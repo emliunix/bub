@@ -135,7 +135,7 @@ class AppRuntime:
             base_system_prompt=self.settings.system_prompt,
             workspace_system_prompt=self.workspace_prompt,
         )
-        loop = AgentLoop(router=router, model_runner=runner, tape=tape)
+        loop = AgentLoop(router=router, model_runner=runner, tape=tape, session_id=session_id, bus=self.bus)
         runtime = SessionRuntime(session_id=session_id, loop=loop, tape=tape, model_runner=runner, tool_view=tool_view)
         self._sessions[session_id] = runtime
         return runtime

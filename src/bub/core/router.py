@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,7 @@ class AssistantRouteResult:
     visible_text: str
     next_prompt: str
     exit_requested: bool
+    trigger_next: str | None = None
 
 
 class InputRouter:
@@ -176,14 +178,22 @@ class InputRouter:
         )
         visible_text = "\n".join(visible_lines).strip()
         if command_blocks:
-            # Hide execution-phase chatter and keep only post-execution assistant answers.
             visible_text = ""
         next_prompt = "\n".join(command_blocks).strip()
+        trigger_next = self._parse_trigger_instruction(visible_text)
         return AssistantRouteResult(
             visible_text=visible_text,
             next_prompt=next_prompt,
             exit_requested=exit_requested,
+            trigger_next=trigger_next,
         )
+
+    def _parse_trigger_instruction(self, text: str) -> str | None:
+        pattern = r"\[TRIGGER:\s*session=(\S+)\s*\]"
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
 
     async def _execute_assistant_command(self, command: DetectedCommand, command_blocks: list[str]) -> bool:
         result = await self._execute_command(command, origin="assistant")

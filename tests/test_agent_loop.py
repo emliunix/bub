@@ -50,6 +50,7 @@ async def test_loop_short_circuit_without_model() -> None:
         ),  # type: ignore[arg-type]
         model_runner=FakeRunner(ModelTurnResult("", False, 0)),  # type: ignore[arg-type]
         tape=FakeTape(),  # type: ignore[arg-type]
+        session_id="test-session",
     )
     result = await loop.handle_input(",help")
     assert result.immediate_output == "ok"
@@ -69,6 +70,7 @@ async def test_loop_runs_model_when_router_requests() -> None:
         ),  # type: ignore[arg-type]
         model_runner=FakeRunner(ModelTurnResult("answer", False, 2)),  # type: ignore[arg-type]
         tape=FakeTape(),  # type: ignore[arg-type]
+        session_id="test-session",
     )
     result = await loop.handle_input("bad cmd")
     assert result.immediate_output == "cmd error"

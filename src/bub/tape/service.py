@@ -16,6 +16,7 @@ from republic import LLM, TapeEntry
 from republic.tape import Tape
 
 from bub.tape.anchors import AnchorSummary
+from bub.tape.session import AgentIntention
 from bub.tape.store import FileTapeStore
 
 
@@ -67,6 +68,49 @@ class TapeService:
             self._store.merge(fork_name, self._tape.name)
             _tape_context.reset(reset_token)
             logger.info("Merged forked tape '{}' back into '{}'", fork_name, self._tape.name)
+
+    def fork_session(
+        self,
+        new_tape_name: str,
+        from_anchor: str | None = None,
+        intention: AgentIntention | None = None,
+    ) -> TapeService:
+        """Create a new session (tape) continuing from an anchor in this tape.
+
+        Args:
+            new_tape_name: Name for the new tape (usually includes session_id)
+            from_anchor: Start from this anchor. If None, starts from beginning.
+            intention: Optional intention to record on the new tape.
+
+        Returns:
+            New TapeService for the forked session.
+        """
+        entries = self.between_anchors(from_anchor, "latest") if from_anchor else self.read_entries()
+
+        new_tape = TapeService(self._llm, new_tape_name, store=self._store)
+
+        for entry in entries:
+            if from_anchor and entry.payload.get("name") == from_anchor:
+                continue
+            new_tape.tape.append(entry)
+
+        if intention:
+            new_tape.handoff("intention", state=intention.to_state())
+        else:
+            new_tape.ensure_bootstrap_anchor()
+
+        logger.info("Forked session '{}' from anchor '{}'", new_tape_name, from_anchor)
+        return new_tape
+
+    def get_intention(self) -> AgentIntention | None:
+        """Get the intention from the current tape if it exists."""
+        entries = [e for e in self.read_entries() if e.kind == "anchor" and e.payload.get("name") == "intention"]
+        if not entries:
+            return None
+        state = entries[-1].payload.get("state")
+        if isinstance(state, dict):
+            return AgentIntention.from_state(state)
+        return None
 
     def ensure_bootstrap_anchor(self) -> None:
         anchors = [entry for entry in self.read_entries() if entry.kind == "anchor"]

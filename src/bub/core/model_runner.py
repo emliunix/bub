@@ -31,6 +31,7 @@ class ModelTurnResult:
     steps: int
     error: str | None = None
     command_followups: int = 0
+    trigger_next: str | None = None
 
 
 @dataclass
@@ -41,6 +42,7 @@ class _PromptState:
     visible_parts: list[str] = field(default_factory=list)
     error: str | None = None
     exit_requested: bool = False
+    trigger_next: str | None = None
 
 
 class ModelRunner:
@@ -139,12 +141,14 @@ class ModelRunner:
             state.error = f"max_steps_reached={self._max_steps}"
             self._tape.append_event("loop.max_steps", {"max_steps": self._max_steps})
 
+        trigger_next = getattr(state, "trigger_next", None)
         return ModelTurnResult(
             visible_text="\n\n".join(part for part in state.visible_parts if part).strip(),
             exit_requested=state.exit_requested,
             steps=state.step,
             error=state.error,
             command_followups=state.followups,
+            trigger_next=trigger_next,
         )
 
     def _consume_route(self, state: _PromptState, route: AssistantRouteResult) -> None:
@@ -152,6 +156,8 @@ class ModelRunner:
             state.visible_parts.append(route.visible_text)
         if route.exit_requested:
             state.exit_requested = True
+        if route.trigger_next and not state.trigger_next:
+            state.trigger_next = route.trigger_next
         self._tape.append_event(
             "loop.step.finish",
             {

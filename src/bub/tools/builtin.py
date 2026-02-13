@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from republic import ToolContext
 
 from bub.tape.service import TapeService
+from bub.tape.session import AgentIntention
 from bub.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -86,6 +87,18 @@ class TapeSearchInput(BaseModel):
 
 class TapeResetInput(BaseModel):
     archive: bool = Field(default=False)
+
+
+class ForkSessionInput(BaseModel):
+    new_session_id: str = Field(..., description="ID for the new forked session")
+    from_anchor: str | None = Field(default=None, description="Start from this anchor (default: from start)")
+    next_steps: str | None = Field(default=None, description="What the forked agent should do next")
+    context_summary: str | None = Field(default=None, description="Brief context summary for the forked agent")
+    trigger_on_complete: str | None = Field(default=None, description="Session ID to trigger when this agent completes")
+
+
+class SessionIntentionInput(BaseModel):
+    show: bool = Field(default=True, description="Show current intention")
 
 
 class SkillNameInput(BaseModel):
@@ -483,6 +496,57 @@ def register_builtin_tools(
         result = tape.reset(archive=params.archive)
         runtime.reset_session_context(session_id)
         return result
+
+    @register(name="tape.fork_session", short_description="Fork to new session from checkpoint", model=ForkSessionInput)
+    def fork_session(params: ForkSessionInput) -> str:
+        """Fork current session to a new session starting from an anchor.
+
+        This creates a new independent agent session that continues from a checkpoint
+        in the current tape. The new session has its own tape but starts with entries
+        from the specified anchor onwards.
+        """
+        from bub.app.runtime import _session_slug
+
+        new_tape_name = f"{runtime.settings.tape_name}:{_session_slug(params.new_session_id)}"
+        intention = None
+        if params.next_steps or params.context_summary or params.trigger_on_complete:
+            intention = AgentIntention(
+                next_steps=params.next_steps or "",
+                context_summary=params.context_summary or "",
+                trigger_on_complete=params.trigger_on_complete,
+            )
+        tape.fork_session(new_tape_name, from_anchor=params.from_anchor, intention=intention)
+
+        if runtime.bus:
+            from bub.channels.events import AgentSpawnEvent
+
+            # We're intentionally fire-and-forget here - the event is for monitoring/hooks
+            task = asyncio.create_task(
+                runtime.bus.publish_agent_spawn(
+                    AgentSpawnEvent(
+                        parent_session_id=session_id,
+                        child_session_id=params.new_session_id,
+                        from_anchor=params.from_anchor or "start",
+                        intention=intention.to_state() if intention else None,
+                    )
+                )
+            )
+            del task
+
+        return f"forked session: {params.new_session_id} from anchor: {params.from_anchor or 'start'}"
+
+    @register(name="session.intention", short_description="Show session intention", model=SessionIntentionInput)
+    def session_intention(params: SessionIntentionInput) -> str:
+        """Show the current session's intention if any."""
+        if not params.show:
+            return "ok"
+        intention = tape.get_intention()
+        if intention is None:
+            return "(no intention set)"
+        parts = [f"next_steps: {intention.next_steps}", f"context_summary: {intention.context_summary}"]
+        if intention.trigger_on_complete:
+            parts.append(f"trigger_on_complete: {intention.trigger_on_complete}")
+        return "\n".join(parts)
 
     @register(name="skills.list", short_description="List skills", model=EmptyInput)
     def list_skills(_params: EmptyInput) -> str:

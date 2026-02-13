@@ -37,3 +37,26 @@ class OutboundMessage:
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
     reply_to_message_id: int | None = None
+
+
+@dataclass(frozen=True)
+class AgentCompleteEvent:
+    """Event emitted when an agent finishes processing."""
+
+    session_id: str
+    exit_requested: bool
+    steps: int
+    error: str | None
+    trigger_next: str | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class AgentSpawnEvent:
+    """Event emitted when a new agent session is forked."""
+
+    parent_session_id: str
+    child_session_id: str
+    from_anchor: str
+    intention: dict[str, Any] | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
