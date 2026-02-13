@@ -193,6 +193,7 @@ def telegram(
                     token=runtime.settings.telegram_token,
                     allow_from=set(runtime.settings.telegram_allow_from),
                     allow_chats=set(runtime.settings.telegram_allow_chats),
+                    proxy=runtime.settings.telegram_proxy,
                 ),
             )
         )

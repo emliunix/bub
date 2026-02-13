@@ -78,6 +78,7 @@ class TelegramConfig:
     token: str
     allow_from: set[str]
     allow_chats: set[str]
+    proxy: str | None = None
 
 
 class TelegramChannel(BaseChannel):
@@ -95,12 +96,16 @@ class TelegramChannel(BaseChannel):
         if not self._config.token:
             raise RuntimeError("telegram token is empty")
         logger.info(
-            "telegram.channel.start allow_from_count={} allow_chats_count={}",
+            "telegram.channel.start allow_from_count={} allow_chats_count={} proxy={}",
             len(self._config.allow_from),
             len(self._config.allow_chats),
+            self._config.proxy,
         )
         self._running = True
-        self._app = Application.builder().token(self._config.token).build()
+        builder = Application.builder().token(self._config.token)
+        if self._config.proxy:
+            builder = builder.proxy(self._config.proxy).get_updates_proxy(self._config.proxy)
+        self._app = builder.build()
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("help", self._on_help))
         self._app.add_handler(MessageHandler(BubMessageFilter(), self._on_text, block=False))

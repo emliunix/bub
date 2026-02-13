@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     telegram_token: str | None = Field(default=None)
     telegram_allow_from: list[str] = Field(default_factory=list)
     telegram_allow_chats: list[str] = Field(default_factory=list)
+    telegram_proxy: str | None = Field(default=None)
 
     @property
     def resolved_api_key(self) -> str | None:
