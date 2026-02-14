@@ -15,6 +15,8 @@ from bub.app import build_runtime
 from bub.app.runtime import AppRuntime
 from bub.channels import ChannelManager, MessageBus, TelegramChannel, TelegramConfig
 from bub.cli.interactive import InteractiveCli
+from bub.config.settings import load_settings
+from bub.integrations.republic_client import build_tape_store
 from bub.logging_utils import configure_logging
 
 app = typer.Typer(name="bub", help="Tape-first coding agent CLI", add_completion=False)
@@ -206,6 +208,139 @@ def telegram(
             raise
         finally:
             logger.info("telegram.stop workspace={}", str(resolved_workspace))
+
+
+tape_app = typer.Typer(help="Tape operations")
+
+
+@tape_app.command("list")
+def tape_list(
+    workspace: Annotated[Path | None, typer.Option("--workspace", "-w")] = None,
+) -> None:
+    """List all tapes."""
+    from rich.console import Console
+
+    resolved_workspace = (workspace or Path.cwd()).resolve()
+    settings = load_settings(resolved_workspace)
+    store = build_tape_store(settings, resolved_workspace)
+
+    tapes = store.list_tapes()
+    console = Console()
+    console.print(f"[bold]Tapes in {resolved_workspace}:[/bold]")
+    if not tapes:
+        console.print("[dim]No tapes found[/dim]")
+    for tape_name in tapes:
+        entries = store.read(tape_name)
+        console.print(f"  {tape_name}: {len(entries or [])} entries")
+
+
+@tape_app.command("history")
+def tape_history(
+    name: str = typer.Argument(..., help="Tape name"),
+    workspace: Annotated[Path | None, typer.Option("--workspace", "-w")] = None,
+) -> None:
+    """Show tape history."""
+    from rich.console import Console
+
+    resolved_workspace = (workspace or Path.cwd()).resolve()
+    settings = load_settings(resolved_workspace)
+    store = build_tape_store(settings, resolved_workspace)
+
+    entries = store.read(name)
+    console = Console()
+
+    if not entries:
+        console.print(f"[yellow]No entries in tape '{name}'[/yellow]")
+        return
+
+    for entry in entries:
+        if entry.kind == "message":
+            role = entry.payload.get("role", "?")
+            content = entry.payload.get("content", "")[:100]
+            console.print(f"[blue]{role}[/blue]: {content}")
+        elif entry.kind == "tool_call":
+            console.print(f"[yellow]tool_call[/yellow]: {entry.payload.get('calls', [])}")
+        elif entry.kind == "tool_result":
+            console.print(f"[green]tool_result[/green]: {entry.payload.get('results', [])}")
+        elif entry.kind == "anchor":
+            console.print(f"[magenta]anchor[/magenta]: {entry.payload.get('name')}")
+        elif entry.kind == "event":
+            console.print(f"[dim]event[/dim]: {entry.payload.get('name')}")
+        elif entry.kind == "error":
+            console.print(f"[red]error[/red]: {entry.payload.get('message')}")
+
+
+@tape_app.command("anchors")
+def tape_anchors(
+    name: str = typer.Argument(..., help="Tape name"),
+    workspace: Annotated[Path | None, typer.Option("--workspace", "-w")] = None,
+) -> None:
+    """List anchors in a tape."""
+    from rich.console import Console
+
+    resolved_workspace = (workspace or Path.cwd()).resolve()
+    settings = load_settings(resolved_workspace)
+    store = build_tape_store(settings, resolved_workspace)
+
+    anchor_list = store.list_anchors()
+
+    console = Console()
+    console.print(f"[bold]Anchors in '{name}':[/bold]")
+    if not anchor_list:
+        console.print("[dim]No anchors found[/dim]")
+    for anchor in anchor_list:
+        console.print(f"  {anchor.name}: {anchor.state}")
+
+
+@tape_app.command("fork", hidden=True)
+def tape_fork(
+    from_tape: str = typer.Argument(..., help="Source tape"),
+    to_tape: str = typer.Option(None, "--to", help="New tape name"),
+    from_entry: int = typer.Option(None, "--from-entry", help="Fork from entry ID"),
+    workspace: Annotated[Path | None, typer.Option("--workspace", "-w")] = None,
+) -> None:
+    """Fork a tape using primitives: create + read + append."""
+    import uuid
+
+    from republic import TapeEntry
+    from rich.console import Console
+
+    resolved_workspace = (workspace or Path.cwd()).resolve()
+    settings = load_settings(resolved_workspace)
+    store = build_tape_store(settings, resolved_workspace)
+
+    if not to_tape:
+        to_tape = f"{from_tape}_fork_{uuid.uuid4().hex[:8]}"
+
+    # Primitive 1: Read entries from source (with optional entry filter)
+    entries = store.read(from_tape, from_entry_id=from_entry)
+    if not entries:
+        console = Console()
+        console.print(f"[red]No entries found in '{from_tape}'[/red]")
+        return
+
+    # Primitive 2: Create new tape by appending (auto-creates file)
+    for entry in entries:
+        # Create new entry with ID starting from 1
+        new_entry = TapeEntry(
+            id=0,  # Will be assigned by append
+            kind=entry.kind,
+            payload=dict(entry.payload),
+            meta=dict(entry.meta),
+        )
+        store.append(to_tape, new_entry)
+
+    # Add bootstrap anchor to new tape
+    store.append(to_tape, TapeEntry.anchor(name="session/start", state={"owner": "forked", "from_tape": from_tape}))
+
+    console = Console()
+    console.print(f"[green]Forked '{from_tape}' → '{to_tape}'[/green]")
+    console.print(f"  entries: {len(entries)}")
+    if from_entry:
+        console.print(f"  from entry: {from_entry}")
+
+
+app.add_typer(tape_app, name="tape")
 
 
 async def _serve_channels(manager: ChannelManager) -> None:

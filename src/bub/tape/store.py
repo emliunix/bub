@@ -15,6 +15,8 @@ from urllib.parse import quote, unquote
 
 from republic.tape import TapeEntry
 
+from bub.tape.types import Anchor, Manifest, TapeMeta
+
 TAPE_FILE_SUFFIX = ".jsonl"
 
 
@@ -37,12 +39,14 @@ class TapeFile:
         self._read_entries: list[TapeEntry] = []
         self._read_offset = 0
 
-    def copy_to(self, target: TapeFile) -> None:
+    def copy_to(self, target: TapeFile, from_entry_id: int | None = None) -> None:
         if self.path.exists():
             shutil.copy2(self.path, target.path)
         target._read_entries = self.read()
         target.fork_start_id = self._next_id()
         target._read_offset = self._read_offset
+        if from_entry_id is not None and from_entry_id > 0:
+            target.fork_start_id = from_entry_id
 
     def copy_from(self, source: TapeFile) -> None:
         entries = [entry for entry in source.read() if entry.id >= (source.fork_start_id or 0)]
@@ -152,15 +156,39 @@ class TapeFile:
 
 
 class FileTapeStore:
-    """Append-only JSONL tape store compatible with Republic TapeStore protocol."""
+    """Append-only JSONL tape store with manifest-based tape management.
+
+    All tape operations go through this class. The manifest is an internal
+    implementation detail for tracking tape metadata and anchors.
+    """
 
     def __init__(self, home: Path, workspace_path: Path) -> None:
         self._paths = self._resolve_paths(home, workspace_path)
         self._tape_files: dict[str, TapeFile] = {}
         self._fork_start_ids: dict[str, int] = {}
         self._lock = threading.Lock()
+        self._manifest = self._load_manifest()
+
+    # -------------------------------------------------------------------------
+    # Tape operations
+    # -------------------------------------------------------------------------
+
+    def create_tape(self, tape: str, title: str | None = None) -> str:
+        """Create a new tape. Returns the tape ID."""
+        self._manifest.create_tape(tape, title=title)
+        return tape
+
+    def get_title(self, tape: str) -> str | None:
+        """Get the title of a tape."""
+        meta = self._manifest.get_tape(tape)
+        return meta.title if meta else None
+
+    def set_title(self, tape: str, title: str) -> None:
+        """Set the title of a tape."""
+        self._manifest.update_tape(tape, title=title)
 
     def list_tapes(self) -> list[str]:
+        """List all tapes."""
         with self._lock:
             tapes: list[str] = []
             prefix = f"{self._paths.workspace_hash}__"
@@ -171,39 +199,176 @@ class FileTapeStore:
                 tapes.append(unquote(encoded))
             return sorted(set(tapes))
 
-    def fork(self, source: str) -> str:
-        fork_suffix = uuid.uuid4().hex[:8]
-        new_name = f"{source}__{fork_suffix}"
-        source_file = self._tape_file(source)
-        target_file = self._tape_file(new_name)
-        source_file.copy_to(target_file)
-        return new_name
+    def read(
+        self, tape: str, from_entry_id: int | None = None, to_entry_id: int | None = None
+    ) -> list[TapeEntry] | None:
+        """Read tape entries, optionally by range."""
+        tape_file = self._tape_file(tape)
+        if not tape_file.path.exists():
+            return None
+        entries = tape_file.read()
+        if from_entry_id is not None:
+            entries = [e for e in entries if e.id >= from_entry_id]
+        if to_entry_id is not None:
+            entries = [e for e in entries if e.id <= to_entry_id]
+        return entries
+
+    def append(self, tape: str, entry: TapeEntry) -> None:
+        """Append an entry to a tape (auto-creates tape if needed)."""
+        self._tape_file(tape).append(entry)
+
+    def fork(
+        self,
+        from_tape: str,
+        new_tape_id: str | None = None,
+        from_entry: tuple[str, int] | None = None,
+        from_anchor: str | None = None,
+    ) -> str:
+        """Fork a tape. Returns the new tape ID.
+
+        Args:
+            from_tape: Source tape ID
+            new_tape_id: New tape ID (auto-generated if None)
+            from_entry: Fork from (tape_id, entry_id) tuple - partial copy
+            from_anchor: Fork from anchor name (resolves to entry_id)
+        """
+        if from_anchor is not None:
+            anchor = self._manifest.get_anchor(from_anchor)
+            if anchor is None:
+                raise ValueError(f"Anchor not found: {from_anchor}")
+            from_entry = (anchor.tape_id, anchor.entry_id)
+        elif from_entry is None:
+            from_entry = (from_tape, 0)
+
+        source_tape, source_entry_id = from_entry
+        if new_tape_id is None:
+            new_tape_id = f"{from_tape}__{uuid.uuid4().hex[:8]}"
+        source_file = self._tape_file(source_tape)
+        target_file = self._tape_file(new_tape_id)
+        source_file.copy_to(target_file, from_entry_id=source_entry_id)
+        self._manifest.fork_tape(source_tape, new_tape_id, parent=(source_tape, source_entry_id))
+        return new_tape_id
+
+    def archive(self, tape_id: str) -> Path | None:
+        """Archive a tape."""
+        tape_file = self._tape_file(tape_id)
+        self._tape_files.pop(tape_id, None)
+        self._manifest.delete_tape(tape_id)
+        return tape_file.archive()
+
+    def reset(self, tape_id: str) -> None:
+        """Reset (clear) a tape."""
+        return self._tape_file(tape_id).reset()
+
+    # -------------------------------------------------------------------------
+    # Anchor operations
+    # -------------------------------------------------------------------------
+
+    def create_anchor(self, name: str, tape_id: str, entry_id: int, state: dict[str, object] | None = None) -> None:
+        """Create an anchor."""
+        self._manifest.create_anchor(name, tape_id, entry_id, state)
+
+    def get_anchor(self, name: str) -> Anchor | None:
+        """Get an anchor by name."""
+        return self._manifest.get_anchor(name)
+
+    def update_anchor(self, name: str, entry_id: int | None = None, state: dict[str, object] | None = None) -> None:
+        """Update an anchor."""
+        self._manifest.update_anchor(name, entry_id=entry_id, state=state)
+
+    def delete_anchor(self, name: str) -> None:
+        """Delete an anchor."""
+        self._manifest.delete_anchor(name)
+
+    def list_anchors(self) -> list[Anchor]:
+        """List all anchors."""
+        return list(self._manifest.anchors.values())
+
+    def resolve_anchor(self, name: str) -> int:
+        """Resolve anchor name to entry ID."""
+        return self._manifest.resolve_anchor(name)
+
+    # -------------------------------------------------------------------------
+    # Internal methods
+    # -------------------------------------------------------------------------
 
     def merge(self, source: str, target: str) -> None:
+        """Merge source tape into target tape."""
         source_file = self._tape_file(source)
         target_file = self._tape_file(target)
         target_file.copy_from(source_file)
         source_file.path.unlink(missing_ok=True)
         self._tape_files.pop(source, None)
 
-    def reset(self, tape: str) -> None:
-        return self._tape_file(tape).reset()
+    def save_manifest(self) -> None:
+        """Save the manifest to disk."""
+        path = self._paths.home / "manifest.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "version": 1,
+            "tapes": {
+                tape_id: {
+                    "id": meta.id,
+                    "file": meta.file,
+                    "title": meta.title,
+                    "parent": list(meta.parent) if meta.parent else None,
+                    "created_at": meta.created_at.isoformat(),
+                }
+                for tape_id, meta in self._manifest.tapes.items()
+            },
+            "anchors": {
+                name: {
+                    "name": anchor.name,
+                    "tape_id": anchor.tape_id,
+                    "entry_id": anchor.entry_id,
+                    "state": anchor.state,
+                    "created_at": anchor.created_at.isoformat(),
+                }
+                for name, anchor in self._manifest.anchors.items()
+            },
+        }
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    def read(self, tape: str) -> list[TapeEntry] | None:
-        tape_file = self._tape_file(tape)
-        if not tape_file.path.exists():
-            return None
-        return tape_file.read()
+    def _load_manifest(self) -> Manifest:
+        """Load manifest from disk."""
+        manifest = Manifest()
+        path = self._paths.home / "manifest.json"
+        if not path.exists():
+            return manifest
 
-    def append(self, tape: str, entry: TapeEntry) -> None:
-        return self._tape_file(tape).append(entry)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for tape_id, meta in data.get("tapes", {}).items():
+            parent_data = meta.get("parent")
+            parent: tuple[str, int] | None = None
+            if parent_data and isinstance(parent_data, list) and len(parent_data) == 2:
+                parent = (parent_data[0], parent_data[1])
+            elif meta.get("parent_id"):
+                parent = (meta["parent_id"], meta.get("head_id", 0))
+            meta_obj = TapeMeta(
+                id=meta["id"],
+                file=meta["file"],
+                title=meta.get("title"),
+                parent=parent,
+                created_at=datetime.fromisoformat(meta["created_at"]) if meta.get("created_at") else datetime.now(UTC),
+            )
+            manifest._tapes[tape_id] = meta_obj
 
-    def archive(self, tape: str) -> Path | None:
-        tape_file = self._tape_file(tape)
-        self._tape_files.pop(tape, None)
-        return tape_file.archive()
+        for anchor_name, anchor in data.get("anchors", {}).items():
+            anchor_obj = Anchor(
+                name=anchor["name"],
+                tape_id=anchor["tape_id"],
+                entry_id=anchor["entry_id"],
+                state=anchor.get("state", {}),
+                created_at=datetime.fromisoformat(anchor["created_at"])
+                if anchor.get("created_at")
+                else datetime.now(UTC),
+            )
+            manifest._anchors[anchor_name] = anchor_obj
+
+        return manifest
 
     def _tape_file(self, tape: str) -> TapeFile:
+        """Get or create a TapeFile for the given tape."""
         if tape not in self._tape_files:
             encoded_name = quote(tape, safe="")
             file_name = f"{self._paths.workspace_hash}__{encoded_name}{TAPE_FILE_SUFFIX}"

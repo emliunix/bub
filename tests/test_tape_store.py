@@ -131,3 +131,114 @@ def test_multi_forks_merge_keeps_entries_ordered(tmp_path: Path) -> None:
     assert [entry.id for entry in merged] == [1, 2, 3, 4, 5]
     assert store.read(fork_a) is None
     assert store.read(fork_b) is None
+
+
+class TestTapeReadRange:
+    def test_read_all(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        for i in range(5):
+            store.append("test", TapeEntry(id=i + 1, kind="message", payload={"n": i}, meta={}))
+
+        entries = store.read("test")
+        assert len(entries) == 5
+
+    def test_read_from(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        for i in range(5):
+            store.append("test", TapeEntry(id=i + 1, kind="message", payload={"n": i}, meta={}))
+
+        entries = store.read("test", from_entry_id=3)
+        assert len(entries) == 3
+        assert entries[0].id == 3
+
+    def test_read_to(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        for i in range(5):
+            store.append("test", TapeEntry(id=i + 1, kind="message", payload={"n": i}, meta={}))
+
+        entries = store.read("test", to_entry_id=3)
+        assert len(entries) == 3
+
+    def test_read_range(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        for i in range(5):
+            store.append("test", TapeEntry(id=i + 1, kind="message", payload={"n": i}, meta={}))
+
+        entries = store.read("test", from_entry_id=2, to_entry_id=4)
+        assert len(entries) == 3
+        assert entries[0].id == 2
+        assert entries[-1].id == 4
+
+    def test_read_nonexistent(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        entries = store.read("nonexistent")
+        assert entries is None
+
+
+class TestTapeTitle:
+    def test_create_tape_with_title(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        store.create_tape("main", title="My Session")
+
+        assert store.get_title("main") == "My Session"
+
+    def test_set_title(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        store.create_tape("main")
+        store.set_title("main", "Updated Title")
+
+        assert store.get_title("main") == "Updated Title"
+
+    def test_get_title_none(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        store.create_tape("main")
+
+        assert store.get_title("main") is None
+
+
+class TestManifestPersistence:
+    def test_anchor_ops_persist_after_save(self, tmp_path):
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        store = FileTapeStore(home, workspace)
+        store.create_anchor("phase1", "main", 50, {"summary": "done"})
+        store.save_manifest()
+
+        loaded = FileTapeStore(home, workspace)
+        anchor = loaded.get_anchor("phase1")
+        assert anchor is not None
+        assert anchor.entry_id == 50
