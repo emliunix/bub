@@ -7,7 +7,8 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from loguru import logger
 
 from bub.core.commands import ParsedArgs, parse_command_words, parse_internal_command, parse_kv_arguments
 from bub.core.types import DetectedCommand
@@ -68,20 +69,26 @@ class InputRouter:
     async def route_user(self, raw: str) -> UserRouteResult:
         stripped = raw.strip()
         if not stripped:
+            logger.debug("router.empty_input")
             return UserRouteResult(enter_model=False, model_prompt="", immediate_output="", exit_requested=False)
         try:
-            # For telegram wrapped messages
             parsed = json.loads(stripped)
             text = parsed.get("message", stripped)
+            logger.debug("router.parse_json message={}", text[:50])
         except json.JSONDecodeError:
             text = stripped
         command = self._parse_comma_prefixed_command(text)
         if command is None:
+            logger.debug("router.no_command prompt={}", stripped[:50])
             return UserRouteResult(enter_model=True, model_prompt=stripped, immediate_output="", exit_requested=False)
 
+        logger.debug("router.command_detected name={}", command.name)
         result = await self._execute_command(command, origin="human")
+        logger.debug("router.command_result name={} status={}", command.name, result.status)
+
         if result.status == "ok" and result.name != "bash":
             if result.name == "quit" and result.output == "exit":
+                logger.debug("router.exit_requested")
                 return UserRouteResult(
                     enter_model=False,
                     model_prompt="",
@@ -103,7 +110,7 @@ class InputRouter:
                 exit_requested=False,
             )
 
-        # Failed command falls back to model with command block context.
+        logger.debug("router.command_failed fallback_to_model name={}", command.name)
         return UserRouteResult(
             enter_model=True,
             model_prompt=result.block(),
@@ -365,5 +372,5 @@ class InputRouter:
         return result.block()
 
     @staticmethod
-    def to_json(data: Any) -> str:
+    def to_json(data: object) -> str:
         return json.dumps(data, ensure_ascii=False)

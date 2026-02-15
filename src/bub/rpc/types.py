@@ -6,6 +6,8 @@ Used across different RPC implementations.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 RequestId = str | int
@@ -17,7 +19,7 @@ class JSONRPCRequest(BaseModel):
     jsonrpc: str
     id: RequestId
     method: str
-    params: dict[str, object] | None = None
+    params: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -27,7 +29,7 @@ class JSONRPCNotification(BaseModel):
 
     jsonrpc: str
     method: str
-    params: dict[str, object] | None = None
+    params: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -37,7 +39,7 @@ class ErrorData(BaseModel):
 
     code: int
     message: str
-    data: object = None
+    data: Any = None
 
 
 class JSONRPCError(BaseModel):
@@ -55,7 +57,7 @@ class JSONRPCResponse(BaseModel):
 
     jsonrpc: str
     id: RequestId | None
-    result: dict[str, object]
+    result: dict[str, Any]
 
     model_config = ConfigDict(extra="forbid")
 

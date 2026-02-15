@@ -1,12 +1,10 @@
 """Unit tests for tape manifest."""
 
-from pathlib import Path
-from datetime import datetime
 
 import pytest
 
 from bub.tape.store import FileTapeStore
-from bub.tape.types import Anchor, Manifest, TapeMeta
+from bub.tape.types import Manifest
 
 
 class TestManifestCreate:
@@ -17,15 +15,16 @@ class TestManifestCreate:
         assert manifest.anchors == {}
 
     def test_manifest_save_and_load(self, tmp_path):
+        from republic.tape import TapeEntry
+
         store = FileTapeStore(home=tmp_path, workspace_path=tmp_path)
         store.create_tape("main", title="Test")
-        store._manifest.create_tape("other", parent=("main", 100))
-        store.save_manifest()
+        store.append("main", TapeEntry.message({"role": "user", "content": "hello"}))
+        store.fork("main", "other", from_entry=("main", 100))
 
         loaded_store = FileTapeStore(home=tmp_path, workspace_path=tmp_path)
-        assert "main" in loaded_store._manifest.tapes
-        assert loaded_store._manifest.tapes["main"].title == "Test"
-        assert loaded_store._manifest.tapes["other"].parent == ("main", 100)
+        assert "main" in loaded_store.list_tapes()
+        assert loaded_store.get_title("main") == "Test"
 
 
 class TestTapeCrud:

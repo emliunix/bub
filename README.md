@@ -29,7 +29,7 @@ cp env.example .env
 Minimal `.env`:
 
 ```bash
-BUB_MODEL=openrouter:qwen/qwen3-coder-next
+BUB_AGENT_MODEL=openrouter:qwen/qwen3-coder-next
 OPENROUTER_API_KEY=your_key_here
 ```
 
@@ -65,9 +65,9 @@ Common commands:
 ## Telegram (Optional)
 
 ```bash
-BUB_TELEGRAM_ENABLED=true
-BUB_TELEGRAM_TOKEN=123456:token
-BUB_TELEGRAM_ALLOW_FROM=["123456789","your_username"]
+BUB_BUS_TELEGRAM_ENABLED=true
+BUB_BUS_TELEGRAM_TOKEN=123456:token
+BUB_BUS_TELEGRAM_ALLOW_FROM=["123456789","your_username"]
 uv run bub telegram
 ```
 

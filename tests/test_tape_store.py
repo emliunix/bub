@@ -98,41 +98,6 @@ def test_tape_file_append_uses_existing_tail_id(tmp_path: Path) -> None:
     assert [entry.id for entry in entries] == [3, 4]
 
 
-def test_multi_forks_merge_keeps_entries_ordered(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    store = FileTapeStore(home, workspace)
-
-    root_tape = "session"
-    store.append(root_tape, TapeEntry.message({"role": "user", "content": "root-1"}))
-
-    fork_a = store.fork(root_tape)
-    fork_b = store.fork(root_tape)
-
-    store.append(fork_a, TapeEntry.message({"role": "assistant", "content": "fork-a-1"}))
-    store.append(fork_a, TapeEntry.message({"role": "assistant", "content": "fork-a-2"}))
-    store.append(fork_b, TapeEntry.message({"role": "assistant", "content": "fork-b-1"}))
-    store.append(fork_b, TapeEntry.message({"role": "assistant", "content": "fork-b-2"}))
-
-    store.merge(fork_b, root_tape)
-    store.merge(fork_a, root_tape)
-
-    merged = store.read(root_tape)
-    assert merged is not None
-
-    assert [entry.payload["content"] for entry in merged] == [
-        "root-1",
-        "fork-b-1",
-        "fork-b-2",
-        "fork-a-1",
-        "fork-a-2",
-    ]
-    assert [entry.id for entry in merged] == [1, 2, 3, 4, 5]
-    assert store.read(fork_a) is None
-    assert store.read(fork_b) is None
-
-
 class TestTapeReadRange:
     def test_read_all(self, tmp_path):
         home = tmp_path / "home"
@@ -235,8 +200,8 @@ class TestManifestPersistence:
         workspace.mkdir()
 
         store = FileTapeStore(home, workspace)
+        store.create_tape("main")
         store.create_anchor("phase1", "main", 50, {"summary": "done"})
-        store.save_manifest()
 
         loaded = FileTapeStore(home, workspace)
         anchor = loaded.get_anchor("phase1")

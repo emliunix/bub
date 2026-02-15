@@ -4,24 +4,31 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from bub.app.runtime import AppRuntime
 from bub.channels.base import BaseChannel
 from bub.channels.bus import MessageBus
 from bub.channels.events import InboundMessage, OutboundMessage
+
+if TYPE_CHECKING:
+    from bub.app.runtime import AgentRuntime
 
 
 class ChannelManager:
     """Coordinate inbound routing and outbound dispatch for channels."""
 
-    def __init__(self, bus: MessageBus, runtime: AppRuntime) -> None:
+    def __init__(self, bus: MessageBus, runtime: AgentRuntime) -> None:
         self.bus = bus
-        self.runtime = runtime
+        self._runtime = runtime
         self._channels: dict[str, BaseChannel] = {}
         self._unsub_inbound: Callable[[], None] | None = None
         self._unsub_outbound: Callable[[], None] | None = None
+
+    @property
+    def runtime(self) -> AgentRuntime:
+        return self._runtime
 
     def register(self, channel: BaseChannel) -> None:
         self._channels[channel.name] = channel
@@ -31,8 +38,8 @@ class ChannelManager:
         return dict(self._channels)
 
     async def start(self) -> None:
-        self._unsub_inbound = self.bus.on_inbound(self._process_inbound)
-        self._unsub_outbound = self.bus.on_outbound(self._process_outbound)
+        self._unsub_inbound = await self.bus.on_inbound(self._process_inbound)
+        self._unsub_outbound = await self.bus.on_outbound(self._process_outbound)
         logger.info("channel.manager.start channels={}", sorted(self._channels.keys()))
         for channel in self._channels.values():
             await channel.start()
@@ -50,7 +57,7 @@ class ChannelManager:
 
     async def _process_inbound(self, message: InboundMessage) -> None:
         try:
-            result = await self.runtime.handle_input(message.session_id, message.render())
+            result = await self._runtime.handle_input(message.session_id, message.render())
             parts = [part for part in (result.immediate_output, result.assistant_output) if part]
             if result.error:
                 parts.append(f"error: {result.error}")

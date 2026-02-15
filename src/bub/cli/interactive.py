@@ -14,14 +14,14 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 from rich import get_console
 
-from bub.app.runtime import AppRuntime
+from bub.app.runtime import AgentRuntime
 from bub.cli.render import CliRenderer
 
 
 class InteractiveCli:
     """Single interactive CLI mode inspired by modern coding agent shells."""
 
-    def __init__(self, runtime: AppRuntime, *, session_id: str = "cli") -> None:
+    def __init__(self, runtime: AgentRuntime, *, session_id: str = "cli") -> None:
         self._runtime = runtime
         self._session_id = session_id
         self._session = runtime.get_session(session_id)
@@ -73,7 +73,7 @@ class InteractiveCli:
             section, _, name = tool_name.rpartition(".")
             return (section, name)
 
-        history_file = self._history_file(self._runtime.settings.resolve_home(), self._runtime.workspace)
+        history_file = self._history_file(self._runtime.tape_settings.resolve_home(), self._runtime.workspace)
         history_file.parent.mkdir(parents=True, exist_ok=True)
         history = FileHistory(str(history_file))
         tool_names = sorted((f",{tool}" for tool in self._session.tool_view.all_tools()), key=_tool_sort_key)

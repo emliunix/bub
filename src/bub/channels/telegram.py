@@ -14,7 +14,6 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from telegramify_markdown import markdownify as md
 
 from bub.channels.base import BaseChannel
-from bub.channels.bus import MessageBus
 from bub.channels.events import InboundMessage, OutboundMessage
 
 
@@ -86,7 +85,7 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
 
-    def __init__(self, bus: MessageBus, config: TelegramConfig) -> None:
+    def __init__(self, bus: Any, config: TelegramConfig) -> None:
         super().__init__(bus)
         self._config = config
         self._app: Application | None = None

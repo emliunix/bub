@@ -17,6 +17,7 @@ async def test_protocol_full_flow() -> None:
     await server.start_server()
 
     try:
+        assert server._server is not None
         server_url = f"ws://localhost:{server._server.sockets[0].getsockname()[1]}"
 
         # Client 1: Connects and subscribes to all topics
@@ -115,6 +116,7 @@ async def test_server_rejects_uninitialized_requests() -> None:
     await server.start_server()
 
     try:
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
         server_url = f"ws://localhost:{port}"
 
@@ -145,6 +147,7 @@ async def test_initialize_twice_fails() -> None:
     await server.start_server()
 
     try:
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
         server_url = f"ws://localhost:{port}"
 
@@ -169,6 +172,7 @@ async def test_wildcard_subscription_receives_all() -> None:
     await server.start_server()
 
     try:
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
         server_url = f"ws://localhost:{port}"
 
@@ -224,6 +228,7 @@ async def test_client_rejects_subscribe_before_initialize() -> None:
     await server.start_server()
 
     try:
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
         server_url = f"ws://localhost:{port}"
 
@@ -245,6 +250,7 @@ async def test_ping_pong() -> None:
     await server.start_server()
 
     try:
+        assert server._server is not None
         port = server._server.sockets[0].getsockname()[1]
         server_url = f"ws://localhost:{port}"
 

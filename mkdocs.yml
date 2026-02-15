@@ -10,12 +10,26 @@ copyright: Maintained by <a href="https://psiace.me">Chojan Shang</a>.
 nav:
   - Home: index.md
   - Key Features: features.md
-  - Architecture: architecture.md
+  - Architecture:
+      - architecture/index.md
+      - Class Hierarchy: architecture/01-class-hierarchy.md
+      - Message Flow: architecture/02-message-flow-sequence.md
+      - NEW Architecture: architecture/03-new-architecture-direct-coupling.md
+      - Comparison: architecture/04-old-vs-new-architecture-comparison.md
+      - Component Interaction: architecture/05-detailed-component-interaction.md
+      - Session Lifecycle: architecture/06-session-lifecycle.md
+      - Data Flow: architecture/07-data-flow-with-type-mapping.md
+      - Channel Initialization: architecture/08-channel-initialization-flow.md
+      - Legacy: architecture.md
   - Interactive CLI: cli.md
   - Telegram: telegram.md
 
 plugins:
   - search
+  - mermaid2:
+      arguments:
+        theme: dark
+        securityLevel: 'loose'
   - mkdocstrings:
       handlers:
         python:
@@ -36,22 +50,19 @@ theme:
     - content.code.copy
     - content.code.select
 
-markdown_extensions:
-  - admonition
-  - codehilite:
-      guess_lang: false
-  - toc:
-      permalink: true
-  - pymdownx.superfences
-  - pymdownx.tabbed:
-      alternate_style: true
-  - pymdownx.details
-  - pymdownx.highlight:
-      anchor_linenums: true
-  - pymdownx.inlinehilite
-  - pymdownx.snippets
-  - pymdownx.tasklist:
-      custom_checkbox: true
+  markdown_extensions:
+    - admonition
+    - toc:
+        permalink: true
+    - pymdownx.tabbed:
+        alternate_style: true
+    - pymdownx.details
+    - pymdownx.highlight:
+        anchor_linenums: true
+    - pymdownx.inlinehilite
+    - pymdownx.snippets
+    - pymdownx.tasklist:
+        custom_checkbox: true
 
 extra:
   social:

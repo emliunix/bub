@@ -250,7 +250,7 @@ Notifications are fire-and-forget (no ID, no response):
 
 ## Layer 3: Agent Protocol API Layer
 
-**Location:** `src/bub/rpc/agent_protocol.py`
+**Location:** `src/bub/rpc/protocol.py`
 
 **Purpose:** Agent Bus specific protocol types and API methods
 
@@ -550,8 +550,7 @@ src/bub/
 ├── rpc/                           # JSON-RPC Framework (Layers 1, 2, 3)
 │   ├── __init__.py                # Public API exports
 │   ├── types.py                   # Layer 1: Generic JSON-RPC types
-│   ├── protocol.py                # Layer 2: Generic JSON-RPC framework
-│   └── agent_protocol.py         # Layer 3: Agent Bus specific protocol
+│   ├── protocol.py                # Layer 2: Generic JSON-RPC framework + Layer 3: Agent Bus specific protocol
 ├── channels/                      # WebSocket Implementation
 │   ├── wsbus.py                  # WebSocket server/client using JSON-RPC
 │   ├── events.py                  # Agent Bus message types

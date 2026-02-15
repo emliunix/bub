@@ -4,18 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bub.app.runtime import AppRuntime
-from bub.config import load_settings
+from loguru import logger
 
-# Global singleton runtime instance
-_runtime: AppRuntime | None = None
-
-
-def get_runtime() -> AppRuntime:
-    """Get or create the global app runtime."""
-    if _runtime is None:
-        raise RuntimeError("AppRuntime is not initialized. Call build_runtime() first.")
-    return _runtime
+from bub.app.runtime import AgentRuntime
+from bub.app.types import TapeStore
+from bub.channels.wsbus import AgentBusClient
+from bub.config import AgentSettings, TapeSettings
+from bub.integrations.republic_client import build_tape_store
+from bub.types import MessageBus
 
 
 def build_runtime(
@@ -26,23 +22,30 @@ def build_runtime(
     allowed_tools: set[str] | None = None,
     allowed_skills: set[str] | None = None,
     enable_scheduler: bool = True,
-) -> AppRuntime:
-    """Build app runtime for one workspace."""
+) -> AgentRuntime:
+    """Build agent runtime for one workspace."""
 
-    global _runtime
-    settings = load_settings(workspace)
-    updates: dict[str, object] = {}
+    agent_settings = AgentSettings()
+    tape_settings = TapeSettings()
+
     if model:
-        updates["model"] = model
+        agent_settings = agent_settings.model_copy(update={"model": model})
     if max_tokens is not None:
-        updates["max_tokens"] = max_tokens
-    if updates:
-        settings = settings.model_copy(update=updates)
-    _runtime = AppRuntime(
+        agent_settings = agent_settings.model_copy(update={"max_tokens": max_tokens})
+
+    store: TapeStore = build_tape_store(agent_settings, tape_settings, workspace)
+
+    if agent_settings.bus_url:
+        logger.info("bus.client.create url={}", agent_settings.bus_url)
+        bus: MessageBus = AgentBusClient(agent_settings.bus_url)
+    else:
+        raise ValueError("bus_url is required")
+
+    return AgentRuntime(
         workspace,
-        settings,
+        agent_settings,
+        store,
+        bus,
         allowed_tools=allowed_tools,
         allowed_skills=allowed_skills,
-        enable_scheduler=enable_scheduler,
     )
-    return _runtime

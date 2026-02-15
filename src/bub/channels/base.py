@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
-from bub.channels.bus import MessageBus
 from bub.channels.events import InboundMessage, OutboundMessage
+
+if TYPE_CHECKING:
+    from bub.types import MessageBus
 
 
 class BaseChannel(ABC):

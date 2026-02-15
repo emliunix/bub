@@ -15,20 +15,50 @@ Tests are in `tests/`. Documentation is in `docs/`. Legacy implementation is arc
 
 ## Build, Test, and Development Commands
 - `uv sync`: install/update dependencies
+- `uv pip list`: list installed packages
+- `uv pip index versions <package>`: search for package versions
 - `just install`: setup env + hooks
-- `uv run bub chat`: run interactive CLI
-- `uv run bub telegram`: run Telegram adapter
-- `uv run pytest -q` or `just test`: run all tests
-- `uv run pytest tests/test_foo.py`: run specific test file
-- `uv run pytest tests/test_foo.py::test_bar`: run specific test function
-- `uv run pytest -k "test_name_pattern"`: run tests matching pattern
-- `uv run ruff check .`: lint checks
-- `uv run ruff check src/bub/file.py`: lint specific file
-- `uv run ruff check --fix .`: auto-fix lint issues
-- `uv run mypy src`: type-check all source
-- `uv run mypy src/bub/file.py`: type-check specific file
-- `just check`: lock validation + lint + typing
-- `just docs` / `just docs-test`: serve/build docs
+
+## Development Workflow
+
+Run these checks before committing (or let pre-commit hooks handle it):
+
+```bash
+# Check only changed files (recommended)
+uv run ruff check .
+uv run mypy src
+
+# Run tests
+uv run pytest -q
+
+# Or all at once
+just check
+```
+
+Pre-commit hooks (installed via `just install`) will automatically run these checks on staged files before each commit.
+
+## Dependency Management
+When adding new dependencies:
+
+1. Search for the latest version:
+   ```bash
+   uv run --with pip pip index versions <package>
+   ```
+
+2. Add to project (auto-updates pyproject.toml):
+   ```bash
+   uv add <package>>=X.Y.Z
+   ```
+
+3. Sync dependencies:
+   ```bash
+   uv sync
+   ```
+
+4. Run tests to verify:
+   ```bash
+   uv run pytest -q
+   ```
 
 ## Code Style Guidelines
 
@@ -47,8 +77,10 @@ Tests are in `tests/`. Documentation is in `docs/`. Legacy implementation is arc
 ### Imports
 - Use absolute imports: `from bub.core import router`
 - Sort imports with ruff (isort rules): stdlib → third-party → local
+- **All imports must be at the top of the file** (enforced by ruff E402)
 - Avoid wildcard imports (`from x import *`)
 - Group related imports: `from pathlib import Path, PurePath`
+- No local imports inside functions (use TYPE_CHECKING for type-only imports)
 
 ### Types & Type Hints
 - Use `X | None` over `Optional[X]`
@@ -57,6 +89,11 @@ Tests are in `tests/`. Documentation is in `docs/`. Legacy implementation is arc
 - Use `type` for simple type aliases: `type Foo = str | None`
 - Mark untyped external calls with `# type: ignore[attr-defined]`
 - Put shared type definitions in `types.py` within the module (e.g., `tape/types.py` for tape types)
+
+### Code Quality
+- **Strict type checking is enforced** - all code must pass mypy
+- Run `just check` (lint + typecheck) before committing
+- No deferred type annotations - fix type errors immediately
 
 ### Functions & Classes
 - Keep functions focused (< 50 lines); use composable helpers
@@ -92,8 +129,8 @@ Tests are in `tests/`. Documentation is in `docs/`. Legacy implementation is arc
   - docs updates when CLI behavior, commands, or architecture changes
 
 ## Security & Configuration
-- Use `.env` for secrets (`OPENROUTER_API_KEY`, `BUB_TELEGRAM_TOKEN`); never commit keys
-- Validate Telegram allowlist (`BUB_TELEGRAM_ALLOW_FROM`) before enabling production bots
+- Use `.env` for secrets (`OPENROUTER_API_KEY`, `BUB_BUS_TELEGRAM_TOKEN`); never commit keys
+- Validate Telegram allowlist (`BUB_BUS_TELEGRAM_ALLOW_FROM`) before enabling production bots
 - Never log sensitive data (API keys, tokens, passwords)
 
 ## Pre-commit Hooks
@@ -106,10 +143,12 @@ The project uses prek for pre-commit hooks (installed via `just install`):
 Settings are split into focused components:
 
 ```python
-from bub.config import TapeSettings, BusSettings, ChatSettings, Settings
+from bub.config import TapeSettings, BusSettings, AgentSettings, Settings
 
 # Individual settings
 tape = TapeSettings()          # BUB_TAPE_* env vars
+bus = BusSettings()           # BUB_BUS_* env vars
+agent = AgentSettings()       # BUB_AGENT_* env vars
 bus = BusSettings()           # BUB_BUS_* env vars  
 chat = ChatSettings()          # BUB_* env vars
 
@@ -182,11 +221,131 @@ from bub.tape.types import Anchor, Manifest, TapeMeta
 
 ## Code Review Findings
 
+### Type Design Principles
+
+Types are classified into two categories:
+
+#### 1. Data Types
+Data types are concrete types where the class itself is both the definition and the type. Use dataclasses, Pydantic models, or simple classes.
+
+```python
+# Good - dataclass is both definition and type
+from dataclasses import dataclass
+
+@dataclass
+class Anchor:
+    name: str
+    tape_id: str
+    entry_id: int
+    state: dict[str, Any] | None = None
+
+def find_anchor(anchors: list[Anchor], name: str) -> Anchor | None:
+    ...
+```
+
+#### 2. Behavior Protocols (Interfaces)
+Protocols define behavior contracts. They are defined in `types.py` and implemented in `runtime.py` (or similar) within the same module.
+
+```
+src/bub/app/
+├── types.py      # Protocol definitions only
+└── runtime.py   # Concrete implementations
+```
+
+**Protocol Definition (types.py):**
+```python
+# In app/types.py - no circular imports
+class TapeStore(Protocol):
+    """Protocol for tape store implementations."""
+
+    def create_tape(self, tape: str, title: str | None = None) -> str: ...
+    def read(self, tape: str) -> list[TapeEntry] | None: ...
+    def append(self, tape: str, entry: TapeEntry) -> None: ...
+```
+
+**Protocol Implementation (runtime.py):**
+```python
+# In app/runtime.py
+from app.types import TapeStore
+from bub.tape.store import FileTapeStore
+
+class FileTapeStoreAdapter(TapeStore):
+    """Adapter for FileTapeStore."""
+
+    def __init__(self, store: FileTapeStore) -> None:
+        self._store = store
+
+    def create_tape(self, tape: str, title: str | None = None) -> str:
+        return self._store.create_tape(tape, title)
+
+    def read(self, tape: str) -> list[TapeEntry] | None:
+        return self._store.read(tape)
+
+    def append(self, tape: str, entry: TapeEntry) -> None:
+        self._store.append(tape, entry)
+```
+
+#### 3. Avoid `TYPE_CHECKING`, `Any`, and `object` Types
+- **Never use `TYPE_CHECKING`** for type imports - it's a code smell indicating a circular import problem
+- **Never use `Any`** - it defeats the purpose of static typing
+- **Never use `object`** as a type hint - it's too vague and equivalent to `Any`
+
+**Exceptions**:
+- `TYPE_CHECKING` may be used to break circular imports between deeply nested modules (e.g., core ↔ channels), but this should be rare and documented.
+- `Any` is acceptable for pydantic BaseSettings `__init__` kwargs, because pydantic handles runtime validation from unstructured input (env vars, .env files) to typed objects.
+
+#### 4. Root Cause: Circular Imports
+Using `TYPE_CHECKING`, `Any`, or `object` typically indicates a circular import problem. Instead of workarounds, fix the root cause by extracting protocols to a dedicated types module.
+
+When defining protocols, use concrete types for all attributes:
+```python
+# Good - concrete types
+class AgentSettings(Protocol):
+    model: str
+    max_tokens: int
+
+# Bad - too vague
+class BadSettings(Protocol):
+    settings: object  # Never do this
+```
+
+#### 5. Test Without Full Bundles
+- Extract pure functions from classes for testing
+- Test individual behaviors, not full integration
+- Example: `reset_session_context()` and `cancel_active_inputs()` are tested as standalone functions
+
+```python
+# Good - test the function directly
+from app.runtime import reset_session_context
+
+def test_reset_session_context():
+    sessions = {"id": DummySession()}
+    reset_session_context(sessions, "id")
+    assert sessions["id"].calls == 1
+
+# Bad - requires building full AgentRuntime with all dependencies
+def test_agent_runtime():
+    runtime = build_runtime(workspace)  # Too heavy for unit tests
+```
+
 ### Observed Patterns
 
 #### 1. Null Check Patterns
 - **Location-based null checks**: Prefer initializing contextual objects in `__init__` rather than checking for None throughout the code. Example: `meta.title if meta else None` is acceptable but consider requiring meta to exist upfront.
 - **Update methods**: Checking `if key not in dict` before update is appropriate for enforcing invariants.
+- **Component None checks**: When a None check targets a component (not runtime messages or data being processed), it should only happen at `__init__`. If the component is required for valid operation, crash immediately with a clear error. If optional with a sensible default, set the default in `__init__`:
+  ```python
+  # Good - crash immediately if required
+  def __init__(self, bus: MessageBus):
+      if bus is None:
+          raise ValueError("bus is required for AgentLoop")
+      self._bus = bus
+
+  # Good - sensible default at __init__
+  def __init__(self, *, timeout: int | None = None):
+      self._timeout = timeout if timeout is not None else 30
+  ```
+- **Anti-pattern**: Checking `if bus is not None` outside of `__init__` on a component is an anti-pattern. The component should be required at construction time, not checked at runtime.
 
 #### 2. Delegate Pattern (FileTapeStore → Manifest)
 - FileTapeStore delegates many methods to Manifest (create_anchor, get_anchor, etc.)

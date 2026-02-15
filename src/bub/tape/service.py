@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import re
-from collections.abc import Generator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, cast
@@ -15,9 +13,9 @@ from rapidfuzz import fuzz, process
 from republic import LLM, TapeEntry
 from republic.tape import Tape
 
+from bub.app.runtime import TapeStore
 from bub.tape.anchors import AnchorSummary
 from bub.tape.session import AgentIntention
-from bub.tape.store import FileTapeStore
 
 
 @dataclass(frozen=True)
@@ -49,7 +47,7 @@ def current_tape() -> str:
 class TapeService:
     """Tape helper with app-specific operations."""
 
-    def __init__(self, llm: LLM, tape_name: str, *, store: FileTapeStore) -> None:
+    def __init__(self, llm: LLM, tape_name: str, *, store: TapeStore) -> None:
         self._llm = llm
         self._store = store
         self._tape = llm.tape(tape_name)
@@ -57,17 +55,6 @@ class TapeService:
     @property
     def tape(self) -> Tape:
         return _tape_context.get(self._tape)
-
-    @contextlib.contextmanager
-    def fork_tape(self) -> Generator[Tape, None, None]:
-        fork_name = self._store.fork(self._tape.name)
-        reset_token = _tape_context.set(self._llm.tape(fork_name))
-        try:
-            yield _tape_context.get()
-        finally:
-            self._store.merge(fork_name, self._tape.name)
-            _tape_context.reset(reset_token)
-            logger.info("Merged forked tape '{}' back into '{}'", fork_name, self._tape.name)
 
     def fork_session(
         self,

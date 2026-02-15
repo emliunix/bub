@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from loguru import logger
+
+from bub.channels.events import InboundMessage
 from bub.core.model_runner import ModelRunner, ModelTurnResult
 from bub.core.router import InputRouter
 from bub.tape.service import TapeService
-
-if TYPE_CHECKING:
-    from bub.channels.bus import MessageBus
+from bub.types import MessageBus
 
 
 @dataclass(frozen=True)
@@ -39,51 +40,137 @@ class AgentLoop:
         model_runner: ModelRunner,
         tape: TapeService,
         session_id: str,
-        bus: MessageBus | None = None,
+        bus: MessageBus,
     ) -> None:
+        if bus is None:
+            raise ValueError("bus is required for AgentLoop")
         self._router = router
         self._model_runner = model_runner
         self._tape = tape
         self._session_id = session_id
         self._bus = bus
         self._on_complete: CompleteCallback | None = None
+        self._unsub_inbound: Callable[[], None] | None = None
+        self._running = False
 
     def set_complete_callback(self, callback: CompleteCallback) -> None:
         self._on_complete = callback
 
+    async def start(self) -> None:
+        """Start listening to inbound messages from the bus."""
+        self._unsub_inbound = await self._bus.on_inbound(self._handle_inbound)
+
+        self._running = True
+        logger.info("agent.loop.start session_id={}", self._session_id)
+
+    async def stop(self) -> None:
+        """Stop listening to the bus."""
+        self._running = False
+        if self._unsub_inbound is not None:
+            self._unsub_inbound()
+            self._unsub_inbound = None
+        logger.info("agent.loop.stop session_id={}", self._session_id)
+
+    async def _handle_inbound(self, message: InboundMessage) -> None:
+        """Handle inbound message from the bus."""
+        from bub.channels.events import OutboundMessage
+
+        if not self._running:
+            return
+
+        session_id = message.session_id
+        if session_id != self._session_id:
+            return
+
+        logger.debug(
+            "agent.loop.receive session_id={} channel={} chat_id={} content={}",
+            session_id,
+            message.channel,
+            message.chat_id,
+            message.content[:100],
+        )
+
+        try:
+            result = await self.handle_input(message.render())
+            parts = [part for part in (result.immediate_output, result.assistant_output) if part]
+            if result.error:
+                parts.append(f"error: {result.error}")
+            output = "\n\n".join(parts).strip()
+
+            if output and self._bus:
+                reply_to_message_id = message.metadata.get("message_id")
+                await self._bus.publish_outbound(
+                    OutboundMessage(
+                        channel=message.channel,
+                        chat_id=message.chat_id,
+                        content=output,
+                        metadata={"session_id": session_id},
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                )
+                logger.debug(
+                    "agent.loop.send session_id={} channel={} chat_id={} content={}",
+                    session_id,
+                    message.channel,
+                    message.chat_id,
+                    output[:100],
+                )
+        except Exception:
+            logger.exception("agent.loop.error session_id={}", session_id)
+
     async def handle_input(self, raw: str) -> LoopResult:
-        with self._tape.fork_tape():
-            route = await self._router.route_user(raw)
-            if route.exit_requested:
-                return LoopResult(
-                    immediate_output=route.immediate_output,
-                    assistant_output="",
-                    exit_requested=True,
-                    steps=0,
-                    error=None,
-                )
+        logger.debug("agent.loop.input session_id={} raw={}", self._session_id, raw[:100])
+        route = await self._router.route_user(raw)
+        logger.debug(
+            "agent.loop.route session_id={} enter_model={} exit_requested={}",
+            self._session_id,
+            route.enter_model,
+            route.exit_requested,
+        )
 
-            if not route.enter_model:
-                return LoopResult(
-                    immediate_output=route.immediate_output,
-                    assistant_output="",
-                    exit_requested=False,
-                    steps=0,
-                    error=None,
-                )
-
-            model_result = await self._model_runner.run(route.model_prompt)
-            self._record_result(model_result)
-            if self._on_complete and model_result.trigger_next:
-                await self._on_complete(model_result)
+        if route.exit_requested:
+            logger.debug("agent.loop.exit session_id={}", self._session_id)
             return LoopResult(
                 immediate_output=route.immediate_output,
-                assistant_output=model_result.visible_text,
-                exit_requested=model_result.exit_requested,
-                steps=model_result.steps,
-                error=model_result.error,
-                trigger_next=model_result.trigger_next,
+                assistant_output="",
+                exit_requested=True,
+                steps=0,
+                error=None,
             )
+
+        if not route.enter_model:
+            logger.debug("agent.loop.command session_id={}", self._session_id)
+            return LoopResult(
+                immediate_output=route.immediate_output,
+                assistant_output="",
+                exit_requested=False,
+                steps=0,
+                error=None,
+            )
+
+        logger.debug("agent.loop.model session_id={} prompt={}", self._session_id, route.model_prompt[:100])
+        model_result = await self._model_runner.run(route.model_prompt)
+        self._record_result(model_result)
+        logger.debug(
+            "agent.loop.complete session_id={} steps={} exit={}",
+            self._session_id,
+            model_result.steps,
+            model_result.exit_requested,
+        )
+
+        if self._on_complete and model_result.trigger_next:
+            logger.debug(
+                "agent.loop.trigger_next session_id={} trigger={}", self._session_id, model_result.trigger_next
+            )
+            await self._on_complete(model_result)
+        return LoopResult(
+            immediate_output=route.immediate_output,
+            assistant_output=model_result.visible_text,
+            exit_requested=model_result.exit_requested,
+            steps=model_result.steps,
+            error=model_result.error,
+            trigger_next=model_result.trigger_next,
+        )
 
     def _record_result(self, result: ModelTurnResult) -> None:
         self._tape.append_event(

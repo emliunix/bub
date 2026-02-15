@@ -5,43 +5,50 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
 from hashlib import md5
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import BaseScheduler
 from loguru import logger
+from republic import LLM
 
 from bub.app.jobstore import JSONJobStore
-from bub.config.settings import Settings
+from bub.app.types import Session, TapeStore
+from bub.config.settings import AgentSettings, TapeSettings
 from bub.core import AgentLoop, InputRouter, LoopResult, ModelRunner
-from bub.integrations.republic_client import build_llm, build_tape_store, read_workspace_agents_prompt
+from bub.integrations.republic_client import build_llm, read_workspace_agents_prompt
 from bub.skills import SkillMetadata, discover_skills, load_skill_body
 from bub.tape import TapeService
 from bub.tools import ProgressiveToolView, ToolRegistry
 from bub.tools.builtin import register_builtin_tools
-
-if TYPE_CHECKING:
-    from bub.channels.bus import MessageBus
+from bub.types import MessageBus
 
 
 def _session_slug(session_id: str) -> str:
     return md5(session_id.encode("utf-8")).hexdigest()[:16]  # noqa: S324
 
 
-@dataclass
 class SessionRuntime:
     """Runtime state for one deterministic session."""
 
-    session_id: str
-    loop: AgentLoop
-    tape: TapeService
-    model_runner: ModelRunner
-    tool_view: ProgressiveToolView
+    def __init__(
+        self,
+        session_id: str,
+        loop: AgentLoop,
+        tape: TapeService,
+        model_runner: ModelRunner,
+        tool_view: ProgressiveToolView,
+        bus: MessageBus,
+    ) -> None:
+        self.session_id = session_id
+        self.loop = loop
+        self.tape = tape
+        self.model_runner = model_runner
+        self.tool_view = tool_view
+        self._bus = bus
 
     async def handle_input(self, text: str) -> LoopResult:
         return await self.loop.handle_input(text)
@@ -51,45 +58,101 @@ class SessionRuntime:
         self.model_runner.reset_context()
         self.tool_view.reset()
 
+    async def run_loop(self) -> None:
+        """Run the session loop indefinitely with proper lifecycle management."""
+        await self._start()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await self._stop()
 
-class AppRuntime:
-    """Global runtime that manages multiple session loops."""
+    async def _start(self) -> None:
+        """Start the session: connect to bus and start listening."""
+        await self._bus.connect()
+        await self._bus.initialize(self.session_id)
+        await self.loop.start()
+        logger.info("session.start session_id={}", self.session_id)
+
+    async def _stop(self) -> None:
+        """Stop the session: stop listening and disconnect from bus."""
+        await self.loop.stop()
+        await self._bus.disconnect()
+        logger.info("session.stop session_id={}", self.session_id)
+
+
+def reset_session_context(sessions: Mapping[str, Session], session_id: str) -> None:
+    """Reset volatile context for an already-created session."""
+    session = sessions.get(session_id)
+    if session is None:
+        return
+    session.reset_context()
+
+
+async def cancel_active_inputs(active_inputs: set[asyncio.Task[None]]) -> int:
+    """Cancel all in-flight input tasks and return canceled count."""
+    count = 0
+    while active_inputs:
+        task = active_inputs.pop()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        count += 1
+    return count
+
+
+class AgentRuntime:
+    """Agent runtime that manages multiple session loops."""
 
     def __init__(
         self,
         workspace: Path,
-        settings: Settings,
+        agent_settings: AgentSettings,
+        tape_store: TapeStore,
+        bus: MessageBus | None = None,
         *,
         allowed_tools: set[str] | None = None,
         allowed_skills: set[str] | None = None,
-        enable_scheduler: bool = True,
+        tape_settings: TapeSettings | None = None,
+        workspace_prompt: str | None = None,
+        scheduler: BaseScheduler | None = None,
+        llm: LLM | None = None,
     ) -> None:
+        if bus is None:
+            raise ValueError("bus is required for AgentRuntime")
         self.workspace = workspace.resolve()
-        self.settings = settings
+        self._agent_settings = agent_settings
         self._allowed_skills = _normalize_name_set(allowed_skills)
         self._allowed_tools = _normalize_name_set(allowed_tools)
-        self._store = build_tape_store(settings, self.workspace)
-        self.workspace_prompt = read_workspace_agents_prompt(self.workspace)
-        self.bus: MessageBus | None = None
-        self.scheduler = self._default_scheduler()
-        self._llm = build_llm(settings, self._store)
+        self._store = tape_store
+        self.workspace_prompt = workspace_prompt or read_workspace_agents_prompt(self.workspace)
+        self.bus = bus
+        self._tape_settings = tape_settings or TapeSettings()
+        self.scheduler = scheduler or self._default_scheduler()
+        self._llm = llm or build_llm(agent_settings, self._store)
         self._sessions: dict[str, SessionRuntime] = {}
         self._active_inputs: set[asyncio.Task[LoopResult]] = set()
-        self._enable_scheduler = enable_scheduler
 
     def _default_scheduler(self) -> BaseScheduler:
-        job_store = JSONJobStore(self.settings.resolve_home() / "jobs.json")
+        job_store = JSONJobStore(self._tape_settings.resolve_home() / "jobs.json")
         return BackgroundScheduler(daemon=True, jobstores={"default": job_store})
 
-    def __enter__(self) -> AppRuntime:
-        if not self.scheduler.running and self._enable_scheduler:
+    def __enter__(self) -> AgentRuntime:
+        if not self.scheduler.running:
             self.scheduler.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        if self.scheduler.running and self._enable_scheduler:
+        if self.scheduler.running:
             with suppress(Exception):
                 self.scheduler.shutdown()
+
+    @property
+    def settings(self) -> AgentSettings:
+        return self._agent_settings
+
+    @property
+    def tape_settings(self) -> TapeSettings:
+        return self._tape_settings
 
     def discover_skills(self) -> list[SkillMetadata]:
         discovered = discover_skills(self.workspace)
@@ -107,7 +170,7 @@ class AppRuntime:
         if existing is not None:
             return existing
 
-        tape_name = f"{self.settings.tape_name}:{_session_slug(session_id)}"
+        tape_name = f"{self._tape_settings.tape_name}:{_session_slug(session_id)}"
         tape = TapeService(self._llm, tape_name, store=self._store)
         tape.ensure_bootstrap_anchor()
 
@@ -128,15 +191,22 @@ class AppRuntime:
             tools=registry.model_tools(),
             list_skills=self.discover_skills,
             load_skill_body=self.load_skill_body,
-            model=self.settings.model,
-            max_steps=self.settings.max_steps,
-            max_tokens=self.settings.max_tokens,
-            model_timeout_seconds=self.settings.model_timeout_seconds,
-            base_system_prompt=self.settings.system_prompt,
+            model=self._agent_settings.model,
+            max_steps=self._agent_settings.max_steps,
+            max_tokens=self._agent_settings.max_tokens,
+            model_timeout_seconds=self._agent_settings.model_timeout_seconds,
+            base_system_prompt=self._agent_settings.system_prompt,
             workspace_system_prompt=self.workspace_prompt,
         )
         loop = AgentLoop(router=router, model_runner=runner, tape=tape, session_id=session_id, bus=self.bus)
-        runtime = SessionRuntime(session_id=session_id, loop=loop, tape=tape, model_runner=runner, tool_view=tool_view)
+        runtime = SessionRuntime(
+            session_id=session_id,
+            loop=loop,
+            tape=tape,
+            model_runner=runner,
+            tool_view=tool_view,
+            bus=self.bus,
+        )
         self._sessions[session_id] = runtime
         return runtime
 
@@ -167,9 +237,6 @@ class AppRuntime:
             return
         session.reset_context()
 
-    def set_bus(self, bus: MessageBus) -> None:
-        self.bus = bus
-
     @contextlib.asynccontextmanager
     async def graceful_shutdown(self) -> AsyncGenerator[asyncio.Event, None]:
         """Run the runtime indefinitely with graceful shutdown."""
@@ -197,9 +264,7 @@ class AppRuntime:
                     loop.remove_signal_handler(sig)
 
 
-def _normalize_name_set(raw: set[str] | None) -> set[str] | None:
-    if raw is None:
+def _normalize_name_set(values: set[str] | None) -> set[str] | None:
+    if values is None:
         return None
-
-    normalized = {name.strip().casefold() for name in raw if name.strip()}
-    return normalized or None
+    return {v.casefold().strip() for v in values}

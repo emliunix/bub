@@ -164,10 +164,7 @@ class FileTapeStore:
 
     def __init__(self, home: Path, workspace_path: Path) -> None:
         self._paths = self._resolve_paths(home, workspace_path)
-        self._tape_files: dict[str, TapeFile] = {}
-        self._fork_start_ids: dict[str, int] = {}
         self._lock = threading.Lock()
-        self._manifest = self._load_manifest()
 
     # -------------------------------------------------------------------------
     # Tape operations
@@ -175,17 +172,22 @@ class FileTapeStore:
 
     def create_tape(self, tape: str, title: str | None = None) -> str:
         """Create a new tape. Returns the tape ID."""
-        self._manifest.create_tape(tape, title=title)
+        manifest = self._load_manifest()
+        manifest.create_tape(tape, title=title)
+        self.save_manifest(manifest)
         return tape
 
     def get_title(self, tape: str) -> str | None:
         """Get the title of a tape."""
-        meta = self._manifest.get_tape(tape)
+        manifest = self._load_manifest()
+        meta = manifest.get_tape(tape)
         return meta.title if meta else None
 
     def set_title(self, tape: str, title: str) -> None:
         """Set the title of a tape."""
-        self._manifest.update_tape(tape, title=title)
+        manifest = self._load_manifest()
+        manifest.update_tape(tape, title=title)
+        self.save_manifest(manifest)
 
     def list_tapes(self) -> list[str]:
         """List all tapes."""
@@ -203,7 +205,7 @@ class FileTapeStore:
         self, tape: str, from_entry_id: int | None = None, to_entry_id: int | None = None
     ) -> list[TapeEntry] | None:
         """Read tape entries, optionally by range."""
-        tape_file = self._tape_file(tape)
+        tape_file = self._make_tape_file(tape)
         if not tape_file.path.exists():
             return None
         entries = tape_file.read()
@@ -215,7 +217,7 @@ class FileTapeStore:
 
     def append(self, tape: str, entry: TapeEntry) -> None:
         """Append an entry to a tape (auto-creates tape if needed)."""
-        self._tape_file(tape).append(entry)
+        self._make_tape_file(tape).append(entry)
 
     def fork(
         self,
@@ -232,8 +234,9 @@ class FileTapeStore:
             from_entry: Fork from (tape_id, entry_id) tuple - partial copy
             from_anchor: Fork from anchor name (resolves to entry_id)
         """
+        manifest = self._load_manifest()
         if from_anchor is not None:
-            anchor = self._manifest.get_anchor(from_anchor)
+            anchor = manifest.get_anchor(from_anchor)
             if anchor is None:
                 raise ValueError(f"Anchor not found: {from_anchor}")
             from_entry = (anchor.tape_id, anchor.entry_id)
@@ -243,22 +246,26 @@ class FileTapeStore:
         source_tape, source_entry_id = from_entry
         if new_tape_id is None:
             new_tape_id = f"{from_tape}__{uuid.uuid4().hex[:8]}"
-        source_file = self._tape_file(source_tape)
-        target_file = self._tape_file(new_tape_id)
+        source_file = self._make_tape_file(source_tape)
+        target_file = self._make_tape_file(new_tape_id)
         source_file.copy_to(target_file, from_entry_id=source_entry_id)
-        self._manifest.fork_tape(source_tape, new_tape_id, parent=(source_tape, source_entry_id))
+        # Use next_id as fork_start_id (where fork starts reading from target)
+        fork_start_id = source_file._next_id()
+        manifest.fork_tape(source_tape, new_tape_id, parent=(source_tape, fork_start_id))
+        self.save_manifest(manifest)
         return new_tape_id
 
     def archive(self, tape_id: str) -> Path | None:
         """Archive a tape."""
-        tape_file = self._tape_file(tape_id)
-        self._tape_files.pop(tape_id, None)
-        self._manifest.delete_tape(tape_id)
+        tape_file = self._make_tape_file(tape_id)
+        manifest = self._load_manifest()
+        manifest.delete_tape(tape_id)
+        self.save_manifest(manifest)
         return tape_file.archive()
 
     def reset(self, tape_id: str) -> None:
         """Reset (clear) a tape."""
-        return self._tape_file(tape_id).reset()
+        return self._make_tape_file(tape_id).reset()
 
     # -------------------------------------------------------------------------
     # Anchor operations
@@ -266,41 +273,42 @@ class FileTapeStore:
 
     def create_anchor(self, name: str, tape_id: str, entry_id: int, state: dict[str, object] | None = None) -> None:
         """Create an anchor."""
-        self._manifest.create_anchor(name, tape_id, entry_id, state)
+        manifest = self._load_manifest()
+        manifest.create_anchor(name, tape_id, entry_id, state)
+        self.save_manifest(manifest)
 
     def get_anchor(self, name: str) -> Anchor | None:
         """Get an anchor by name."""
-        return self._manifest.get_anchor(name)
+        manifest = self._load_manifest()
+        return manifest.get_anchor(name)
 
     def update_anchor(self, name: str, entry_id: int | None = None, state: dict[str, object] | None = None) -> None:
         """Update an anchor."""
-        self._manifest.update_anchor(name, entry_id=entry_id, state=state)
+        manifest = self._load_manifest()
+        manifest.update_anchor(name, entry_id=entry_id, state=state)
+        self.save_manifest(manifest)
 
     def delete_anchor(self, name: str) -> None:
         """Delete an anchor."""
-        self._manifest.delete_anchor(name)
+        manifest = self._load_manifest()
+        manifest.delete_anchor(name)
+        self.save_manifest(manifest)
 
     def list_anchors(self) -> list[Anchor]:
         """List all anchors."""
-        return list(self._manifest.anchors.values())
+        manifest = self._load_manifest()
+        return list(manifest.anchors.values())
 
     def resolve_anchor(self, name: str) -> int:
         """Resolve anchor name to entry ID."""
-        return self._manifest.resolve_anchor(name)
+        manifest = self._load_manifest()
+        return manifest.resolve_anchor(name)
 
     # -------------------------------------------------------------------------
     # Internal methods
     # -------------------------------------------------------------------------
 
-    def merge(self, source: str, target: str) -> None:
-        """Merge source tape into target tape."""
-        source_file = self._tape_file(source)
-        target_file = self._tape_file(target)
-        target_file.copy_from(source_file)
-        source_file.path.unlink(missing_ok=True)
-        self._tape_files.pop(source, None)
-
-    def save_manifest(self) -> None:
+    def save_manifest(self, manifest: Manifest) -> None:
         """Save the manifest to disk."""
         path = self._paths.home / "manifest.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -314,7 +322,7 @@ class FileTapeStore:
                     "parent": list(meta.parent) if meta.parent else None,
                     "created_at": meta.created_at.isoformat(),
                 }
-                for tape_id, meta in self._manifest.tapes.items()
+                for tape_id, meta in manifest.tapes.items()
             },
             "anchors": {
                 name: {
@@ -324,7 +332,7 @@ class FileTapeStore:
                     "state": anchor.state,
                     "created_at": anchor.created_at.isoformat(),
                 }
-                for name, anchor in self._manifest.anchors.items()
+                for name, anchor in manifest.anchors.items()
             },
         }
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -367,13 +375,11 @@ class FileTapeStore:
 
         return manifest
 
-    def _tape_file(self, tape: str) -> TapeFile:
-        """Get or create a TapeFile for the given tape."""
-        if tape not in self._tape_files:
-            encoded_name = quote(tape, safe="")
-            file_name = f"{self._paths.workspace_hash}__{encoded_name}{TAPE_FILE_SUFFIX}"
-            self._tape_files[tape] = TapeFile(self._paths.tape_root / file_name)
-        return self._tape_files[tape]
+    def _make_tape_file(self, tape: str) -> TapeFile:
+        """Create a new TapeFile for the given tape."""
+        encoded_name = quote(tape, safe="")
+        file_name = f"{self._paths.workspace_hash}__{encoded_name}{TAPE_FILE_SUFFIX}"
+        return TapeFile(self._paths.tape_root / file_name)
 
     @staticmethod
     def _resolve_paths(home: Path, workspace_path: Path) -> TapePaths:

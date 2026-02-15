@@ -9,7 +9,6 @@ import shutil
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 from urllib import parse as urllib_parse
 
 import html2markdown
@@ -20,12 +19,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 from pydantic import BaseModel, Field
 from republic import ToolContext
 
+from bub.app.types import AgentRuntime
 from bub.tape.service import TapeService
 from bub.tape.session import AgentIntention
 from bub.tools.registry import ToolRegistry
-
-if TYPE_CHECKING:
-    from bub.app.runtime import AppRuntime
 
 DEFAULT_OLLAMA_WEB_API_BASE = "https://ollama.com/api"
 WEB_REQUEST_TIMEOUT_SECONDS = 20
@@ -187,7 +184,7 @@ def register_builtin_tools(
     *,
     workspace: Path,
     tape: TapeService,
-    runtime: AppRuntime,
+    runtime: AgentRuntime,
     session_id: str,
 ) -> None:
     """Register built-in tools and internal commands."""
@@ -307,7 +304,7 @@ def register_builtin_tools(
                 raise RuntimeError(f"invalid cron expression: {params.cron}") from exc
 
         try:
-            job = runtime.scheduler.add_job(
+            job = runtime.scheduler.add_job(  # type: ignore[attr-defined]
                 run_scheduled_reminder,
                 trigger=trigger,
                 id=job_id,
@@ -327,7 +324,7 @@ def register_builtin_tools(
     def schedule_remove(params: ScheduleRemoveInput) -> str:
         """Remove one scheduled job by id."""
         try:
-            runtime.scheduler.remove_job(params.job_id)
+            runtime.scheduler.remove_job(params.job_id)  # type: ignore[attr-defined]
         except JobLookupError as exc:
             raise RuntimeError(f"job not found: {params.job_id}") from exc
         return f"removed: {params.job_id}"
@@ -335,7 +332,7 @@ def register_builtin_tools(
     @register(name="schedule.list", short_description="List scheduled jobs", model=EmptyInput)
     def schedule_list(_params: EmptyInput) -> str:
         """List scheduled jobs for current workspace."""
-        jobs = runtime.scheduler.get_jobs()
+        jobs = runtime.scheduler.get_jobs()  # type: ignore[attr-defined]
         rows: list[str] = []
         for job in jobs:
             next_run = "-"
@@ -507,7 +504,7 @@ def register_builtin_tools(
         """
         from bub.app.runtime import _session_slug
 
-        new_tape_name = f"{runtime.settings.tape_name}:{_session_slug(params.new_session_id)}"
+        new_tape_name = f"{runtime.tape_settings.tape_name}:{_session_slug(params.new_session_id)}"
         intention = None
         if params.next_steps or params.context_summary or params.trigger_on_complete:
             intention = AgentIntention(
@@ -522,7 +519,7 @@ def register_builtin_tools(
 
             # We're intentionally fire-and-forget here - the event is for monitoring/hooks
             task = asyncio.create_task(
-                runtime.bus.publish_agent_spawn(
+                runtime.bus.publish_agent_spawn(  # type: ignore[attr-defined]
                     AgentSpawnEvent(
                         parent_session_id=session_id,
                         child_session_id=params.new_session_id,

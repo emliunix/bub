@@ -6,30 +6,42 @@ from pathlib import Path
 
 from republic import LLM
 
-from bub.config.settings import Settings
+from bub.app.runtime import TapeStore
+from bub.config.settings import AgentSettings, TapeSettings
 from bub.tape.context import default_tape_context
+from bub.tape.remote import RemoteTapeStore
 from bub.tape.store import FileTapeStore
 
 AGENTS_FILE = "AGENTS.md"
 
 
-def build_tape_store(settings: Settings, workspace: Path) -> FileTapeStore:
-    """Build persistent tape store for one workspace."""
+def build_tape_store(
+    agent_settings: AgentSettings,
+    tape_settings: TapeSettings,
+    workspace: Path,
+) -> FileTapeStore | RemoteTapeStore:
+    """Build tape store for one workspace.
 
-    return FileTapeStore(settings.resolve_home(), workspace)
+    If tape_server_url is set in agent_settings, connects to remote tape server.
+    Otherwise, uses local FileTapeStore.
+    """
+    if agent_settings.tape_server_url:
+        return RemoteTapeStore(agent_settings.tape_server_url, workspace)
+
+    return FileTapeStore(tape_settings.resolve_home(), workspace)
 
 
-def build_llm(settings: Settings, store: FileTapeStore) -> LLM:
+def build_llm(agent_settings: AgentSettings, store: TapeStore) -> LLM:
     """Build Republic LLM client configured for Bub runtime."""
 
     client_args = None
-    if "azure" in settings.model:
+    if "azure" in agent_settings.model:
         client_args = {"api_version": "2025-01-01-preview"}
 
     return LLM(
-        settings.model,
-        api_key=settings.resolved_api_key,
-        api_base=settings.api_base,
+        agent_settings.model,
+        api_key=agent_settings.resolved_api_key,
+        api_base=agent_settings.api_base,
         tape_store=store,
         context=default_tape_context(),
         client_args=client_args,

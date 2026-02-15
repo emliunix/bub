@@ -1,14 +1,14 @@
 import importlib
 from pathlib import Path
 
-from bub.app.runtime import AppRuntime
+from bub.app.runtime import AgentRuntime
 from bub.skills.loader import SkillMetadata
 
 runtime_module = importlib.import_module("bub.app.runtime")
 
 
-def _build_runtime_stub(workspace: Path, *, allowed_skills: set[str] | None) -> AppRuntime:
-    runtime = object.__new__(AppRuntime)
+def _build_runtime_stub(workspace: Path, *, allowed_skills: set[str] | None) -> AgentRuntime:
+    runtime = object.__new__(AgentRuntime)
     runtime.workspace = workspace
     runtime._allowed_skills = allowed_skills  # type: ignore[attr-defined]
     return runtime

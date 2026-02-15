@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
-if TYPE_CHECKING:
-    from bub.channels.events import InboundMessage, OutboundMessage
+from bub.channels.events import InboundMessage, OutboundMessage
 
 
 class MessageBus(Protocol):
@@ -21,7 +20,3 @@ class MessageBus(Protocol):
     async def on_outbound(
         self, handler: Callable[[OutboundMessage], Coroutine[Any, Any, None]]
     ) -> Callable[[], None]: ...
-
-    async def connect(self) -> None: ...
-    async def disconnect(self) -> None: ...
-    async def initialize(self, client_id: str, client_info: dict[str, Any] | None = None) -> object: ...

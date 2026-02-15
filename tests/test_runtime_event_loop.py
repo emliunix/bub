@@ -2,48 +2,45 @@ import asyncio
 
 import pytest
 
-from bub.app.runtime import AppRuntime
+from bub.app.runtime import Session, cancel_active_inputs, reset_session_context
+
+
+class DummySession:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def reset_context(self) -> None:
+        self.calls += 1
 
 
 def test_reset_session_context_ignores_missing_session() -> None:
-    runtime = object.__new__(AppRuntime)
-    runtime._sessions = {}
-    AppRuntime.reset_session_context(runtime, "missing")
+    sessions: dict[str, Session] = {}
+    reset_session_context(sessions, "missing")
 
 
 def test_reset_session_context_resets_existing_session() -> None:
-    runtime = object.__new__(AppRuntime)
-
-    class _DummySession:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def reset_context(self) -> None:
-            self.calls += 1
-
-    session = _DummySession()
-    runtime._sessions = {"telegram:1": session}
-    AppRuntime.reset_session_context(runtime, "telegram:1")
+    session = DummySession()
+    sessions: dict[str, Session] = {"telegram:1": session}
+    reset_session_context(sessions, "telegram:1")
     assert session.calls == 1
 
 
 @pytest.mark.asyncio
 async def test_cancel_active_inputs_cancels_running_tasks() -> None:
-    runtime = object.__new__(AppRuntime)
     gate = asyncio.Event()
     cancelled = {"value": False}
 
-    async def _pending() -> str:
+    async def _pending() -> None:
         try:
             await gate.wait()
         finally:
             cancelled["value"] = True
 
     task = asyncio.create_task(_pending())
-    runtime._active_inputs = {task}
+    active_inputs: set[asyncio.Task[None]] = {task}
     await asyncio.sleep(0)
 
-    count = await AppRuntime._cancel_active_inputs(runtime)
+    count = await cancel_active_inputs(active_inputs)
     assert count == 1
 
     with pytest.raises(asyncio.CancelledError):

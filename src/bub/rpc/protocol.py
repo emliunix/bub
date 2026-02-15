@@ -1,243 +1,302 @@
-"""JSON-RPC 2.0 framework implementation.
+"""Agent Bus specific protocol types and API methods."""
 
-Provides a direction-agnostic, transport-agnostic JSON-RPC framework.
-Supports both sending requests/notifications AND receiving/handling them.
-"""
-
-from __future__ import annotations
-
-import asyncio
-import contextlib
-import uuid
-from collections.abc import Callable
 from typing import Protocol
 
-from bub.rpc.types import (
-    ErrorData,
-    JSONRPCError,
-    JSONRPCMessage,
-    JSONRPCNotification,
-    JSONRPCRequest,
-    JSONRPCResponse,
-    RequestId,
-    jsonrpc_message_adapter,
-)
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
+
+from bub.rpc.framework import JSONRPCFramework
+
+JsonValue = object
 
 
-class JSONRPCErrorException(Exception):
-    """Exception with JSON-RPC error code."""
+class ProtocolModel(BaseModel):
+    """Base model for Agent Bus protocol types.
 
-    def __init__(self, code: int, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-class JSONRPCTransport(Protocol):
-    """Bidirectional JSON message transport."""
-
-    async def send_message(self, message: str) -> None:
-        """Send a JSON message."""
-        ...
-
-    async def receive_message(self) -> str:
-        """Receive a JSON message. Blocks until message available."""
-        ...
-
-
-class JSONRPCFramework:
-    """Direction-agnostic JSON-RPC 2.0 framework.
-
-    The same instance can act as:
-    - Caller: send_request(), send_notification()
-    - Responder: register_method(), on_notification(), listen()
-    - Both: simultaneously send and receive messages
-
-    The framework handles:
-    - Request/response correlation with pending_requests
-    - Fire-and-forget notifications
-    - Method registration and dispatch
+    Uses alias_generator to convert snake_case to camelCase.
     """
 
-    def __init__(self, transport: JSONRPCTransport) -> None:
-        self._transport = transport
-        self._pending_requests: dict[RequestId, asyncio.Future[dict[str, object]]] = {}
-        self._method_handlers: dict[str, Callable[[dict[str, object]], dict[str, object] | None]] = {}
-        self._notification_handlers: dict[str, list[Callable[[dict[str, object]], None]]] = {}
-        self._running = False
-        self._stop_event = asyncio.Event()
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
 
-    async def send_request(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        """Send JSON-RPC request and await response.
 
-        Creates a request with unique ID, sends it, waits for response.
+class ClientInfo(ProtocolModel):
+    name: str
+    version: str
+
+
+class ServerInfo(ProtocolModel):
+    name: str
+    version: str
+
+
+class ServerCapabilities(ProtocolModel):
+    subscribe: bool
+    publish: bool
+    topics: list[str]
+
+
+class InitializeParams(ProtocolModel):
+    client_id: str
+    client_info: ClientInfo | None = None
+
+
+class InitializeResult(ProtocolModel):
+    server_id: str
+    server_info: ServerInfo
+    capabilities: ServerCapabilities
+
+
+class SubscribeParams(ProtocolModel):
+    topic: str
+
+
+class SubscribeResult(ProtocolModel):
+    success: bool
+    subscription_id: str = "sub_unknown"
+
+
+class UnsubscribeParams(ProtocolModel):
+    topic: str
+
+
+class UnsubscribeResult(ProtocolModel):
+    success: bool
+
+
+class SendMessageParams(ProtocolModel):
+    topic: str
+    payload: dict[str, JsonValue]
+
+
+class SendMessageResult(ProtocolModel):
+    success: bool
+    stop_propagation: bool = False
+
+
+class PingParams(ProtocolModel):
+    pass
+
+
+class PingResult(ProtocolModel):
+    timestamp: str
+
+
+class PublishInboundParams(ProtocolModel):
+    channel: str
+    sender_id: str
+    chat_id: str
+    content: str
+
+
+class PublishInboundResult(ProtocolModel):
+    success: bool
+
+
+class PublishOutboundParams(ProtocolModel):
+    channel: str
+    chat_id: str
+    content: str
+
+
+class PublishOutboundResult(ProtocolModel):
+    success: bool
+
+
+class AgentBusServerCallbacks(Protocol):
+    """Callbacks for server to call on client."""
+
+    async def handle_initialize(self, params: InitializeParams) -> InitializeResult: ...
+    async def handle_subscribe(self, params: SubscribeParams) -> SubscribeResult: ...
+    async def handle_unsubscribe(self, params: UnsubscribeParams) -> UnsubscribeResult: ...
+    async def handle_ping(self, params: PingParams) -> PingResult: ...
+    async def send_message(self, params: SendMessageParams) -> SendMessageResult: ...
+    async def handle_publish_inbound(self, params: PublishInboundParams) -> PublishInboundResult: ...
+    async def handle_publish_outbound(self, params: PublishOutboundParams) -> PublishOutboundResult: ...
+
+
+def register_server_callbacks(framework: JSONRPCFramework, callbacks: AgentBusServerCallbacks) -> None:
+    """Register server callbacks.
+
+    Server-side: registers callbacks that the server can call on the client.
+    """
+
+    async def _handle_initialize(params: dict[str, object]) -> dict[str, object]:
+        params_model = InitializeParams.model_validate(params)
+        result_model = await callbacks.handle_initialize(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    async def _handle_subscribe(params: dict[str, object]) -> dict[str, object]:
+        params_model = SubscribeParams.model_validate(params)
+        result_model = await callbacks.handle_subscribe(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    async def _handle_unsubscribe(params: dict[str, object]) -> dict[str, object]:
+        params_model = UnsubscribeParams.model_validate(params)
+        result_model = await callbacks.handle_unsubscribe(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    async def _send_message(params: dict[str, object]) -> dict[str, object]:
+        params_model = SendMessageParams.model_validate(params)
+        result_model = await callbacks.send_message(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    async def _handle_ping(params: dict[str, object]) -> dict[str, object]:
+        params_model = PingParams.model_validate(params)
+        result_model = await callbacks.handle_ping(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    async def _handle_publish_inbound(params: dict[str, object]) -> dict[str, object]:
+        params_model = PublishInboundParams.model_validate(params)
+        result_model = await callbacks.handle_publish_inbound(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    async def _handle_publish_outbound(params: dict[str, object]) -> dict[str, object]:
+        params_model = PublishOutboundParams.model_validate(params)
+        result_model = await callbacks.handle_publish_outbound(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    framework.register_method("initialize", _handle_initialize)
+    framework.register_method("subscribe", _handle_subscribe)
+    framework.register_method("unsubscribe", _handle_unsubscribe)
+    framework.register_method("ping", _handle_ping)
+    framework.register_method("sendMessage", _send_message)
+    framework.register_method("publishInbound", _handle_publish_inbound)
+    framework.register_method("publishOutbound", _handle_publish_outbound)
+
+
+class AgentBusClientCallbacks(Protocol):
+    """Callbacks for client to handle server requests."""
+
+    async def send_message(self, params: SendMessageParams) -> SendMessageResult: ...
+
+
+def register_client_callbacks(framework: JSONRPCFramework, callbacks: AgentBusClientCallbacks) -> None:
+    """Register client callbacks.
+
+    Client-side: registers handlers for requests from the server.
+    """
+
+    async def _send_message(params: dict[str, object]) -> dict[str, object]:
+        params_model = SendMessageParams.model_validate(params)
+        result_model = await callbacks.send_message(params_model)
+        return result_model.model_dump(by_alias=True)
+
+    framework.register_method("sendMessage", _send_message)
+
+
+class AgentBusServerApi:
+    """Agent Bus protocol API.
+
+    Provides typed methods for Agent Bus operations.
+    """
+
+    def __init__(self, framework: JSONRPCFramework) -> None:
+        self._framework = framework
+
+    async def send_message(self, params: SendMessageParams) -> SendMessageResult:
+        """Send message request.
+
+        Server-side: sends message request to client.
+        Returns SendMessageResult with stop_propagation flag.
         """
-        request_id = str(uuid.uuid4())
-        request = JSONRPCRequest(
-            jsonrpc="2.0",
-            id=request_id,
-            method=method,
-            params=params,
-        )
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("sendMessage", params_dict)
+        return SendMessageResult.model_validate(result_dict)
 
-        future: asyncio.Future[dict[str, object]] = asyncio.Future()
-        self._pending_requests[request_id] = future
+    async def ping(self, params: PingParams) -> PingResult:
+        """Send ping request.
 
-        await self._send_message(request)
-
-        try:
-            result = await future
-            return result
-        finally:
-            self._pending_requests.pop(request_id, None)
-
-    async def send_notification(self, method: str, params: dict[str, object]) -> None:
-        """Send JSON-RPC notification (fire-and-forget).
-
-        Creates a notification (no ID), sends it. No response expected.
+        Client-side: sends ping request to server.
+        Returns timestamp.
         """
-        notification = JSONRPCNotification(
-            jsonrpc="2.0",
-            method=method,
-            params=params,
-        )
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("ping", params_dict)
+        return PingResult.model_validate(result_dict)
 
-        await self._send_message(notification)
 
-    async def _send_message(self, message: JSONRPCMessage) -> None:
-        """Send a JSON-RPC message via transport.
+class AgentBusClientApi:
+    """Client API for handling server notifications."""
 
-        Uses Layer 1 types, serializes to JSON.
+    def __init__(self, framework: JSONRPCFramework) -> None:
+        self._framework = framework
+
+    async def initialize(self, params: InitializeParams) -> InitializeResult:
+        """Send initialize request.
+
+        Client-side: sends initialization request to server.
+        Returns server info and capabilities.
         """
-        json_str = message.model_dump_json(by_alias=True)
-        await self._transport.send_message(json_str)
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("initialize", params_dict)
+        return InitializeResult.model_validate(result_dict)
 
-    async def listen(self) -> None:
-        """Start listening for incoming messages.
+    async def subscribe(self, params: SubscribeParams) -> SubscribeResult:
+        """Send subscribe request.
 
-        Loops calling transport.receive_message(), dispatches to handlers.
+        Client-side: sends subscribe request to server.
+        Returns subscription ID.
         """
-        self._running = True
-        self._stop_event.clear()
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("subscribe", params_dict)
+        return SubscribeResult.model_validate(result_dict)
 
-        while self._running:
-            try:
-                raw_message = await asyncio.wait_for(self._transport.receive_message(), timeout=0.1)
-                await self._process_message(raw_message)
-            except TimeoutError:
-                if self._stop_event.is_set():
-                    break
-                continue
-            except Exception:
-                if not self._running:
-                    break
-                raise
+    async def unsubscribe(self, params: UnsubscribeParams) -> UnsubscribeResult:
+        """Send unsubscribe request.
 
-    async def _process_message(self, raw_message: str) -> None:
-        """Process incoming JSON message.
-
-        1. Deserialize using jsonrpc_message_adapter
-        2. If request: call method handler, send response
-        3. If notification: call notification handlers
-        4. If response: match to pending request, complete future
-        5. If error: match to pending request, complete future with exception
+        Client-side: sends unsubscribe request to server.
         """
-        message = jsonrpc_message_adapter.validate_json(raw_message)
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("unsubscribe", params_dict)
+        return UnsubscribeResult.model_validate(result_dict)
 
-        if isinstance(message, JSONRPCRequest):
-            await self._handle_request(message)
-        elif isinstance(message, JSONRPCNotification):
-            await self._handle_notification(message)
-        elif isinstance(message, JSONRPCResponse):
-            self._handle_response(message)
-        elif isinstance(message, JSONRPCError):
-            self._handle_error(message)
+    async def publish_inbound(self, params: PublishInboundParams) -> PublishInboundResult:
+        """Send publish inbound request.
 
-    async def _handle_request(self, request: JSONRPCRequest) -> None:
-        """Handle incoming JSON-RPC request."""
-        handler = self._method_handlers.get(request.method)
-
-        if handler is None:
-            error_response = JSONRPCError(
-                jsonrpc="2.0",
-                id=request.id,
-                error=ErrorData(code=-32601, message="Method not found"),
-            )
-            await self._send_message(error_response)
-            return
-
-        try:
-            params = request.params or {}
-            result = handler(params)
-
-            if isinstance(result, dict):
-                response = JSONRPCResponse(
-                    jsonrpc="2.0",
-                    id=request.id,
-                    result=result,
-                )
-                await self._send_message(response)
-        except Exception as e:
-            # Extract error code and message if available
-            code = getattr(e, "code", -32603)
-            message = str(e) if str(e) else "Internal error"
-            error_response = JSONRPCError(
-                jsonrpc="2.0",
-                id=request.id,
-                error=ErrorData(code=code, message=message),
-            )
-            await self._send_message(error_response)
-
-    async def _handle_notification(self, notification: JSONRPCNotification) -> None:
-        """Handle incoming JSON-RPC notification."""
-        handlers = self._notification_handlers.get(notification.method, [])
-        params = notification.params or {}
-
-        for handler in handlers:
-            with contextlib.suppress(Exception):
-                handler(params)
-
-    def _handle_response(self, response: JSONRPCResponse) -> None:
-        """Handle incoming JSON-RPC response."""
-        if response.id is None:
-            return
-        future = self._pending_requests.get(response.id)
-
-        if future is not None and not future.done():
-            future.set_result(response.result)
-
-    def _handle_error(self, error: JSONRPCError) -> None:
-        """Handle incoming JSON-RPC error."""
-        if error.id is None:
-            return
-        future = self._pending_requests.get(error.id)
-
-        if future is not None and not future.done():
-            future.set_exception(RuntimeError(f"JSON-RPC error: {error.error.code} - {error.error.message}"))
-
-    def register_method(self, name: str, handler: Callable[[dict[str, object]], dict[str, object]]) -> None:
-        """Register handler for incoming JSON-RPC requests.
-
-        Handler takes params dict, returns result dict.
+        Client-side: sends inbound message to server.
+        Server will broadcast to subscribers.
         """
-        self._method_handlers[name] = handler
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("publishInbound", params_dict)
+        return PublishInboundResult.model_validate(result_dict)
 
-    def on_notification(self, method: str, handler: Callable[[dict[str, object]], None]) -> None:
-        """Register handler for incoming JSON-RPC notifications.
+    async def publish_outbound(self, params: PublishOutboundParams) -> PublishOutboundResult:
+        """Send publish outbound request.
 
-        Can register multiple handlers per method.
+        Client-side: sends outbound message to server.
+        Server will broadcast to subscribers.
         """
-        if method not in self._notification_handlers:
-            self._notification_handlers[method] = []
-
-        self._notification_handlers[method].append(handler)
-
-    async def stop(self) -> None:
-        """Stop listening for messages."""
-        self._running = False
-        self._stop_event.set()
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("publishOutbound", params_dict)
+        return PublishOutboundResult.model_validate(result_dict)
 
 
 __all__ = [
-    "JSONRPCFramework",
-    "JSONRPCTransport",
+    "AgentBusClientApi",
+    "AgentBusClientCallbacks",
+    "AgentBusServerApi",
+    "AgentBusServerCallbacks",
+    "ClientInfo",
+    "InitializeParams",
+    "InitializeResult",
+    "JsonValue",
+    "PingParams",
+    "PingResult",
+    "ProtocolModel",
+    "PublishInboundParams",
+    "PublishInboundResult",
+    "PublishOutboundParams",
+    "PublishOutboundResult",
+    "SendMessageParams",
+    "SendMessageResult",
+    "ServerCapabilities",
+    "ServerInfo",
+    "SubscribeParams",
+    "SubscribeResult",
+    "UnsubscribeParams",
+    "UnsubscribeResult",
+    "register_client_callbacks",
+    "register_server_callbacks",
 ]
