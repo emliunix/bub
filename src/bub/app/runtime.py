@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
+import os
 import signal
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import suppress
 from hashlib import md5
 from pathlib import Path
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import BaseScheduler
@@ -17,14 +21,17 @@ from republic import LLM
 
 from bub.app.jobstore import JSONJobStore
 from bub.app.types import Session, TapeStore
-from bub.config.settings import AgentSettings, TapeSettings
+from bub.config.settings import AgentSettings, BusSettings, TapeSettings
 from bub.core import AgentLoop, InputRouter, LoopResult, ModelRunner
 from bub.integrations.republic_client import build_llm, read_workspace_agents_prompt
 from bub.skills import SkillMetadata, discover_skills, load_skill_body
 from bub.tape import TapeService
 from bub.tools import ProgressiveToolView, ToolRegistry
 from bub.tools.builtin import register_builtin_tools
-from bub.types import MessageBus
+
+if TYPE_CHECKING:
+    from bub.channels.manager import ChannelManager
+    from bub.types import MessageBus
 
 
 def _session_slug(session_id: str) -> str:
@@ -68,15 +75,12 @@ class SessionRuntime:
 
     async def _start(self) -> None:
         """Start the session: connect to bus and start listening."""
-        await self._bus.connect()
-        await self._bus.initialize(self.session_id)
         await self.loop.start()
         logger.info("session.start session_id={}", self.session_id)
 
     async def _stop(self) -> None:
         """Stop the session: stop listening and disconnect from bus."""
         await self.loop.stop()
-        await self._bus.disconnect()
         logger.info("session.stop session_id={}", self.session_id)
 
 
@@ -151,6 +155,10 @@ class AgentRuntime:
         return self._agent_settings
 
     @property
+    def bus_settings(self) -> BusSettings | None:
+        return None
+
+    @property
     def tape_settings(self) -> TapeSettings:
         return self._tape_settings
 
@@ -196,7 +204,7 @@ class AgentRuntime:
             max_tokens=self._agent_settings.max_tokens,
             model_timeout_seconds=self._agent_settings.model_timeout_seconds,
             base_system_prompt=self._agent_settings.system_prompt,
-            workspace_system_prompt=self.workspace_prompt,
+            get_workspace_system_prompt=lambda: self.workspace_prompt,
         )
         loop = AgentLoop(router=router, model_runner=runner, tape=tape, session_id=session_id, bus=self.bus)
         runtime = SessionRuntime(
@@ -262,6 +270,24 @@ class AgentRuntime:
             for sig in handled_signals:
                 with suppress(NotImplementedError, RuntimeError):
                     loop.remove_signal_handler(sig)
+
+    def install_hooks(self, channel_manager: ChannelManager) -> None:
+        """Install hooks for cross-cutting concerns like channel integration."""
+        hooks_module_str = os.getenv("BUB_HOOKS_MODULE")
+        if not hooks_module_str:
+            return
+        try:
+            module = importlib.import_module(hooks_module_str)
+        except ImportError as e:
+            raise ImportError(f"Failed to import hooks module '{hooks_module_str}'") from e
+        if not hasattr(module, "install"):
+            raise AttributeError(f"Hooks module '{hooks_module_str}' does not have an 'install' function")
+        hooks_context = SimpleNamespace(
+            runtime=self,
+            register_channel=channel_manager.register,
+            default_channels=channel_manager.default_channels,
+        )
+        module.install(hooks_context)
 
 
 def _normalize_name_set(values: set[str] | None) -> set[str] | None:

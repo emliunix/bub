@@ -6,6 +6,7 @@ import json
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from loguru import logger
@@ -118,7 +119,7 @@ class TapeService:
         self.tape.append(TapeEntry.system(content))
 
     def info(self) -> TapeInfo:
-        entries = self.read_entries()
+        entries = self._tape.read_entries()
         anchors = [entry for entry in entries if entry.kind == "anchor"]
         last_anchor = anchors[-1].payload.get("name") if anchors else None
         if last_anchor is not None:
@@ -126,7 +127,7 @@ class TapeService:
         else:
             entries_since_last_anchor = len(entries)
         return TapeInfo(
-            name=self.tape.name,
+            name=self._tape.name,
             entries=len(entries),
             anchors=len(anchors),
             last_anchor=str(last_anchor) if last_anchor else None,
@@ -134,18 +135,18 @@ class TapeService:
         )
 
     def reset(self, *, archive: bool = False) -> str:
+        archive_path: Path | None = None
         if archive and self._store is not None:
-            archive_path = self._store.archive(self.tape.name)
-            self.tape.reset()
-            self.ensure_bootstrap_anchor()
-            if archive_path is not None:
-                return f"archived: {archive_path}"
-        self.tape.reset()
-        self.ensure_bootstrap_anchor()
-        return "ok"
+            archive_path = self._store.archive(self._tape.name)
+        self._tape.reset()
+        state = {"owner": "human"}
+        if archive_path is not None:
+            state["archived"] = str(archive_path)
+        self._tape.handoff("session/start", state=state)
+        return f"Archived: {archive_path}" if archive_path else "ok"
 
     def anchors(self, *, limit: int = 20) -> list[AnchorSummary]:
-        entries = [entry for entry in self.read_entries() if entry.kind == "anchor"]
+        entries = [entry for entry in self._tape.read_entries() if entry.kind == "anchor"]
         results: list[AnchorSummary] = []
         for entry in entries[-limit:]:
             name = str(entry.payload.get("name", "-"))
@@ -172,29 +173,33 @@ class TapeService:
             query = query.kinds(*kinds)
         return cast(list[TapeEntry], query.all())
 
-    def search(self, query: str, *, limit: int = 20) -> list[TapeEntry]:
+    def search(self, query: str, *, limit: int = 20, all_tapes: bool = False) -> list[TapeEntry]:
         normalized_query = query.strip().lower()
         if not normalized_query:
             return []
         results: list[TapeEntry] = []
-        for entry in self.read_entries():
-            payload_text = json.dumps(entry.payload, ensure_ascii=False)
-            entry_meta = getattr(entry, "meta", {})
-            meta_text = json.dumps(entry_meta, ensure_ascii=False)
-            kind_text = entry.kind.lower()
+        tapes = [self.tape]
+        if all_tapes:
+            tapes = [self._llm.tape(name) for name in self._store.list_tapes()]
 
-            if (
-                normalized_query in payload_text.lower()
-                or normalized_query in meta_text.lower()
-                or normalized_query in kind_text
-            ) or self._is_fuzzy_match(normalized_query, payload_text, meta_text, kind_text):
-                results.append(entry)
-                if len(results) >= limit:
-                    break
+        for tape in tapes:
+            count = 0
+            for entry in reversed(tape.read_entries()):
+                payload_text = json.dumps(entry.payload, ensure_ascii=False)
+                entry_meta = getattr(entry, "meta", {})
+                meta_text = json.dumps(entry_meta, ensure_ascii=False)
+
+                if (
+                    normalized_query in payload_text.lower() or normalized_query in meta_text.lower()
+                ) or self._is_fuzzy_match(normalized_query, payload_text, meta_text):
+                    results.append(entry)
+                    count += 1
+                    if count >= limit:
+                        break
         return results
 
     @staticmethod
-    def _is_fuzzy_match(normalized_query: str, payload_text: str, meta_text: str, kind_text: str) -> bool:
+    def _is_fuzzy_match(normalized_query: str, payload_text: str, meta_text: str) -> bool:
         if len(normalized_query) < MIN_FUZZY_QUERY_LENGTH:
             return False
 
@@ -204,11 +209,7 @@ class TapeService:
         query_phrase = " ".join(query_tokens)
         window_size = len(query_tokens)
 
-        source_tokens = (
-            WORD_PATTERN.findall(payload_text.lower())
-            + WORD_PATTERN.findall(meta_text.lower())
-            + WORD_PATTERN.findall(kind_text)
-        )
+        source_tokens = WORD_PATTERN.findall(payload_text.lower()) + WORD_PATTERN.findall(meta_text.lower())
         if not source_tokens:
             return False
 

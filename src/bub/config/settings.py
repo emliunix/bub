@@ -55,6 +55,14 @@ class BusSettings(BaseSettings):
     telegram_allow_from: list[str] = Field(default_factory=list)
     telegram_allow_chats: list[str] = Field(default_factory=list)
     telegram_proxy: str | None = Field(default=None)
+    discord_enabled: bool = Field(default=False)
+    discord_token: str | None = Field(default=None)
+    discord_allow_from: list[str] = Field(default_factory=list)
+    discord_allow_channels: list[str] = Field(default_factory=list)
+    discord_command_prefix: str = Field(default="!")
+    discord_proxy: str | None = Field(default=None)
+    websocket_enabled: bool = Field(default=False)
+    websocket_url: str | None = Field(default=None)
 
 
 class AgentSettings(BaseSettings):
@@ -69,11 +77,11 @@ class AgentSettings(BaseSettings):
         env_parse_none_str="null",
     )
 
-    model: str = Field(default="openrouter:qwen/qwen3-coder-next")
-    api_key: str | None = Field(default=None)
-    api_base: str | None = Field(default=None)
-    ollama_api_key: str | None = Field(default=None)
-    ollama_api_base: str | None = Field(default=None)
+    model: str = "openrouter:qwen/qwen3-coder-next"
+    api_key: str | None = None
+    api_base: str | None = None
+    ollama_api_key: str | None = None
+    ollama_api_base: str | None = None
     llm_api_key: str | None = Field(default=None, validation_alias="LLM_API_KEY")
     openrouter_api_key: str | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
     max_tokens: int = Field(default=1024, ge=1)

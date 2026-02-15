@@ -21,8 +21,10 @@ nav:
       - Data Flow: architecture/07-data-flow-with-type-mapping.md
       - Channel Initialization: architecture/08-channel-initialization-flow.md
       - Legacy: architecture.md
+  - Deployment: deployment.md
   - Interactive CLI: cli.md
   - Telegram: telegram.md
+  - Discord: discord.md
 
 plugins:
   - search

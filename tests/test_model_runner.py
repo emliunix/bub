@@ -129,7 +129,7 @@ async def test_model_runner_follows_command_context_until_stop() -> None:
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="workspace",
+        get_workspace_system_prompt=lambda: "workspace",
     )
 
     result = await runner.run("start")
@@ -164,7 +164,7 @@ async def test_model_runner_continues_after_tool_execution() -> None:
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="workspace",
+        get_workspace_system_prompt=lambda: "workspace",
     )
 
     result = await runner.run("create file")
@@ -206,7 +206,7 @@ async def test_model_runner_tool_followup_does_not_inline_tool_payload() -> None
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="workspace",
+        get_workspace_system_prompt=lambda: "workspace",
     )
 
     await runner.run("create file")
@@ -235,12 +235,12 @@ async def test_model_runner_expands_skill_from_hint() -> None:
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="",
+        get_workspace_system_prompt=lambda: "",
     )
 
     await runner.run("please follow $friendly-python")
     _, system_prompt, _ = tape.tape.calls[0]
-    assert "<skill_details>" in system_prompt
+    assert "<available_skills>" in system_prompt
     assert "friendly-python" in system_prompt
 
 
@@ -272,12 +272,12 @@ async def test_model_runner_expands_skill_from_assistant_hint() -> None:
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="",
+        get_workspace_system_prompt=lambda: "",
     )
 
     await runner.run("no skill hint here")
     _, second_system_prompt, _ = tape.tape.calls[1]
-    assert "<skill_details>" in second_system_prompt
+    assert "<available_skills>" in second_system_prompt
     assert "friendly-python" in second_system_prompt
 
 
@@ -297,7 +297,7 @@ async def test_model_runner_expands_tool_from_user_hint() -> None:
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="",
+        get_workspace_system_prompt=lambda: "",
     )
 
     await runner.run("use $fs.read")
@@ -329,7 +329,7 @@ async def test_model_runner_expands_tool_from_assistant_hint() -> None:
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="",
+        get_workspace_system_prompt=lambda: "",
     )
 
     await runner.run("no tool hint here")
@@ -365,7 +365,7 @@ async def test_model_runner_refreshes_skills_from_provider_between_runs() -> Non
         max_tokens=512,
         model_timeout_seconds=90,
         base_system_prompt="base",
-        workspace_system_prompt="",
+        get_workspace_system_prompt=lambda: "",
     )
     await runner.run("first run")
     _, first_system_prompt, _ = tape.tape.calls[0]
@@ -374,5 +374,5 @@ async def test_model_runner_refreshes_skills_from_provider_between_runs() -> Non
     all_skills.append(skill)
     await runner.run("second run")
     _, second_system_prompt, _ = tape.tape.calls[1]
-    assert "<skill_view>" in second_system_prompt
+    assert "<available_skills>" in second_system_prompt
     assert "friendly-python" in second_system_prompt

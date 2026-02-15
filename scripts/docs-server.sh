@@ -15,9 +15,9 @@ case "${1:-start}" in
         echo "   Live reload: enabled"
         echo "   Mermaid: enabled"
         echo ""
-        
+
         cd "$(dirname "$SCRIPT_DIR")"
-        
+
         systemd-run --user \
             --unit="${SERVICE_NAME}" \
             --description="Bub Documentation Server (MkDocs)" \
@@ -25,7 +25,7 @@ case "${1:-start}" in
             --property=Environment="PYTHONUNBUFFERED=1" \
             --collect \
             uv run mkdocs serve --dev-addr "0.0.0.0:${PORT}" --watch docs
-        
+
         echo ""
         echo "✅ Started! Open http://localhost:${PORT} in your browser"
         echo ""
@@ -40,21 +40,21 @@ case "${1:-start}" in
         echo "  ./scripts/docs-server.sh logs      # View logs"
         echo "  ./scripts/docs-server.sh stop      # Stop"
         ;;
-    
+
     stop)
         echo "🛑 Stopping documentation server..."
         systemctl --user stop "${SERVICE_NAME}" 2>/dev/null || true
         echo "✅ Stopped"
         ;;
-    
+
     status)
         systemctl --user status "${SERVICE_NAME}" --no-pager
         ;;
-    
+
     logs|log)
         journalctl --user -u "${SERVICE_NAME}" -f
         ;;
-    
+
     *)
         echo "Bub Documentation Server (MkDocs)"
         echo ""

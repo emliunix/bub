@@ -84,7 +84,36 @@ def test_chat_command_invokes_interactive_runner(monkeypatch, tmp_path: Path) ->
     assert called["run"] is True
 
 
-def test_telegram_command_validates_enabled(monkeypatch, tmp_path: Path) -> None:
+def test_run_command_expands_home_in_workspace(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, Path] = {}
+
+    class _RunRuntime(DummyRuntime):
+        async def handle_input(self, _session_id: str, _text: str):
+            class _Result:
+                error = None
+                assistant_output = "ok"
+                immediate_output = ""
+
+            return _Result()
+
+    def _fake_build_runtime(workspace: Path, **_kwargs):
+        captured["workspace"] = workspace
+        return _RunRuntime(workspace)
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    expected_workspace = (fake_home / "workspace").resolve()
+
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(cli_app_module, "build_runtime", _fake_build_runtime)
+    runner = CliRunner()
+    result = runner.invoke(cli_app_module.app, ["run", "ping", "--workspace", "~/workspace"])
+
+    assert result.exit_code == 0
+    assert captured["workspace"] == expected_workspace
+
+
+def test_message_command_requires_valid_subcommand_name(monkeypatch, tmp_path: Path) -> None:
     def _fake_build_runtime(workspace: Path, *, model=None, max_tokens=None):
         return DummyRuntime(workspace)
 
@@ -92,7 +121,7 @@ def test_telegram_command_validates_enabled(monkeypatch, tmp_path: Path) -> None
     runner = CliRunner()
     result = runner.invoke(cli_app_module.app, ["telegram", "--workspace", str(tmp_path)])
     assert result.exit_code != 0
-    assert "telegram is disabled" in result.output
+    assert "No such command 'telegram'" in result.output
 
 
 def test_run_command_forwards_allowed_tools_and_skills(monkeypatch, tmp_path: Path) -> None:
@@ -217,14 +246,12 @@ async def test_serve_channels_stops_manager_on_sigterm(monkeypatch) -> None:
             self.calls: list[str] = []
             self.runtime = _DummyRuntime()
 
-        def enabled_channels(self):
-            return {"telegram"}
-
-        async def start(self) -> None:
+        async def run(self) -> None:
             self.calls.append("start")
-
-        async def stop(self) -> None:
-            self.calls.append("stop")
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.calls.append("stop")
 
     manager = _DummyManager()
 

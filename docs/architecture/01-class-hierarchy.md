@@ -11,7 +11,7 @@ classDiagram
         +enabled_channels() list~str~
         +default_channels() list~type~BaseChannel~
     }
-    
+
     class BaseChannel~T~ {
         +name: str
         -runtime: AppRuntime
@@ -21,7 +21,7 @@ classDiagram
         +get_session_prompt(message: T) tuple~str, str~*
         +process_output(session_id: str, output: LoopResult)*
     }
-    
+
     class TelegramChannel {
         +name = "telegram"
         -_config: TelegramConfig
@@ -31,7 +31,7 @@ classDiagram
         +process_output(session_id, output) None
         -_on_text(update, context) None
     }
-    
+
     class DiscordChannel {
         +name = "discord"
         -_config: DiscordConfig
@@ -41,7 +41,7 @@ classDiagram
         +process_output(session_id, output) None
         -_on_message(message) None
     }
-    
+
     class AppRuntime {
         -workspace: Path
         -settings: Settings
@@ -52,7 +52,7 @@ classDiagram
         +handle_input(session_id, text) LoopResult
         +install_hooks(channel_manager) None
     }
-    
+
     class SessionRuntime {
         +session_id: str
         +loop: AgentLoop
@@ -62,7 +62,7 @@ classDiagram
         +handle_input(text) LoopResult
         +reset_context() None
     }
-    
+
     ChannelManager --> BaseChannel : manages
     BaseChannel <|-- TelegramChannel
     BaseChannel <|-- DiscordChannel

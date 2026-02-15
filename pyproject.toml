@@ -1,6 +1,6 @@
 [project]
 name = "bub"
-version = "0.2.0"
+version = "0.2.1"
 description = "Bub it. Build it. Tape-first coding agent CLI."
 authors = [{ name = "Chojan Shang", email = "psiace@apache.org" }]
 readme = "README.md"
@@ -24,7 +24,6 @@ dependencies = [
     "republic>=0.3.0",
     "rich>=13.0.0",
     "prompt-toolkit>=3.0.0",
-    "blinker>=1.8.2",
     "python-telegram-bot>=21.0",
     "html2markdown>=0.1.7",
     "loguru>=0.7.2",
@@ -36,6 +35,9 @@ dependencies = [
     "fastapi>=0.129.0",
     "uvicorn[standard]>=0.40.0",
     "httpx>=0.28.1",
+    "discord-py>=2.6.4",
+    "requests>=2.32.5",
+    "python-dotenv>=1.2.1",
 ]
 
 [project.urls]
@@ -78,8 +80,7 @@ paths = ["src"]
 [tool.mypy]
 files = ["src"]
 exclude = [
-    '^src/bub/skills/skill-creator/scripts/.*$',
-    '^src/bub/skills/skill-installer/scripts/.*$',
+    '^src/bub/skills/.*$',
 ]
 disallow_untyped_defs = false
 disallow_any_unimported = false
@@ -98,8 +99,7 @@ target-version = "py312"
 line-length = 120
 fix = true
 extend-exclude = [
-    "src/bub/skills/skill-creator/scripts",
-    "src/bub/skills/skill-installer/scripts",
+    "src/bub/skills",
     "backup",
 ]
 
@@ -143,6 +143,7 @@ ignore = [
     "E731",
     # Avoid noisy exception-message rule for CLI/tool errors
     "TRY003",
+    "S603",
 ]
 
 [tool.ruff.lint.per-file-ignores]

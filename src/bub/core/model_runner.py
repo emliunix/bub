@@ -64,7 +64,7 @@ class ModelRunner:
         max_tokens: int,
         model_timeout_seconds: int | None,
         base_system_prompt: str,
-        workspace_system_prompt: str,
+        get_workspace_system_prompt: Callable[[], str],
     ) -> None:
         self._tape = tape
         self._router = router
@@ -77,7 +77,7 @@ class ModelRunner:
         self._max_tokens = max_tokens
         self._model_timeout_seconds = model_timeout_seconds
         self._base_system_prompt = base_system_prompt.strip()
-        self._workspace_system_prompt = workspace_system_prompt.strip()
+        self._get_workspace_system_prompt = get_workspace_system_prompt
         self._expanded_skills: dict[str, str] = {}
 
     def reset_context(self) -> None:
@@ -193,24 +193,14 @@ class ModelRunner:
         blocks: list[str] = []
         if self._base_system_prompt:
             blocks.append(self._base_system_prompt)
-        if self._workspace_system_prompt:
-            blocks.append(self._workspace_system_prompt)
+        if workspace_system_prompt := self._get_workspace_system_prompt():
+            blocks.append(workspace_system_prompt)
         blocks.append(_runtime_contract())
         blocks.append(render_tool_prompt_block(self._tool_view))
 
         compact_skills = render_compact_skills(self._list_skills())
         if compact_skills:
             blocks.append(compact_skills)
-
-        if self._expanded_skills:
-            lines = ["<skill_details>"]
-            for name, body in sorted(self._expanded_skills.items()):
-                lines.append(f'  <skill name="{name}">')
-                for line in body.splitlines():
-                    lines.append(f"    {line}")
-                lines.append("  </skill>")
-            lines.append("</skill_details>")
-            blocks.append("\n".join(lines))
         return "\n\n".join(block for block in blocks if block.strip())
 
     def _activate_hints(self, text: str) -> None:

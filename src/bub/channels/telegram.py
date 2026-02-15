@@ -21,46 +21,71 @@ def exclude_none(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
+def _message_type(message: Message) -> str:
+    if getattr(message, "text", None):
+        return "text"
+    if getattr(message, "photo", None):
+        return "photo"
+    if getattr(message, "audio", None):
+        return "audio"
+    if getattr(message, "sticker", None):
+        return "sticker"
+    if getattr(message, "video", None):
+        return "video"
+    if getattr(message, "voice", None):
+        return "voice"
+    if getattr(message, "document", None):
+        return "document"
+    if getattr(message, "video_note", None):
+        return "video_note"
+    return "unknown"
+
+
 class BubMessageFilter(filters.MessageFilter):
     GROUP_CHAT_TYPES: ClassVar[set[str]] = {"group", "supergroup"}
 
+    def _content(self, message: Message) -> str:
+        return (getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
+
     def filter(self, message: Message) -> bool | dict[str, list[Any]] | None:
-        # Only text messages are allowed
-        text = message.text
-        if not text:
+        msg_type = _message_type(message)
+        if msg_type == "unknown":
             return False
 
-        # Private chat: accept all messages except for commands (starting with /)
+        # Private chat: process all non-command messages and bot commands.
         if message.chat.type == "private":
-            return not filters.COMMAND.filter(message)
+            return True
 
-        # Group chat: only allow `/bot`, mention bot, or reply to bot messages.
+        # Group chat: only process when explicitly addressed to the bot.
         if message.chat.type in self.GROUP_CHAT_TYPES:
             bot = message.get_bot()
             bot_id = bot.id
             bot_username = (bot.username or "").lower()
-            if text.startswith("/bot "):
-                return True
 
-            if self._mentions_bot(message, text, bot_id, bot_username):
-                return not filters.COMMAND.filter(message)
+            mentions_bot = self._mentions_bot(message, bot_id, bot_username)
+            reply_to_bot = self._is_reply_to_bot(message, bot_id)
 
-            if self._is_reply_to_bot(message, bot_id):
-                return not filters.COMMAND.filter(message)
+            if msg_type != "text" and not getattr(message, "caption", None):
+                return reply_to_bot
+
+            return mentions_bot or reply_to_bot
 
         return False
 
-    @staticmethod
-    def _mentions_bot(message: Message, text: str, bot_id: int, bot_username: str) -> bool:
-        for entity in message.entities or ():
+    def _mentions_bot(self, message: Message, bot_id: int, bot_username: str) -> bool:
+        content = self._content(message).lower()
+        mentions_by_keyword = "bub" in content or bool(bot_username and f"@{bot_username}" in content)
+
+        entities = [*(getattr(message, "entities", None) or ()), *(getattr(message, "caption_entities", None) or ())]
+        for entity in entities:
             if entity.type == "mention" and bot_username:
-                mention_text = text[entity.offset : entity.offset + entity.length]
+                mention_text = content[entity.offset : entity.offset + entity.length]
                 if mention_text.lower() == f"@{bot_username}":
                     return True
                 continue
             if entity.type == "text_mention" and entity.user and entity.user.id == bot_id:
                 return True
-        return False
+        return mentions_by_keyword
 
     @staticmethod
     def _is_reply_to_bot(message: Message, bot_id: int) -> bool:
@@ -106,8 +131,8 @@ class TelegramChannel(BaseChannel):
             builder = builder.proxy(self._config.proxy).get_updates_proxy(self._config.proxy)
         self._app = builder.build()
         self._app.add_handler(CommandHandler("start", self._on_start))
-        self._app.add_handler(CommandHandler("help", self._on_help))
-        self._app.add_handler(MessageHandler(BubMessageFilter(), self._on_text, block=False))
+        self._app.add_handler(CommandHandler("bub", self._on_text, has_args=True, block=False))
+        self._app.add_handler(MessageHandler(BubMessageFilter() & ~filters.COMMAND, self._on_text, block=False))
         await self._app.initialize()
         await self._app.start()
         updater = self._app.updater
@@ -162,7 +187,7 @@ class TelegramChannel(BaseChannel):
             text = md(raw_content)
             parse_mode = "MarkdownV2"
 
-        # In group chats, reply to the original message if reply_to_message_id is provided
+        # In group chats, reply to original message if reply_to_message_id is provided
         if message.reply_to_message_id is not None:
             await self._app.bot.send_message(
                 chat_id=int(message.chat_id),
@@ -187,16 +212,6 @@ class TelegramChannel(BaseChannel):
             return
         await update.message.reply_text("Bub is online. Send text to start.")
 
-    async def _on_help(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-        if update.message is None:
-            return
-        await update.message.reply_text(
-            "Commands:\n"
-            "/start - show startup message\n"
-            "/help - show this help\n\n"
-            "All plain text is routed to Bub runtime."
-        )
-
     async def _on_text(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.message is None or update.effective_user is None:
             return
@@ -212,8 +227,7 @@ class TelegramChannel(BaseChannel):
             return
 
         text = update.message.text or ""
-        # Strip /bot prefix if present
-        if text.startswith("/bot "):
+        if text.startswith("/bot ") or text.startswith("/bub "):
             text = text[5:]
 
         logger.info(
@@ -221,7 +235,7 @@ class TelegramChannel(BaseChannel):
             chat_id,
             user.id,
             user.username or "",
-            text[:100],  # Log first 100 chars to avoid verbose logs
+            text[:100],
         )
 
         self._start_typing(chat_id)

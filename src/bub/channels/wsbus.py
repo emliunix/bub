@@ -516,20 +516,3 @@ class AgentBusClient:
             _task_ref.append(asyncio.create_task(self.unsubscribe("outbound:*")))
 
         return _unsubscribe
-
-
-class MessageBusAdapter:
-    """Adapter to use AgentBusClient as a MessageBus."""
-
-    def __init__(self, server: AgentBusServer) -> None:
-        self._server = server
-        self._inbound_handlers: list[Callable[[InboundMessage], Coroutine[Any, Any, None]]] = []
-        self._outbound_handlers: list[Callable[[OutboundMessage], Coroutine[Any, Any, None]]] = []
-
-    def on_inbound(self, handler: Callable[[InboundMessage], Coroutine[Any, Any, None]]) -> None:
-        """Register handler for inbound messages. Returns unsubscribe function."""
-        self._inbound_handlers.append(handler)
-
-    def on_outbound(self, handler: Callable[[OutboundMessage], Coroutine[Any, Any, None]]) -> None:
-        """Register handler for outbound messages. Returns unsubscribe function."""
-        self._outbound_handlers.append(handler)

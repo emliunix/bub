@@ -149,7 +149,7 @@ from bub.config import TapeSettings, BusSettings, AgentSettings, Settings
 tape = TapeSettings()          # BUB_TAPE_* env vars
 bus = BusSettings()           # BUB_BUS_* env vars
 agent = AgentSettings()       # BUB_AGENT_* env vars
-bus = BusSettings()           # BUB_BUS_* env vars  
+bus = BusSettings()           # BUB_BUS_* env vars
 chat = ChatSettings()          # BUB_* env vars
 
 # Unified (backwards compatible)

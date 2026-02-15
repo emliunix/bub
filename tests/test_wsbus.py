@@ -32,7 +32,7 @@ class TestAgentBusClient:
         client = AgentBusClient("ws://localhost:7895")
         await client.connect()
 
-        await client.initialize("test-client", {"name": "test", "version": "1.0.0"})
+        await client.initialize("test-client")
 
         await client.disconnect()
         await server.stop_server()

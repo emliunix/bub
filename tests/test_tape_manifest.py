@@ -1,6 +1,5 @@
 """Unit tests for tape manifest."""
 
-
 import pytest
 
 from bub.tape.store import FileTapeStore
