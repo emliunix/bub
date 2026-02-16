@@ -16,6 +16,14 @@ class _DummyRuntime:
 
         self.settings = _Settings()
 
+        # Add tape_settings for InteractiveCli
+        class _TapeSettings:
+            @staticmethod
+            def resolve_home() -> Path:
+                return Path.cwd()
+
+        self.tape_settings = _TapeSettings()
+
     def get_session(self, _session_id: str):
         class _Tape:
             @staticmethod

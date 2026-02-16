@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import quote, unquote
 
+from loguru import logger
 from republic.tape import TapeEntry
 
 from bub.tape.types import Anchor, Manifest, TapeMeta
@@ -172,9 +173,11 @@ class FileTapeStore:
 
     def create_tape(self, tape: str, title: str | None = None) -> str:
         """Create a new tape. Returns the tape ID."""
+        logger.debug("tape.store.create tape={} title={}", tape, title)
         manifest = self._load_manifest()
         manifest.create_tape(tape, title=title)
         self.save_manifest(manifest)
+        logger.info("tape.store.created tape={}", tape)
         return tape
 
     def get_title(self, tape: str) -> str | None:
@@ -205,19 +208,24 @@ class FileTapeStore:
         self, tape: str, from_entry_id: int | None = None, to_entry_id: int | None = None
     ) -> list[TapeEntry] | None:
         """Read tape entries, optionally by range."""
+        logger.debug("tape.store.read tape={} from={} to={}", tape, from_entry_id, to_entry_id)
         tape_file = self._make_tape_file(tape)
         if not tape_file.path.exists():
+            logger.warning("tape.store.not_found tape={}", tape)
             return None
         entries = tape_file.read()
         if from_entry_id is not None:
             entries = [e for e in entries if e.id >= from_entry_id]
         if to_entry_id is not None:
             entries = [e for e in entries if e.id <= to_entry_id]
+        logger.debug("tape.store.read_complete tape={} count={}", tape, len(entries))
         return entries
 
     def append(self, tape: str, entry: TapeEntry) -> None:
         """Append an entry to a tape (auto-creates tape if needed)."""
+        logger.debug("tape.store.append tape={} kind={}", tape, entry.kind)
         self._make_tape_file(tape).append(entry)
+        logger.debug("tape.store.append_complete tape={} kind={}", tape, entry.kind)
 
     def fork(
         self,
@@ -234,10 +242,18 @@ class FileTapeStore:
             from_entry: Fork from (tape_id, entry_id) tuple - partial copy
             from_anchor: Fork from anchor name (resolves to entry_id)
         """
+        logger.debug(
+            "tape.store.fork from_tape={} new_tape={} from_entry={} from_anchor={}",
+            from_tape,
+            new_tape_id,
+            from_entry,
+            from_anchor,
+        )
         manifest = self._load_manifest()
         if from_anchor is not None:
             anchor = manifest.get_anchor(from_anchor)
             if anchor is None:
+                logger.error("tape.store.fork_anchor_not_found from_tape={} anchor={}", from_tape, from_anchor)
                 raise ValueError(f"Anchor not found: {from_anchor}")
             from_entry = (anchor.tape_id, anchor.entry_id)
         elif from_entry is None:
@@ -253,19 +269,25 @@ class FileTapeStore:
         fork_start_id = source_file._next_id()
         manifest.fork_tape(source_tape, new_tape_id, parent=(source_tape, fork_start_id))
         self.save_manifest(manifest)
+        logger.info("tape.store.fork_complete from_tape={} new_tape={}", from_tape, new_tape_id)
         return new_tape_id
 
     def archive(self, tape_id: str) -> Path | None:
         """Archive a tape."""
+        logger.debug("tape.store.archive tape_id={}", tape_id)
         tape_file = self._make_tape_file(tape_id)
         manifest = self._load_manifest()
         manifest.delete_tape(tape_id)
         self.save_manifest(manifest)
-        return tape_file.archive()
+        result = tape_file.archive()
+        logger.info("tape.store.archived tape_id={} path={}", tape_id, result)
+        return result
 
     def reset(self, tape_id: str) -> None:
         """Reset (clear) a tape."""
-        return self._make_tape_file(tape_id).reset()
+        logger.debug("tape.store.reset tape_id={}", tape_id)
+        self._make_tape_file(tape_id).reset()
+        logger.info("tape.store.reset_complete tape_id={}", tape_id)
 
     # -------------------------------------------------------------------------
     # Anchor operations
@@ -273,36 +295,51 @@ class FileTapeStore:
 
     def create_anchor(self, name: str, tape_id: str, entry_id: int, state: dict[str, object] | None = None) -> None:
         """Create an anchor."""
+        logger.debug("tape.store.create_anchor name={} tape_id={} entry_id={}", name, tape_id, entry_id)
         manifest = self._load_manifest()
         manifest.create_anchor(name, tape_id, entry_id, state)
         self.save_manifest(manifest)
+        logger.info("tape.store.anchor_created name={} tape_id={} entry_id={}", name, tape_id, entry_id)
 
     def get_anchor(self, name: str) -> Anchor | None:
         """Get an anchor by name."""
+        logger.debug("tape.store.get_anchor name={}", name)
         manifest = self._load_manifest()
-        return manifest.get_anchor(name)
+        anchor = manifest.get_anchor(name)
+        logger.debug("tape.store.get_anchor_result name={} found={}", name, anchor is not None)
+        return anchor
 
     def update_anchor(self, name: str, entry_id: int | None = None, state: dict[str, object] | None = None) -> None:
         """Update an anchor."""
+        logger.debug("tape.store.update_anchor name={} entry_id={}", name, entry_id)
         manifest = self._load_manifest()
         manifest.update_anchor(name, entry_id=entry_id, state=state)
         self.save_manifest(manifest)
+        logger.info("tape.store.anchor_updated name={} entry_id={}", name, entry_id)
 
     def delete_anchor(self, name: str) -> None:
         """Delete an anchor."""
+        logger.debug("tape.store.delete_anchor name={}", name)
         manifest = self._load_manifest()
         manifest.delete_anchor(name)
         self.save_manifest(manifest)
+        logger.info("tape.store.anchor_deleted name={}", name)
 
     def list_anchors(self) -> list[Anchor]:
         """List all anchors."""
+        logger.debug("tape.store.list_anchors")
         manifest = self._load_manifest()
-        return list(manifest.anchors.values())
+        anchors = list(manifest.anchors.values())
+        logger.debug("tape.store.list_anchors_result count={}", len(anchors))
+        return anchors
 
     def resolve_anchor(self, name: str) -> int:
         """Resolve anchor name to entry ID."""
+        logger.debug("tape.store.resolve_anchor name={}", name)
         manifest = self._load_manifest()
-        return manifest.resolve_anchor(name)
+        result = manifest.resolve_anchor(name)
+        logger.debug("tape.store.resolve_anchor_result name={} entry_id={}", name, result)
+        return result
 
     # -------------------------------------------------------------------------
     # Internal methods

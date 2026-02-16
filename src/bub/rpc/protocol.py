@@ -113,8 +113,6 @@ class AgentBusServerCallbacks(Protocol):
     async def handle_unsubscribe(self, params: UnsubscribeParams) -> UnsubscribeResult: ...
     async def handle_ping(self, params: PingParams) -> PingResult: ...
     async def send_message(self, params: SendMessageParams) -> SendMessageResult: ...
-    async def handle_publish_inbound(self, params: PublishInboundParams) -> PublishInboundResult: ...
-    async def handle_publish_outbound(self, params: PublishOutboundParams) -> PublishOutboundResult: ...
 
 
 def register_server_callbacks(framework: JSONRPCFramework, callbacks: AgentBusServerCallbacks) -> None:
@@ -148,23 +146,11 @@ def register_server_callbacks(framework: JSONRPCFramework, callbacks: AgentBusSe
         result_model = await callbacks.handle_ping(params_model)
         return result_model.model_dump(by_alias=True)
 
-    async def _handle_publish_inbound(params: dict[str, object]) -> dict[str, object]:
-        params_model = PublishInboundParams.model_validate(params)
-        result_model = await callbacks.handle_publish_inbound(params_model)
-        return result_model.model_dump(by_alias=True)
-
-    async def _handle_publish_outbound(params: dict[str, object]) -> dict[str, object]:
-        params_model = PublishOutboundParams.model_validate(params)
-        result_model = await callbacks.handle_publish_outbound(params_model)
-        return result_model.model_dump(by_alias=True)
-
     framework.register_method("initialize", _handle_initialize)
     framework.register_method("subscribe", _handle_subscribe)
     framework.register_method("unsubscribe", _handle_unsubscribe)
     framework.register_method("ping", _handle_ping)
     framework.register_method("sendMessage", _send_message)
-    framework.register_method("publishInbound", _handle_publish_inbound)
-    framework.register_method("publishOutbound", _handle_publish_outbound)
 
 
 class AgentBusClientCallbacks(Protocol):
@@ -252,25 +238,14 @@ class AgentBusClientApi:
         result_dict = await self._framework.send_request("unsubscribe", params_dict)
         return UnsubscribeResult.model_validate(result_dict)
 
-    async def publish_inbound(self, params: PublishInboundParams) -> PublishInboundResult:
-        """Send publish inbound request.
+    async def send_message(self, params: SendMessageParams) -> SendMessageResult:
+        """Send message request.
 
-        Client-side: sends inbound message to server.
-        Server will broadcast to subscribers.
+        Client-side: sends message to server for broadcasting to subscribers.
         """
         params_dict = params.model_dump(by_alias=True)
-        result_dict = await self._framework.send_request("publishInbound", params_dict)
-        return PublishInboundResult.model_validate(result_dict)
-
-    async def publish_outbound(self, params: PublishOutboundParams) -> PublishOutboundResult:
-        """Send publish outbound request.
-
-        Client-side: sends outbound message to server.
-        Server will broadcast to subscribers.
-        """
-        params_dict = params.model_dump(by_alias=True)
-        result_dict = await self._framework.send_request("publishOutbound", params_dict)
-        return PublishOutboundResult.model_validate(result_dict)
+        result_dict = await self._framework.send_request("sendMessage", params_dict)
+        return SendMessageResult.model_validate(result_dict)
 
 
 __all__ = [
@@ -285,10 +260,6 @@ __all__ = [
     "PingParams",
     "PingResult",
     "ProtocolModel",
-    "PublishInboundParams",
-    "PublishInboundResult",
-    "PublishOutboundParams",
-    "PublishOutboundResult",
     "SendMessageParams",
     "SendMessageResult",
     "ServerCapabilities",

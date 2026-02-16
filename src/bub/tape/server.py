@@ -273,7 +273,7 @@ def _entry_from_dict(data: dict[str, Any]) -> Any:
     elif kind == "system":
         return TapeEntry.system(content=payload.get("content", ""))
     elif kind == "tool_call":
-        return TapeEntry.tool_call(payload.get("tool_calls", []))
+        return TapeEntry.tool_call(payload.get("calls", []))
     elif kind == "tool_result":
         return TapeEntry.tool_result(payload.get("results", []))
     else:

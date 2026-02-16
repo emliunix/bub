@@ -179,14 +179,18 @@ class ModelRunner:
                     tools=self._tools,
                     extra_headers=self.DEFAULT_HEADERS,
                 )
-                return _ChatResult.from_tool_auto(output)
+                result = _ChatResult.from_tool_auto(output)
+                if result.error:
+                    logger.info("model.call.error model={} error={}", self._model, result.error)
+                return result
         except TimeoutError:
+            logger.warning("model.call.timeout model={} timeout={}s", self._model, self._model_timeout_seconds)
             return _ChatResult(
                 text="",
                 error=f"model_timeout: no response within {self._model_timeout_seconds}s",
             )
         except Exception as exc:
-            logger.exception("model.call.error")
+            logger.exception("model.call.exception model={}", self._model)
             return _ChatResult(text="", error=f"model_call_error: {exc!s}")
 
     def _render_system_prompt(self) -> str:

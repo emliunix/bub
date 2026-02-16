@@ -17,7 +17,7 @@ class _Runtime:
     settings = _Settings()
 
 
-class _ChannelRaisesOnStop(BaseChannel[object]):
+class _ChannelRaisesOnStop(BaseChannel):
     name = "bad"
 
     async def start(self, on_receive):  # type: ignore[override]

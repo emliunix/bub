@@ -6,8 +6,8 @@ import subprocess
 import sys
 import time
 
-from bub.channels.wsbus import AgentBusClient
 from bub.channels.events import InboundMessage, OutboundMessage
+from bub.channels.wsbus import AgentBusClient
 
 
 def disable_proxy_env():
@@ -51,7 +51,7 @@ def run_systemd_daemon():
     )
 
     if result.returncode != 0:
-        print(f"❌ Failed to start systemd daemon:")
+        print("❌ Failed to start systemd daemon:")
         print(f"   stdout: {result.stdout}")
         print(f"   stderr: {result.stderr}")
         return None
@@ -63,7 +63,7 @@ def run_systemd_daemon():
     else:
         unit_name = "bub-test-wsbus.service"
 
-    print(f"✅ Systemd daemon started")
+    print("✅ Systemd daemon started")
     print(f"   Unit: {unit_name}\n")
 
     return unit_name
@@ -130,7 +130,7 @@ async def test_pubsub(unit_name: str):
     await asyncio.sleep(2)
 
     # Check results
-    print(f"\n📊 Test Results:")
+    print("\n📊 Test Results:")
     print(f"   Inbound messages received: {len(received_messages)}")
     print(f"   Outbound messages received: {len(received_outbound)}")
 

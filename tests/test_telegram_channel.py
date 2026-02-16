@@ -33,9 +33,17 @@ class DummyMessage:
 
 @pytest.mark.asyncio
 async def test_on_text_denies_chat_not_in_allowlist() -> None:
+    from bub.channels.telegram import TelegramConfig
+
     runtime = _Runtime()
     runtime.settings.telegram_allow_chats = ["123"]
-    channel = TelegramChannel(runtime)  # type: ignore[arg-type]
+    config = TelegramConfig(
+        token=runtime.settings.telegram_token,
+        allow_from=set(runtime.settings.telegram_allow_from),
+        allow_chats=set(runtime.settings.telegram_allow_chats),
+        proxy=runtime.settings.telegram_proxy,
+    )
+    channel = TelegramChannel(runtime, config)  # type: ignore[arg-type]
 
     message = DummyMessage(chat_id=999, text="hello")
     update = SimpleNamespace(
@@ -49,9 +57,17 @@ async def test_on_text_denies_chat_not_in_allowlist() -> None:
 
 @pytest.mark.asyncio
 async def test_on_text_invokes_receive_handler_for_allowed_message() -> None:
+    from bub.channels.telegram import TelegramConfig
+
     runtime = _Runtime()
     runtime.settings.telegram_allow_chats = ["999"]
-    channel = TelegramChannel(runtime)  # type: ignore[arg-type]
+    config = TelegramConfig(
+        token=runtime.settings.telegram_token,
+        allow_from=set(runtime.settings.telegram_allow_from),
+        allow_chats=set(runtime.settings.telegram_allow_chats),
+        proxy=runtime.settings.telegram_proxy,
+    )
+    channel = TelegramChannel(runtime, config)  # type: ignore[arg-type]
 
     message = DummyMessage(chat_id=999, text="hello")
     update = SimpleNamespace(
@@ -83,9 +99,17 @@ async def test_on_text_invokes_receive_handler_for_allowed_message() -> None:
 
 @pytest.mark.asyncio
 async def test_on_text_always_stops_typing() -> None:
+    from bub.channels.telegram import TelegramConfig
+
     runtime = _Runtime()
     runtime.settings.telegram_allow_chats = ["999"]
-    channel = TelegramChannel(runtime)  # type: ignore[arg-type]
+    config = TelegramConfig(
+        token=runtime.settings.telegram_token,
+        allow_from=set(runtime.settings.telegram_allow_from),
+        allow_chats=set(runtime.settings.telegram_allow_chats),
+        proxy=runtime.settings.telegram_proxy,
+    )
+    channel = TelegramChannel(runtime, config)  # type: ignore[arg-type]
 
     message = DummyMessage(chat_id=999, text="hello")
     update = SimpleNamespace(

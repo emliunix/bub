@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
 
 import discord
 from discord.ext import commands
@@ -22,7 +20,7 @@ def exclude_none(d: dict[str, Any]) -> dict[str, Any]:
 class BubMessageFilter:
     """Message filter for Discord."""
 
-    def __init__(self, config: "DiscordConfig") -> None:
+    def __init__(self, config: DiscordConfig) -> None:
         self._config = config
 
     def filter(self, message: discord.Message) -> bool:

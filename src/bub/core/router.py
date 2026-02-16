@@ -355,18 +355,9 @@ class InputRouter:
         elapsed_ms: int,
         origin: str,
     ) -> None:
-        self._tape.append_event(
-            "command",
-            {
-                "origin": origin,
-                "kind": command.kind,
-                "raw": command.raw,
-                "name": command.name,
-                "status": status,
-                "elapsed_ms": elapsed_ms,
-                "output": output,
-            },
-        )
+        # Commands are not recorded in the tape to keep it clean
+        # Only model interactions and their results are recorded
+        pass
 
     def render_failure_context(self, result: CommandExecutionResult) -> str:
         return result.block()

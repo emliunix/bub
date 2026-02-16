@@ -10,6 +10,8 @@ from bub.channels.telegram import TelegramChannel
 
 
 def _build_channel() -> TelegramChannel:
+    from bub.channels.telegram import TelegramConfig
+
     runtime = SimpleNamespace(
         settings=SimpleNamespace(
             telegram_token="token",  # noqa: S106
@@ -18,7 +20,13 @@ def _build_channel() -> TelegramChannel:
             telegram_proxy=None,
         )
     )
-    return TelegramChannel(runtime)
+    config = TelegramConfig(
+        token=runtime.settings.telegram_token,
+        allow_from=set(runtime.settings.telegram_allow_from),
+        allow_chats=set(runtime.settings.telegram_allow_chats),
+        proxy=runtime.settings.telegram_proxy,
+    )
+    return TelegramChannel(runtime, config)
 
 
 def _build_message(*, text: str = "hello", chat_id: int = 123, message_id: int = 10) -> SimpleNamespace:

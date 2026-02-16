@@ -17,7 +17,7 @@ class _Runtime:
     settings = _Settings()
 
 
-class _FakeChannel(BaseChannel[object]):
+class _FakeChannel(BaseChannel):
     name = "fake"
 
     def __init__(self, runtime) -> None:

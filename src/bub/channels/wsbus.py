@@ -31,10 +31,6 @@ from bub.rpc.protocol import (
     InitializeResult,
     PingParams,
     PingResult,
-    PublishInboundParams,
-    PublishInboundResult,
-    PublishOutboundParams,
-    PublishOutboundResult,
     SendMessageParams,
     SendMessageResult,
     ServerCapabilities,
@@ -159,31 +155,6 @@ class AgentConnection:
         stop_propagation = await self._server.publish(params.topic, cast(dict, params.payload))
         return SendMessageResult(success=True, stop_propagation=stop_propagation)
 
-    async def handle_publish_inbound(self, params: PublishInboundParams) -> PublishInboundResult:
-        """Handle publish inbound request - broadcast to all subscribers."""
-        self._check_initialized()
-        topic = f"inbound:{params.chat_id}"
-        payload = {
-            "channel": params.channel,
-            "senderId": params.sender_id,
-            "chatId": params.chat_id,
-            "content": params.content,
-        }
-        await self._server.publish(topic, payload)
-        return PublishInboundResult(success=True)
-
-    async def handle_publish_outbound(self, params: PublishOutboundParams) -> PublishOutboundResult:
-        """Handle publish outbound request - broadcast to all subscribers."""
-        self._check_initialized()
-        topic = f"outbound:{params.chat_id}"
-        payload = {
-            "channel": params.channel,
-            "chatId": params.chat_id,
-            "content": params.content,
-        }
-        await self._server.publish(topic, payload)
-        return PublishOutboundResult(success=True)
-
 
 class AgentBusServer:
     """JSON-RPC 2.0 WebSocket server for agent communication."""
@@ -246,18 +217,45 @@ class AgentBusServer:
 
         Returns True if propagation should stop, False otherwise.
         """
+        logger.info("wsbus.server.publish topic={} payload_keys={}", topic, list(payload.keys()))
+        matched_peers: list[str] = []
         for other_conn in self._connections.values():
             if other_conn.initialized and self._topic_matches(topic, other_conn.subscriptions):
+                matched_peers.append(other_conn.client_id or other_conn.conn_id)
+                logger.info("wsbus.server.publish sending to peer={}", other_conn.client_id or other_conn.conn_id)
                 send_params = SendMessageParams(topic=topic, payload=cast(dict[str, object], payload))
                 result = await other_conn.api.send_message(send_params)
                 if result.stop_propagation:
+                    logger.info(
+                        "wsbus.publish topic={} peers={} matched={} stopped_at={}",
+                        topic,
+                        len(matched_peers),
+                        matched_peers,
+                        other_conn.client_id or other_conn.conn_id,
+                    )
                     return True
+
+        if matched_peers:
+            logger.info(
+                "wsbus.publish topic={} peers={} matched={}",
+                topic,
+                len(matched_peers),
+                matched_peers,
+            )
+        else:
+            logger.info("wsbus.publish topic={} peers=0 (no subscribers)", topic)
+
         return False
 
     async def publish_inbound(self, message: InboundMessage) -> None:
         """Publish inbound message."""
         topic = f"inbound:{message.chat_id}"
-        payload = {"chatId": message.chat_id, "content": message.content, "senderId": message.sender_id}
+        payload = {
+            "channel": message.channel,
+            "chatId": message.chat_id,
+            "content": message.content,
+            "senderId": message.sender_id,
+        }
         logger.debug(
             "wsbus.client.publish_inbound topic={} channel={} chat_id={} sender_id={} content_len={}",
             topic,
@@ -281,38 +279,11 @@ class AgentBusServer:
         )
         await self.publish(topic, payload)
 
-    async def start_with_telegram(
-        self,
-        token: str,
-        allow_from: set[str] | None = None,
-        allow_chats: set[str] | None = None,
-        proxy: str | None = None,
-    ) -> None:
-        """Start bus server with embedded telegram upstream channel."""
-        from bub.channels.telegram import TelegramChannel, TelegramConfig
-
-        telegram_config = TelegramConfig(
-            token=token,
-            allow_from=allow_from or set(),
-            allow_chats=allow_chats or set(),
-            proxy=proxy,
-        )
-        telegram = TelegramChannel(self, telegram_config)
-
-        await telegram.start()
-        self._telegram_channel = telegram
-        logger.info("wsbus.telegram.started")
-
-    async def stop_with_telegram(self) -> None:
-        """Stop embedded telegram channel."""
-        if hasattr(self, "_telegram_channel"):
-            await self._telegram_channel.stop()
-
 
 class AgentBusClient:
-    """JSON-RPC 2.0 WebSocket client for agent communication."""
+    """JSON-RPC 2.0 WebSocket client for agent communication with auto-reconnect."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, auto_reconnect: bool = True, max_reconnect_delay: float = 30.0) -> None:
         self._client_id = f"client-{uuid.uuid4().hex}"
         self._url = url
         self._ws: Any = None
@@ -322,13 +293,48 @@ class AgentBusClient:
         self._notification_handlers: dict[str, list[Callable[[str, dict[str, Any]], Any]]] = {}
         self._pending_tasks: list[asyncio.Task[Any]] = []
         self._initialized = False
+        self._auto_reconnect = auto_reconnect
+        self._max_reconnect_delay = max_reconnect_delay
+        self._reconnect_delay = 1.0  # Initial delay
+        self._reconnect_attempts = 0
+        self._subscribed_topics: set[str] = set()  # Track subscriptions for reconnect
+        self._stop_event = asyncio.Event()
+        self._initialized_client_id: str | None = None  # Store client_id for reconnect
 
     @property
     def url(self) -> str:
         return self._url
 
     async def connect(self) -> None:
-        """Connect to server."""
+        """Connect to server with auto-reconnect support."""
+        while not self._stop_event.is_set():
+            try:
+                await self._connect_once()
+                # Reset reconnect delay on successful connection
+                self._reconnect_delay = 1.0
+                self._reconnect_attempts = 0
+                return
+            except (websockets.exceptions.WebSocketException, ConnectionRefusedError, OSError) as e:
+                if not self._auto_reconnect:
+                    raise
+                self._reconnect_attempts += 1
+                logger.warning(
+                    "wsbus.client.connect_failed attempt={} delay={:.1f}s error={}",
+                    self._reconnect_attempts,
+                    self._reconnect_delay,
+                    e,
+                )
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=self._reconnect_delay)
+                    # If stop_event is set, exit
+                    return
+                except TimeoutError:
+                    pass
+                # Exponential backoff with max limit
+                self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
+
+    async def _connect_once(self) -> None:
+        """Single connection attempt."""
         self._ws = await websockets.connect(self._url)
 
         # Create transport, framework, and protocol
@@ -339,19 +345,95 @@ class AgentBusClient:
         register_client_callbacks(self._framework, self)
 
         # Start listening for messages BEFORE sending requests
-        self._run_task = asyncio.create_task(self._framework.run())
+        self._run_task = asyncio.create_task(self._run_with_reconnect())
         await asyncio.sleep(0.01)  # Give framework time to start listening
 
         logger.info("wsbus.client.connected url={}", self._url)
 
-    async def disconnect(self) -> None:
-        """Disconnect from server."""
+    async def _run_with_reconnect(self) -> None:
+        """Run framework and handle disconnections."""
+        try:
+            if self._framework:
+                await self._framework.run()
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("wsbus.client.connection_closed")
+        except Exception as e:
+            logger.error("wsbus.client.run_error error={}", e)
+        finally:
+            if self._auto_reconnect and not self._stop_event.is_set():
+                logger.info("wsbus.client.triggering_reconnect")
+                # Clear state before reconnect
+                self._initialized = False
+                self._api = None
+                self._framework = None
+                self._ws = None
+                # Trigger reconnect
+                asyncio.create_task(self._reconnect())
+
+    async def _reconnect(self) -> None:
+        """Reconnect and restore subscriptions."""
+        if self._stop_event.is_set():
+            return
+
+        logger.info("wsbus.client.reconnecting subscriptions={}", len(self._subscribed_topics))
+
+        # Disconnect cleanly without setting stop_event (for internal reconnect)
         if self._framework:
             await self._framework.stop()
         if self._ws:
             await self._ws.close()
         if self._run_task:
             self._run_task.cancel()
+            try:
+                await self._run_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("wsbus.client.disconnected_for_reconnect")
+
+        # Clear state before reconnect
+        self._initialized = False
+        self._api = None
+        self._framework = None
+        self._ws = None
+
+        # Reconnect
+        await self.connect()
+
+        if self._stop_event.is_set():
+            return
+
+        # Re-initialize if we have a stored client_id
+        if self._initialized_client_id:
+            try:
+                await self.initialize(self._initialized_client_id)
+                logger.debug("wsbus.client.reinitialized client_id={}", self._initialized_client_id)
+            except Exception as e:
+                logger.error("wsbus.client.reinitialize_failed error={}", e)
+                return
+
+        # Restore subscriptions
+        for topic in self._subscribed_topics:
+            try:
+                await self.subscribe(topic)
+                logger.debug("wsbus.client.resubscribed topic={}", topic)
+            except Exception as e:
+                logger.error("wsbus.client.resubscribe_failed topic={} error={}", topic, e)
+
+        logger.info("wsbus.client.reconnect_complete")
+
+    async def disconnect(self) -> None:
+        """Disconnect from server."""
+        self._stop_event.set()
+        if self._framework:
+            await self._framework.stop()
+        if self._ws:
+            await self._ws.close()
+        if self._run_task:
+            self._run_task.cancel()
+            try:
+                await self._run_task
+            except asyncio.CancelledError:
+                pass
         logger.info("wsbus.client.disconnected")
 
     async def send_message(self, params: SendMessageParams) -> SendMessageResult:
@@ -376,6 +458,7 @@ class AgentBusClient:
             raise RuntimeError("Already initialized")
         result = await self._api.initialize(InitializeParams(client_id=client_id))
         self._initialized = True
+        self._initialized_client_id = client_id  # Store for reconnect
         return result
 
     async def subscribe(self, topic: str) -> SubscribeResult:
@@ -386,6 +469,8 @@ class AgentBusClient:
         # Store handler mapping for this subscription
         if topic not in self._notification_handlers:
             self._notification_handlers[topic] = []
+        # Track for reconnect
+        self._subscribed_topics.add(topic)
         return result
 
     async def unsubscribe(self, topic: str) -> UnsubscribeResult:
@@ -394,6 +479,8 @@ class AgentBusClient:
             raise RuntimeError("Not connected")
         # Remove handlers for this topic
         self._notification_handlers.pop(topic, None)
+        # Remove from tracked subscriptions
+        self._subscribed_topics.discard(topic)
         return await self._api.unsubscribe(UnsubscribeParams(topic=topic))
 
     def on_notification(self, pattern: str, handler: Callable[[str, dict[str, Any]], Any]) -> None:
@@ -423,7 +510,8 @@ class AgentBusClient:
                 for handler in handlers:
                     try:
                         if inspect.iscoroutinefunction(handler):
-                            task = asyncio.create_task(handler(topic, payload))
+                            # Create task with exception handling
+                            task = asyncio.create_task(self._run_handler_with_error_handling(handler, topic, payload))
                             tasks.append(task)
                         else:
                             handler(topic, payload)
@@ -436,53 +524,69 @@ class AgentBusClient:
 
         logger.debug("wsbus.client.notification_matched topic={} patterns={}", topic, matched_patterns)
 
+    async def _run_handler_with_error_handling(
+        self, handler: Callable[[str, dict[str, Any]], Any], topic: str, payload: dict[str, Any]
+    ) -> None:
+        """Run handler and catch any exceptions."""
+        try:
+            await handler(topic, payload)
+        except Exception:
+            logger.exception("wsbus.client.handler_execution_error topic={}", topic)
+
     async def publish_inbound(self, message: InboundMessage) -> None:
-        """Publish inbound message."""
+        """Publish inbound message using sendMessage."""
         if not self._api:
             raise RuntimeError("Not connected")
-        params = PublishInboundParams(
-            channel=message.channel,
-            sender_id=message.sender_id,
-            chat_id=message.chat_id,
-            content=message.content,
-        )
+        topic = f"inbound:{message.chat_id}"
+        payload: dict[str, object] = {
+            "channel": message.channel,
+            "senderId": message.sender_id,
+            "chatId": message.chat_id,
+            "content": message.content,
+        }
         logger.debug(
-            "wsbus.client.publish_inbound channel={} chat_id={} sender_id={} content_len={}",
+            "wsbus.client.publish_inbound topic={} channel={} chat_id={} sender_id={} content_len={}",
+            topic,
             message.channel,
             message.chat_id,
             message.sender_id,
             len(message.content),
         )
-        await self._api.publish_inbound(params)
+        await self._api.send_message(SendMessageParams(topic=topic, payload=payload))
 
     async def publish_outbound(self, message: OutboundMessage) -> None:
-        """Publish outbound message."""
+        """Publish outbound message using sendMessage."""
         if not self._api:
             raise RuntimeError("Not connected")
-        params = PublishOutboundParams(
-            channel=message.channel,
-            chat_id=message.chat_id,
-            content=message.content,
-        )
+        topic = f"outbound:{message.chat_id}"
+        payload: dict[str, object] = {
+            "channel": message.channel,
+            "chatId": message.chat_id,
+            "content": message.content,
+        }
         logger.debug(
-            "wsbus.client.publish_outbound channel={} chat_id={} content_len={}",
+            "wsbus.client.publish_outbound topic={} channel={} chat_id={} content_len={}",
+            topic,
             message.channel,
             message.chat_id,
             len(message.content),
         )
-        await self._api.publish_outbound(params)
+        await self._api.send_message(SendMessageParams(topic=topic, payload=payload))
 
     async def on_inbound(self, handler: Callable[[InboundMessage], Coroutine[Any, Any, None]]) -> Callable[[], None]:
         """Register handler for inbound messages. Returns unsubscribe function."""
 
         async def wrapper(topic: str, payload: dict[str, Any]) -> None:
+            logger.info("wsbus.client.on_inbound.wrapper received topic={}", topic)
             msg = InboundMessage(
                 channel=payload.get("channel", ""),
                 sender_id=payload.get("senderId", ""),
                 chat_id=payload.get("chatId", ""),
                 content=payload.get("content", ""),
             )
+            logger.info("wsbus.client.on_inbound.wrapper calling handler with msg.chat_id={}", msg.chat_id)
             await handler(msg)
+            logger.info("wsbus.client.on_inbound.wrapper handler done")
 
         await self.subscribe("inbound:*")
         self.on_notification("inbound:*", wrapper)

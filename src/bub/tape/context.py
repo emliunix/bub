@@ -12,10 +12,16 @@ from republic import TapeContext, TapeEntry
 def default_tape_context() -> TapeContext:
     """Return the default context selection for Bub."""
 
-    return TapeContext(select=_select_messages)
+    return TapeContext(anchor=None, select=_select_messages)
 
 
 def _select_messages(entries: Sequence[TapeEntry], _context: TapeContext) -> list[dict[str, Any]]:
+    """Reconstruct messages from tape entries in standard OpenAI format.
+
+    All messages produced by this function conform to the standard format
+    defined in bub.llm.format, ensuring compatibility with all LLM providers
+    when proper adapter functions are used.
+    """
     messages: list[dict[str, Any]] = []
     pending_calls: list[dict[str, Any]] = []
 
@@ -42,6 +48,7 @@ def _append_message_entry(messages: list[dict[str, Any]], entry: TapeEntry) -> N
 
 
 def _append_tool_call_entry(messages: list[dict[str, Any]], entry: TapeEntry) -> list[dict[str, Any]]:
+    """Append a tool call entry as an assistant message with tool_calls."""
     calls = _normalize_tool_calls(entry.payload.get("calls"))
     if calls:
         messages.append({"role": "assistant", "content": "", "tool_calls": calls})
@@ -65,20 +72,34 @@ def _build_tool_result_message(
     pending_calls: list[dict[str, Any]],
     index: int,
 ) -> dict[str, Any]:
+    """Build a tool result message in standard format.
+
+    Standard format requires 'tool_call_id' for all tool role messages.
+    If the corresponding tool_call cannot be found, generates a placeholder ID.
+    """
     message: dict[str, Any] = {"role": "tool", "content": _render_tool_result(result)}
-    if index >= len(pending_calls):
-        return message
 
-    call = pending_calls[index]
-    call_id = call.get("id")
-    if isinstance(call_id, str) and call_id:
-        message["tool_call_id"] = call_id
+    # Determine tool_call_id
+    if index < len(pending_calls):
+        call = pending_calls[index]
+        call_id = call.get("id")
+        if isinstance(call_id, str) and call_id:
+            message["tool_call_id"] = call_id
+        else:
+            # Invalid call_id, generate placeholder
+            message["tool_call_id"] = f"orphan_call_{index}"
 
-    function = call.get("function")
-    if isinstance(function, dict):
-        name = function.get("name")
-        if isinstance(name, str) and name:
-            message["name"] = name
+        # Add function name if available
+        function = call.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            if isinstance(name, str) and name:
+                message["name"] = name
+    else:
+        # No matching tool_call, generate placeholder ID
+        # This should not happen in normal operation but handles edge cases
+        message["tool_call_id"] = f"orphan_result_{index}"
+
     return message
 
 

@@ -18,15 +18,18 @@ class DummyMessageable:
 
 
 def _build_channel() -> DiscordChannel:
-    settings = SimpleNamespace(
-        discord_token="token",  # noqa: S106
-        discord_allow_from=[],
-        discord_allow_channels=[],
-        discord_command_prefix="!",
-        discord_proxy=None,
+    from bub.channels.discord import DiscordConfig
+
+    config = DiscordConfig(
+        token="token",  # noqa: S106
+        allow_from=set(),
+        allow_channels=set(),
+        command_prefix="!",
+        proxy=None,
     )
-    runtime = SimpleNamespace(settings=settings)
-    return DiscordChannel(runtime)  # type: ignore[arg-type]
+    # Create a dummy bus for the channel
+    dummy_bus = SimpleNamespace()
+    return DiscordChannel(dummy_bus, config)
 
 
 @pytest.mark.asyncio

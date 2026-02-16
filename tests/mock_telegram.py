@@ -7,10 +7,8 @@ and publishes inbound messages.
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import sys
-from typing import Any
 
 from bub.channels.events import InboundMessage
 from bub.channels.wsbus import AgentBusClient
@@ -122,10 +120,10 @@ async def main() -> None:
     url = sys.argv[1] if len(sys.argv) > 1 else "ws://localhost:7892"
     delay = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 
-    print(f"🚀 Mock Telegram Client")
+    print("🚀 Mock Telegram Client")
     print(f"   Connecting to: {url}")
     print(f"   Message delay: {delay}s")
-    print(f"   Press Ctrl+C to stop\n")
+    print("   Press Ctrl+C to stop\n")
 
     client = MockTelegramClient(url, bot_name="MockTelegram")
 

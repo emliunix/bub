@@ -107,16 +107,26 @@ class TapeService:
         self.handoff("session/start", state={"owner": "human"})
 
     def read_entries(self) -> list[TapeEntry]:
-        return cast(list[TapeEntry], self.tape.read_entries())
+        logger.debug("tape.service.read_entries tape={}", self._tape.name)
+        entries = cast(list[TapeEntry], self.tape.read_entries())
+        logger.debug("tape.service.read_entries_complete tape={} count={}", self._tape.name, len(entries))
+        return entries
 
     def handoff(self, name: str, *, state: dict[str, Any] | None = None) -> list[TapeEntry]:
-        return cast(list[TapeEntry], self.tape.handoff(name, state=state))
+        logger.debug("tape.service.handoff tape={} name={}", self._tape.name, name)
+        result = cast(list[TapeEntry], self.tape.handoff(name, state=state))
+        logger.info("tape.service.handoff_complete tape={} name={} entries={}", self._tape.name, name, len(result))
+        return result
 
     def append_event(self, name: str, data: dict[str, Any]) -> None:
+        logger.debug("tape.service.append_event tape={} name={}", self._tape.name, name)
         self.tape.append(TapeEntry.event(name, data=data))
+        logger.debug("tape.service.append_event_complete tape={} name={}", self._tape.name, name)
 
     def append_system(self, content: str) -> None:
+        logger.debug("tape.service.append_system tape={}", self._tape.name)
         self.tape.append(TapeEntry.system(content))
+        logger.debug("tape.service.append_system_complete tape={}", self._tape.name)
 
     def info(self) -> TapeInfo:
         entries = self._tape.read_entries()
@@ -135,6 +145,7 @@ class TapeService:
         )
 
     def reset(self, *, archive: bool = False) -> str:
+        logger.debug("tape.service.reset tape={} archive={}", self._tape.name, archive)
         archive_path: Path | None = None
         if archive and self._store is not None:
             archive_path = self._store.archive(self._tape.name)
@@ -143,7 +154,9 @@ class TapeService:
         if archive_path is not None:
             state["archived"] = str(archive_path)
         self._tape.handoff("session/start", state=state)
-        return f"Archived: {archive_path}" if archive_path else "ok"
+        result = f"Archived: {archive_path}" if archive_path else "ok"
+        logger.info("tape.service.reset_complete tape={} result={}", self._tape.name, result)
+        return result
 
     def anchors(self, *, limit: int = 20) -> list[AnchorSummary]:
         entries = [entry for entry in self._tape.read_entries() if entry.kind == "anchor"]

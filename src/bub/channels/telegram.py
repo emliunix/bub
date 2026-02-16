@@ -141,6 +141,10 @@ class TelegramChannel(BaseChannel):
         await updater.start_polling(drop_pending_updates=True, allowed_updates=["message"])
         logger.info("telegram.channel.polling")
 
+        # Register handler for outbound messages from the bus
+        self.bus.on_notification("outbound:*", self._handle_outbound_from_bus)
+        logger.info("telegram.channel.subscribed_to_outbound")
+
     async def stop(self) -> None:
         self._running = False
         for task in self._typing_tasks.values():
@@ -201,6 +205,24 @@ class TelegramChannel(BaseChannel):
                 text=text,
                 parse_mode=parse_mode,
             )
+
+    def _handle_outbound_from_bus(self, topic: str, payload: dict[str, Any]) -> None:
+        """Handle outbound message from bus to send to Telegram."""
+        if not self._running:
+            return
+
+        chat_id = payload.get("chatId", "")
+        content = payload.get("content", "")
+
+        if not chat_id or not content:
+            return
+
+        logger.debug("telegram.outbound_from_bus chat_id={} content_len={}", chat_id, len(content))
+
+        # Create OutboundMessage and send to Telegram
+        message = OutboundMessage(channel="telegram", chat_id=chat_id, content=content)
+        task = asyncio.create_task(self.send(message))
+        task.add_done_callback(lambda t: t.exception() or logger.info("telegram.sent chat_id={}", chat_id))
 
     async def _on_start(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.message is None:
