@@ -13,7 +13,7 @@ Core code lives under `src/bub/`:
 - `channels/`: channel bus/manager and Telegram adapter
 - `integrations/`: Republic client setup
 
-Tests are in `tests/`. Documentation is in `docs/`. See [docs/README.md](docs/README.md) for the full docs site structure. Legacy implementation is archived in `backup/src_bub_legacy/` (read-only reference).
+Tests are in `tests/`. Documentation is in `docs/`. See [docs/README.md](docs/README.md) for the full docs site structure. Legacy implementation is archived in `backup/src_bub_legacy/` (read-only reference). The `upstream/` directory contains external repositories cloned for reference and study purposes (e.g., comparing implementations or examining how other projects solve similar problems).
 
 ## Build, Test, and Development Commands
 

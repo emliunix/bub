@@ -25,6 +25,8 @@ nav:
   - Interactive CLI: cli.md
   - Telegram: telegram.md
   - Discord: discord.md
+  - Agent Protocol: agent-protocol.md
+  - Agent Federation: agent-federation.md
 
 plugins:
   - search
@@ -52,19 +54,20 @@ theme:
     - content.code.copy
     - content.code.select
 
-  markdown_extensions:
-    - admonition
-    - toc:
-        permalink: true
-    - pymdownx.tabbed:
-        alternate_style: true
-    - pymdownx.details
-    - pymdownx.highlight:
-        anchor_linenums: true
-    - pymdownx.inlinehilite
-    - pymdownx.snippets
-    - pymdownx.tasklist:
-        custom_checkbox: true
+markdown_extensions:
+  - tables
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tasklist:
+      custom_checkbox: true
 
 extra:
   social:
