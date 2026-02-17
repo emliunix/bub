@@ -10,6 +10,16 @@ from bub.channels.events import InboundMessage, OutboundMessage
 from bub.channels.wsbus import AgentBusClient, AgentBusServer
 
 
+def _server_url(server: AgentBusServer) -> str:
+    assert server._server is not None
+    for sock in server._server.sockets:
+        addr = sock.getsockname()
+        if len(addr) == 2:
+            return f"ws://127.0.0.1:{addr[1]}"
+    port = server._server.sockets[0].getsockname()[1]
+    return f"ws://localhost:{port}"
+
+
 @pytest.mark.asyncio
 async def test_protocol_full_flow() -> None:
     """Validate full protocol flow: connect, initialize, subscribe, receive all messages."""
@@ -17,26 +27,21 @@ async def test_protocol_full_flow() -> None:
     await server.start_server()
 
     try:
-        assert server._server is not None
-        server_url = f"ws://localhost:{server._server.sockets[0].getsockname()[1]}"
+        server_url = _server_url(server)
 
-        # Client 1: Connects and subscribes to all topics
-        client1 = AgentBusClient(server_url)
+        # Client 1: Connects and subscribes to tg topics
+        client1 = AgentBusClient(server_url, auto_reconnect=False)
         await client1.connect()
 
         # Initialize handshake
-        init_result = await client1.initialize("client-1")
+        init_result = await client1.initialize("agent:system")
         assert init_result.server_id
         assert init_result.server_info.name == "bub-bus"
         assert init_result.capabilities.subscribe is True
 
-        # Subscribe to all inbound messages
-        sub1_inbound = await client1.subscribe("inbound:*")
-        assert sub1_inbound.subscription_id.startswith("sub_")
-
-        # Subscribe to all outbound messages
-        sub1_outbound = await client1.subscribe("outbound:*")
-        assert sub1_outbound.subscription_id.startswith("sub_")
+        # Subscribe to all tg messages
+        sub1 = await client1.subscribe("tg:*")
+        assert sub1.success is True
 
         # Track received messages
         client1_messages: list[tuple[str, dict]] = []
@@ -44,15 +49,13 @@ async def test_protocol_full_flow() -> None:
         async def record_handler(topic: str, payload: dict) -> None:
             client1_messages.append((topic, payload))
 
-        client1.on_notification("inbound:*", record_handler)
-        client1.on_notification("outbound:*", record_handler)
+        client1.on_notification("tg:*", record_handler)
 
-        # Client 2: Connects and sends messages
-        client2 = AgentBusClient(server_url)
+        # Client 2: Connects as tg peer and sends messages
+        client2 = AgentBusClient(server_url, auto_reconnect=False)
         await client2.connect()
-        await client2.initialize("client-2")
+        await client2.initialize("tg:chat-bridge")
 
-        # Send inbound message from channel telegram
         await client2.publish_inbound(
             InboundMessage(
                 channel="telegram",
@@ -61,8 +64,6 @@ async def test_protocol_full_flow() -> None:
                 content="hello from telegram",
             )
         )
-
-        # Send inbound message from channel whatsapp
         await client2.publish_inbound(
             InboundMessage(
                 channel="whatsapp",
@@ -71,9 +72,11 @@ async def test_protocol_full_flow() -> None:
                 content="hello from whatsapp",
             )
         )
+        client3 = AgentBusClient(server_url, auto_reconnect=False)
+        await client3.connect()
+        await client3.initialize("agent:worker-1")
 
-        # Send outbound message
-        await client2.publish_outbound(
+        await client3.publish_outbound(
             OutboundMessage(
                 channel="telegram",
                 chat_id="chat1",
@@ -81,29 +84,28 @@ async def test_protocol_full_flow() -> None:
             )
         )
 
-        # Wait for messages to be delivered
         await asyncio.sleep(0.2)
 
-        # Verify client1 received all messages
         assert len(client1_messages) == 3
 
-        # Check first inbound (telegram)
         topic1, payload1 = client1_messages[0]
-        assert topic1 == "inbound:chat1"
-        assert payload1["content"] == "hello from telegram"
+        assert topic1 == "tg:chat1"
+        assert payload1["type"] == "tg_message"
+        assert payload1["content"]["text"] == "hello from telegram"
 
-        # Check second inbound (whatsapp)
         topic2, payload2 = client1_messages[1]
-        assert topic2 == "inbound:chat2"
-        assert payload2["content"] == "hello from whatsapp"
+        assert topic2 == "tg:chat2"
+        assert payload2["type"] == "tg_message"
+        assert payload2["content"]["text"] == "hello from whatsapp"
 
-        # Check outbound
         topic3, payload3 = client1_messages[2]
-        assert topic3 == "outbound:chat1"
-        assert payload3["content"] == "reply to telegram"
+        assert topic3 == "tg:chat1"
+        assert payload3["type"] == "tg_reply"
+        assert payload3["content"]["text"] == "reply to telegram"
 
         await client1.disconnect()
         await client2.disconnect()
+        await client3.disconnect()
 
     finally:
         await server.stop_server()
@@ -116,17 +118,13 @@ async def test_server_rejects_uninitialized_requests() -> None:
     await server.start_server()
 
     try:
-        assert server._server is not None
-        port = server._server.sockets[0].getsockname()[1]
-        server_url = f"ws://localhost:{port}"
+        server_url = _server_url(server)
 
-        # Connect directly with raw websocket
         async with websockets.connect(server_url) as ws:
-            # Try to subscribe before initialize
             subscribe_request = {
                 "jsonrpc": "2.0",
                 "method": "subscribe",
-                "params": {"topic": "inbound:*"},
+                "params": {"topic": "tg:*"},
                 "id": 1,
             }
             await ws.send(json.dumps(subscribe_request))
@@ -147,17 +145,14 @@ async def test_initialize_twice_fails() -> None:
     await server.start_server()
 
     try:
-        assert server._server is not None
-        port = server._server.sockets[0].getsockname()[1]
-        server_url = f"ws://localhost:{port}"
+        server_url = _server_url(server)
 
-        client = AgentBusClient(server_url)
+        client = AgentBusClient(server_url, auto_reconnect=False)
         await client.connect()
-        await client.initialize("client-1")
+        await client.initialize("agent:system")
 
-        # Try to initialize again - should fail on server side
         with pytest.raises(RuntimeError, match="Already initialized"):
-            await client.initialize("client-1")
+            await client.initialize("agent:system")
 
         await client.disconnect()
 
@@ -172,30 +167,25 @@ async def test_wildcard_subscription_receives_all() -> None:
     await server.start_server()
 
     try:
-        assert server._server is not None
-        port = server._server.sockets[0].getsockname()[1]
-        server_url = f"ws://localhost:{port}"
+        server_url = _server_url(server)
 
-        subscriber = AgentBusClient(server_url)
+        subscriber = AgentBusClient(server_url, auto_reconnect=False)
         await subscriber.connect()
-        await subscriber.initialize("subscriber")
+        await subscriber.initialize("agent:system")
 
-        # Subscribe to wildcard
-        await subscriber.subscribe("inbound:*")
+        await subscriber.subscribe("tg:*")
 
         received: list[tuple[str, dict]] = []
 
         async def handler(topic: str, payload: dict) -> None:
             received.append((topic, payload))
 
-        subscriber.on_notification("inbound:*", handler)
+        subscriber.on_notification("tg:*", handler)
 
-        # Publisher sends messages to different chat IDs
-        publisher = AgentBusClient(server_url)
+        publisher = AgentBusClient(server_url, auto_reconnect=False)
         await publisher.connect()
-        await publisher.initialize("publisher")
+        await publisher.initialize("tg:publisher")
 
-        # Send to multiple channels/chats
         await publisher.publish_inbound(
             InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="msg1")
         )
@@ -208,11 +198,10 @@ async def test_wildcard_subscription_receives_all() -> None:
 
         await asyncio.sleep(0.1)
 
-        # Verify all messages received
         assert len(received) == 3
-        assert received[0][0] == "inbound:c1"
-        assert received[1][0] == "inbound:c2"
-        assert received[2][0] == "inbound:c3"
+        assert received[0][0] == "tg:c1"
+        assert received[1][0] == "tg:c2"
+        assert received[2][0] == "tg:c3"
 
         await subscriber.disconnect()
         await publisher.disconnect()
@@ -228,15 +217,13 @@ async def test_client_rejects_subscribe_before_initialize() -> None:
     await server.start_server()
 
     try:
-        assert server._server is not None
-        port = server._server.sockets[0].getsockname()[1]
-        server_url = f"ws://localhost:{port}"
+        server_url = _server_url(server)
 
-        client = AgentBusClient(server_url)
+        client = AgentBusClient(server_url, auto_reconnect=False)
         await client.connect()
 
         with pytest.raises(RuntimeError, match="Not initialized"):
-            await client.subscribe("inbound:*")
+            await client.subscribe("tg:*")
 
         await client.disconnect()
     finally:
@@ -250,20 +237,17 @@ async def test_ping_pong() -> None:
     await server.start_server()
 
     try:
-        assert server._server is not None
-        port = server._server.sockets[0].getsockname()[1]
-        server_url = f"ws://localhost:{port}"
+        server_url = _server_url(server)
 
-        client = AgentBusClient(server_url)
+        client = AgentBusClient(server_url, auto_reconnect=False)
         await client.connect()
-        await client.initialize("pinger")
+        await client.initialize("agent:system")
 
-        # Connect with raw websocket to send ping
         async with websockets.connect(server_url) as ws:
             init_req = {
                 "jsonrpc": "2.0",
                 "method": "initialize",
-                "params": {"clientId": "raw-client"},
+                "params": {"clientId": "agent:raw"},
                 "id": 1,
             }
             await ws.send(json.dumps(init_req))
