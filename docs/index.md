@@ -21,6 +21,7 @@ Bub is built for day-to-day coding tasks: run commands, edit files, debug failur
 
 - [Key Features](features.md)
 - [Interactive CLI](cli.md)
+- [Components](components.md) - System architecture and component details
 - [Deployment Guide](deployment.md)
 - [Architecture](architecture.md)
 - [Telegram Integration](telegram.md)
