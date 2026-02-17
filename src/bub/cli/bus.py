@@ -60,7 +60,7 @@ def bus_send(
     message: Annotated[list[str] | None, typer.Argument(help="Message to send")] = None,
     chat_id: Annotated[str, typer.Option("--chat-id", "-c", help="Chat ID")] = DEFAULT_CHAT_ID,
     channel: Annotated[str, typer.Option("--channel", help="Channel name")] = DEFAULT_CHANNEL,
-    topic: Annotated[str, typer.Option("--topic", help="Topic for outbound responses")] = f"outbound:{DEFAULT_CHAT_ID}",
+    topic: Annotated[str, typer.Option("--topic", help="Topic for responses")] = f"tg:{DEFAULT_CHAT_ID}",
     timeout: Annotated[int, typer.Option("--timeout", "-t", help="Receive timeout in seconds")] = DEFAULT_TIMEOUT,
     bus_url: Annotated[str | None, typer.Option("--bus-url", "-u", envvar="BUB_BUS_URL", help="Bus URL")] = None,
 ) -> None:
@@ -118,7 +118,7 @@ async def _send_and_listen(url: str, content: str, chat_id: str, channel: str, t
 
 @bus_app.command("recv")
 def bus_recv(
-    topic: Annotated[str, typer.Argument(help="Topic pattern to subscribe (e.g., 'outbound:*')")] = "outbound:*",
+    topic: Annotated[str, typer.Argument(help="Topic pattern to subscribe (e.g., 'tg:*')")] = "tg:*",
     bus_url: Annotated[str | None, typer.Option("--bus-url", "-u", envvar="BUB_BUS_URL", help="Bus URL")] = None,
 ) -> None:
     """Subscribe to a topic and print messages until Ctrl-C."""

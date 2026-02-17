@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
+import sqlite3
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from fnmatch import fnmatch
+from pathlib import Path
 from typing import Any, cast
 
 import websockets
@@ -31,6 +34,8 @@ from bub.rpc.protocol import (
     InitializeResult,
     PingParams,
     PingResult,
+    ProcessMessageParams,
+    ProcessMessageResult,
     SendMessageParams,
     SendMessageResult,
     ServerCapabilities,
@@ -44,6 +49,102 @@ from bub.rpc.protocol import (
 )
 
 background_tasks: set[asyncio.Task[Any]] = set()  # Store background tasks to prevent garbage collection
+
+
+class ActivityLogWriter:
+    """Async append-only SQLite activity logger."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+        self._queue: asyncio.Queue[dict[str, str]] = asyncio.Queue()
+        self._worker: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(self._init_db)
+        self._worker = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._worker is None:
+            return
+        await self._queue.put({})
+        await self._worker
+        self._worker = None
+
+    async def log(
+        self,
+        *,
+        event: str,
+        message_id: str,
+        rpc_id: str | None = None,
+        actor: str | None = None,
+        topic: str | None = None,
+        status: str | None = None,
+        payload: dict[str, object] | None = None,
+        error: str | None = None,
+    ) -> None:
+        entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "event": event,
+            "message_id": message_id,
+            "rpc_id": rpc_id or "",
+            "actor": actor or "",
+            "topic": topic or "",
+            "status": status or "",
+            "payload_json": json.dumps(payload or {}, ensure_ascii=False),
+            "error": error or "",
+        }
+        await self._queue.put(entry)
+
+    async def _run(self) -> None:
+        while True:
+            entry = await self._queue.get()
+            if not entry:
+                return
+            await asyncio.to_thread(self._insert, entry)
+
+    def _init_db(self) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS activity_log (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ts TEXT NOT NULL,
+                  event TEXT NOT NULL,
+                  message_id TEXT NOT NULL,
+                  rpc_id TEXT,
+                  actor TEXT,
+                  topic TEXT,
+                  status TEXT,
+                  payload_json TEXT,
+                  error TEXT
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_message_id ON activity_log(message_id)"
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts)")
+
+    def _insert(self, entry: dict[str, str]) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO activity_log (ts, event, message_id, rpc_id, actor, topic, status, payload_json, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry["ts"],
+                    entry["event"],
+                    entry["message_id"],
+                    entry["rpc_id"],
+                    entry["actor"],
+                    entry["topic"],
+                    entry["status"],
+                    entry["payload_json"],
+                    entry["error"],
+                ),
+            )
 
 
 class WebSocketTransport:
@@ -76,10 +177,12 @@ class AgentConnection:
         self.client_id: str | None = None
         self._server = server
         self.api = api
-        self.subscriptions: list[str] = []  # topic patterns
+        self.subscriptions: set[str] = set()  # topic patterns
 
     async def handle_initialize(self, params: InitializeParams) -> InitializeResult:
         """Handle initialize request."""
+        if self.initialized:
+            raise JSONRPCErrorException(-32001, "Already initialized")
         self.client_id = params.client_id
         self.initialized = True
 
@@ -87,7 +190,8 @@ class AgentConnection:
         capabilities = ServerCapabilities(
             subscribe=True,
             publish=True,
-            topics=["inbound:*", "outbound:*", "agent:*"],
+            process_message=True,
+            topics=["tg:*", "agent:*", "system:*"],
         )
         result = InitializeResult(
             server_id=self._server._server_id,
@@ -106,24 +210,23 @@ class AgentConnection:
             logger.warning("wsbus.server.subscribe_missing_topic client_id={}", self.client_id)
             raise RuntimeError("Topic is required")
 
-        self.subscriptions.append(topic)
-
-        subscription_id = f"sub_{uuid.uuid4().hex[:8]}"
+        self.subscriptions.add(topic)
 
         logger.info(
-            "wsbus.server.subscribe client_id={} topic={} total_subs={} subscription_id={}",
+            "wsbus.server.subscribe client_id={} topic={} total_subs={}",
             self.client_id,
             topic,
             len(self.subscriptions),
-            subscription_id,
         )
 
-        result = SubscribeResult(success=True, subscription_id=subscription_id)
+        result = SubscribeResult(success=True)
         return result
 
     async def handle_unsubscribe(self, params: UnsubscribeParams) -> UnsubscribeResult:
         """Handle unsubscribe request."""
         self._check_initialized()
+        if params.topic not in self.subscriptions:
+            raise JSONRPCErrorException(-32003, "Subscription not found")
         self.subscriptions.remove(params.topic)
 
         logger.info(
@@ -147,24 +250,34 @@ class AgentConnection:
             raise JSONRPCErrorException(-32001, "Not initialized")
 
     async def send_message(self, params: SendMessageParams) -> SendMessageResult:
-        """Handle send message request - broadcast to all subscribers.
-
-        Returns SendMessageResult with stop_propagation flag.
-        """
+        """Handle send message request - broadcast to all subscribers."""
         self._check_initialized()
-        stop_propagation = await self._server.publish(params.topic, cast(dict, params.payload))
-        return SendMessageResult(success=True, stop_propagation=stop_propagation)
+        payload = cast(dict[str, object], params.payload)
+        self._server.validate_send_message(
+            sender=self.client_id or self.conn_id,
+            topic=params.topic,
+            payload=payload,
+        )
+        message_id = str(payload.get("messageId", f"msg_{uuid.uuid4().hex}"))
+        delivered_to = await self._server.publish(
+            params.topic,
+            payload,
+            message_id=message_id,
+            sender=self.client_id or self.conn_id,
+        )
+        return SendMessageResult(accepted=True, message_id=message_id, delivered_to=delivered_to)
 
 
 class AgentBusServer:
     """JSON-RPC 2.0 WebSocket server for agent communication."""
 
-    def __init__(self, host: str = "localhost", port: int = 7892) -> None:
+    def __init__(self, host: str = "localhost", port: int = 7892, activity_log_path: Path | None = None) -> None:
         self._host = host
         self._port = port
         self._server_id = f"bus-{uuid.uuid4().hex}"
         self._connections: dict[str, AgentConnection] = {}
         self._server: websockets.Server | None = None
+        self._activity_log = ActivityLogWriter(activity_log_path or Path("run/wsbus_activity.sqlite3"))
 
     @property
     def url(self) -> str:
@@ -172,6 +285,7 @@ class AgentBusServer:
 
     async def start_server(self) -> None:
         """Start WebSocket server."""
+        await self._activity_log.start()
         self._server = await websockets.serve(self._handle_client, self._host, self._port)
         logger.info("wsbus.started url={}", self.url)
 
@@ -180,6 +294,7 @@ class AgentBusServer:
         if self._server:
             self._server.close()
             await self._server.wait_closed()
+        await self._activity_log.stop()
         logger.info("wsbus.stopped")
 
     async def _handle_client(self, websocket: ServerConnection) -> None:
@@ -208,32 +323,98 @@ class AgentBusServer:
             self._connections.pop(conn_id, None)
             logger.info("wsbus.client.disconnected conn_id={}", conn_id)
 
-    def _topic_matches(self, topic: str, patterns: list[str]) -> bool:
+    def _topic_matches(self, topic: str, patterns: set[str]) -> bool:
         """Check if topic matches any wildcard pattern."""
         return any(fnmatch(topic, pattern) for pattern in patterns)
 
-    async def publish(self, topic: str, payload: dict) -> bool:
-        """Publish message to all subscribers.
+    def validate_send_message(self, *, sender: str, topic: str, payload: dict[str, object]) -> None:
+        """Validate payload and sender role constraints for sendMessage."""
+        required_fields = ("messageId", "type", "from", "timestamp", "content")
+        missing = [field for field in required_fields if field not in payload]
+        if missing:
+            raise JSONRPCErrorException(-32602, f"Missing required payload fields: {', '.join(missing)}")
 
-        Returns True if propagation should stop, False otherwise.
-        """
+        msg_type = payload.get("type")
+        if not isinstance(msg_type, str) or not msg_type.strip():
+            raise JSONRPCErrorException(-32602, "payload.type must be a non-empty string")
+        if not isinstance(payload.get("content"), dict):
+            raise JSONRPCErrorException(-32602, "payload.content must be an object")
+
+        allowed_types = self._allowed_types_for_sender(sender)
+        if msg_type not in allowed_types:
+            raise JSONRPCErrorException(
+                -32602,
+                f"Sender '{sender}' is not allowed to send type '{msg_type}' to topic '{topic}'",
+            )
+
+    def _allowed_types_for_sender(self, sender: str) -> set[str]:
+        if sender.startswith("tg:"):
+            return {"spawn_request", "configure", "tg_message", "delivery_status"}
+        if sender == "agent:system":
+            return {"spawn_result", "route_assigned", "agent_event"}
+        if sender.startswith("agent:"):
+            return {"tg_reply", "agent_event", "delivery_status"}
+        return set()
+
+    async def publish(
+        self,
+        topic: str,
+        payload: dict[str, object],
+        *,
+        message_id: str,
+        sender: str,
+        rpc_id: str | None = None,
+    ) -> int:
+        """Publish message to all subscribers and return delivered count."""
         logger.info("wsbus.server.publish topic={} payload_keys={}", topic, list(payload.keys()))
+        await self._activity_log.log(
+            event="send_start",
+            message_id=message_id,
+            rpc_id=rpc_id,
+            actor=sender,
+            topic=topic,
+            status="start",
+            payload=payload,
+        )
         matched_peers: list[str] = []
         for other_conn in self._connections.values():
             if other_conn.initialized and self._topic_matches(topic, other_conn.subscriptions):
-                matched_peers.append(other_conn.client_id or other_conn.conn_id)
-                logger.info("wsbus.server.publish sending to peer={}", other_conn.client_id or other_conn.conn_id)
-                send_params = SendMessageParams(topic=topic, payload=cast(dict[str, object], payload))
-                result = await other_conn.api.send_message(send_params)
-                if result.stop_propagation:
-                    logger.info(
-                        "wsbus.publish topic={} peers={} matched={} stopped_at={}",
-                        topic,
-                        len(matched_peers),
-                        matched_peers,
-                        other_conn.client_id or other_conn.conn_id,
+                peer_id = other_conn.client_id or other_conn.conn_id
+                matched_peers.append(peer_id)
+                logger.info("wsbus.server.publish sending to peer={}", peer_id)
+                await self._activity_log.log(
+                    event="process_start",
+                    message_id=message_id,
+                    rpc_id=rpc_id,
+                    actor=peer_id,
+                    topic=topic,
+                    status="start",
+                    payload=payload,
+                )
+                try:
+                    process_params = ProcessMessageParams(topic=topic, payload=payload)
+                    result = await other_conn.api.process_message(process_params)
+                    await self._activity_log.log(
+                        event="process_finish",
+                        message_id=message_id,
+                        rpc_id=rpc_id,
+                        actor=peer_id,
+                        topic=topic,
+                        status=result.status,
+                        payload=payload,
                     )
-                    return True
+                except Exception as exc:
+                    await self._activity_log.log(
+                        event="process_finish",
+                        message_id=message_id,
+                        rpc_id=rpc_id,
+                        actor=peer_id,
+                        topic=topic,
+                        status="error",
+                        payload=payload,
+                        error=str(exc),
+                    )
+                    logger.exception("wsbus.publish.process_error peer={} topic={}", peer_id, topic)
 
         if matched_peers:
             logger.info(
@@ -245,16 +426,30 @@ class AgentBusServer:
         else:
             logger.info("wsbus.publish topic={} peers=0 (no subscribers)", topic)
 
-        return False
+        await self._activity_log.log(
+            event="send_finish",
+            message_id=message_id,
+            rpc_id=rpc_id,
+            actor=sender,
+            topic=topic,
+            status="ok",
+            payload=payload,
+        )
+        return len(matched_peers)
 
     async def publish_inbound(self, message: InboundMessage) -> None:
         """Publish inbound message."""
-        topic = f"inbound:{message.chat_id}"
-        payload = {
-            "channel": message.channel,
-            "chatId": message.chat_id,
-            "content": message.content,
-            "senderId": message.sender_id,
+        topic = f"tg:{message.chat_id}"
+        payload: dict[str, object] = {
+            "messageId": f"msg_{uuid.uuid4().hex}",
+            "type": "tg_message",
+            "from": topic,
+            "timestamp": message.timestamp.isoformat(),
+            "content": {
+                "text": message.content,
+                "senderId": message.sender_id,
+                "channel": message.channel,
+            },
         }
         logger.debug(
             "wsbus.client.publish_inbound topic={} channel={} chat_id={} sender_id={} content_len={}",
@@ -264,12 +459,18 @@ class AgentBusServer:
             message.sender_id,
             len(message.content),
         )
-        await self.publish(topic, payload)
+        await self.publish(topic, payload, message_id=str(payload["messageId"]), sender="bus")
 
     async def publish_outbound(self, message: OutboundMessage) -> None:
         """Publish outbound message."""
-        topic = f"outbound:{message.chat_id}"
-        payload = {"chatId": message.chat_id, "content": message.content}
+        topic = f"tg:{message.chat_id}"
+        payload: dict[str, object] = {
+            "messageId": f"msg_{uuid.uuid4().hex}",
+            "type": "tg_reply",
+            "from": "agent:unknown",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "content": {"text": message.content, "channel": message.channel},
+        }
         logger.debug(
             "wsbus.client.publish_outbound topic={} channel={} chat_id={} content_len={}",
             topic,
@@ -277,7 +478,7 @@ class AgentBusServer:
             message.chat_id,
             len(message.content),
         )
-        await self.publish(topic, payload)
+        await self.publish(topic, payload, message_id=str(payload["messageId"]), sender="bus")
 
 
 class AgentBusClient:
@@ -298,6 +499,7 @@ class AgentBusClient:
         self._reconnect_delay = 1.0  # Initial delay
         self._reconnect_attempts = 0
         self._subscribed_topics: set[str] = set()  # Track subscriptions for reconnect
+        self._subscription_refcounts: dict[str, int] = {}
         self._stop_event = asyncio.Event()
         self._initialized_client_id: str | None = None  # Store client_id for reconnect
 
@@ -414,7 +616,7 @@ class AgentBusClient:
         # Restore subscriptions
         for topic in self._subscribed_topics:
             try:
-                await self.subscribe(topic)
+                await self._api.subscribe(SubscribeParams(topic=topic))
                 logger.debug("wsbus.client.resubscribed topic={}", topic)
             except Exception as e:
                 logger.error("wsbus.client.resubscribe_failed topic={} error={}", topic, e)
@@ -436,15 +638,12 @@ class AgentBusClient:
                 pass
         logger.info("wsbus.client.disconnected")
 
-    async def send_message(self, params: SendMessageParams) -> SendMessageResult:
-        """Handle send message request.
-
-        Called when server sends a message to this client.
-        Delegates to registered handlers.
-        """
-        # Dispatch to handlers via _handle_notification
-        self._handle_notification({"topic": params.topic, "payload": params.payload})
-        return SendMessageResult(success=True, stop_propagation=False)
+    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+        """Handle processMessage request from bus."""
+        matched = await self._dispatch_message(params.topic, cast(dict[str, Any], params.payload))
+        if matched == 0:
+            return ProcessMessageResult(processed=False, status="ignored", message="No matching handlers")
+        return ProcessMessageResult(processed=True, status="ok", message="Processed")
 
     def _topic_matches(self, topic: str, pattern: str) -> bool:
         """Check if topic matches wildcard pattern."""
@@ -465,23 +664,31 @@ class AgentBusClient:
         """Subscribe to a topic pattern."""
         if not self._api:
             raise RuntimeError("Not connected")
-        result = await self._api.subscribe(SubscribeParams(topic=topic))
+        count = self._subscription_refcounts.get(topic, 0)
+        if count == 0:
+            result = await self._api.subscribe(SubscribeParams(topic=topic))
+            self._subscribed_topics.add(topic)
+        else:
+            result = SubscribeResult(success=True)
         # Store handler mapping for this subscription
         if topic not in self._notification_handlers:
             self._notification_handlers[topic] = []
-        # Track for reconnect
-        self._subscribed_topics.add(topic)
+        self._subscription_refcounts[topic] = count + 1
         return result
 
     async def unsubscribe(self, topic: str) -> UnsubscribeResult:
         """Unsubscribe from a topic pattern."""
         if not self._api:
             raise RuntimeError("Not connected")
-        # Remove handlers for this topic
-        self._notification_handlers.pop(topic, None)
-        # Remove from tracked subscriptions
-        self._subscribed_topics.discard(topic)
-        return await self._api.unsubscribe(UnsubscribeParams(topic=topic))
+        count = self._subscription_refcounts.get(topic, 0)
+        if count <= 1:
+            self._notification_handlers.pop(topic, None)
+            self._subscribed_topics.discard(topic)
+            self._subscription_refcounts.pop(topic, None)
+            return await self._api.unsubscribe(UnsubscribeParams(topic=topic))
+
+        self._subscription_refcounts[topic] = count - 1
+        return UnsubscribeResult(success=True)
 
     def on_notification(self, pattern: str, handler: Callable[[str, dict[str, Any]], Any]) -> None:
         """Register a handler for messages matching pattern."""
@@ -489,12 +696,8 @@ class AgentBusClient:
             self._notification_handlers[pattern] = []
         self._notification_handlers[pattern].append(handler)
 
-    def _handle_notification(self, params: dict[str, Any]) -> None:
-        """Handle incoming notification."""
-        # Note: params keys are camelCase due to ProtocolModel alias_generator
-        topic = params.get("topic", "")
-        payload = params.get("payload", {})
-
+    async def _dispatch_message(self, topic: str, payload: dict[str, Any]) -> int:
+        """Dispatch one routed message to matching handlers."""
         logger.debug(
             "wsbus.client.handle_notification topic={} handlers_count={} payload_keys={}",
             topic,
@@ -503,26 +706,22 @@ class AgentBusClient:
         )
 
         matched_patterns = []
-        tasks: list[asyncio.Task[Any]] = []
+        matched_count = 0
         for pattern, handlers in self._notification_handlers.items():
             if self._topic_matches(topic, pattern):
                 matched_patterns.append(pattern)
                 for handler in handlers:
+                    matched_count += 1
                     try:
                         if inspect.iscoroutinefunction(handler):
-                            # Create task with exception handling
-                            task = asyncio.create_task(self._run_handler_with_error_handling(handler, topic, payload))
-                            tasks.append(task)
+                            await self._run_handler_with_error_handling(handler, topic, payload)
                         else:
                             handler(topic, payload)
                     except Exception:
                         logger.exception("wsbus.client.handler_error topic={}", topic)
 
-        # Store tasks to prevent garbage collection
-        if tasks:
-            self._pending_tasks = tasks
-
         logger.debug("wsbus.client.notification_matched topic={} patterns={}", topic, matched_patterns)
+        return matched_count
 
     async def _run_handler_with_error_handling(
         self, handler: Callable[[str, dict[str, Any]], Any], topic: str, payload: dict[str, Any]
@@ -537,12 +736,17 @@ class AgentBusClient:
         """Publish inbound message using sendMessage."""
         if not self._api:
             raise RuntimeError("Not connected")
-        topic = f"inbound:{message.chat_id}"
+        topic = f"tg:{message.chat_id}"
         payload: dict[str, object] = {
-            "channel": message.channel,
-            "senderId": message.sender_id,
-            "chatId": message.chat_id,
-            "content": message.content,
+            "messageId": f"msg_{uuid.uuid4().hex}",
+            "type": "tg_message",
+            "from": topic,
+            "timestamp": message.timestamp.isoformat(),
+            "content": {
+                "text": message.content,
+                "senderId": message.sender_id,
+                "channel": message.channel,
+            },
         }
         logger.debug(
             "wsbus.client.publish_inbound topic={} channel={} chat_id={} sender_id={} content_len={}",
@@ -558,11 +762,16 @@ class AgentBusClient:
         """Publish outbound message using sendMessage."""
         if not self._api:
             raise RuntimeError("Not connected")
-        topic = f"outbound:{message.chat_id}"
+        topic = f"tg:{message.chat_id}"
         payload: dict[str, object] = {
-            "channel": message.channel,
-            "chatId": message.chat_id,
-            "content": message.content,
+            "messageId": f"msg_{uuid.uuid4().hex}",
+            "type": "tg_reply",
+            "from": "agent:unknown",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "content": {
+                "text": message.content,
+                "channel": message.channel,
+            },
         }
         logger.debug(
             "wsbus.client.publish_outbound topic={} channel={} chat_id={} content_len={}",
@@ -578,24 +787,36 @@ class AgentBusClient:
 
         async def wrapper(topic: str, payload: dict[str, Any]) -> None:
             logger.info("wsbus.client.on_inbound.wrapper received topic={}", topic)
+            content_obj = payload.get("content", {})
+            text = content_obj.get("text", "") if isinstance(content_obj, dict) else ""
+            sender_id = content_obj.get("senderId", "") if isinstance(content_obj, dict) else ""
+            channel = content_obj.get("channel", "telegram") if isinstance(content_obj, dict) else "telegram"
+            chat_id = topic.split(":", 1)[1] if ":" in topic else ""
             msg = InboundMessage(
-                channel=payload.get("channel", ""),
-                sender_id=payload.get("senderId", ""),
-                chat_id=payload.get("chatId", ""),
-                content=payload.get("content", ""),
+                channel=str(channel),
+                sender_id=str(sender_id),
+                chat_id=chat_id,
+                content=str(text),
             )
             logger.info("wsbus.client.on_inbound.wrapper calling handler with msg.chat_id={}", msg.chat_id)
             await handler(msg)
             logger.info("wsbus.client.on_inbound.wrapper handler done")
 
-        await self.subscribe("inbound:*")
-        self.on_notification("inbound:*", wrapper)
+        await self.subscribe("tg:*")
+
+        async def typed_wrapper(topic: str, payload: dict[str, Any]) -> None:
+            msg_type = str(payload.get("type", ""))
+            if msg_type != "tg_message":
+                return
+            await wrapper(topic, payload)
+
+        self.on_notification("tg:*", typed_wrapper)
 
         _task_ref: list[asyncio.Task[Any]] = []
 
         def _unsubscribe() -> None:
             _task_ref.clear()
-            _task_ref.append(asyncio.create_task(self.unsubscribe("inbound:*")))
+            _task_ref.append(asyncio.create_task(self.unsubscribe("tg:*")))
 
         return _unsubscribe
 
@@ -603,20 +824,31 @@ class AgentBusClient:
         """Register handler for outbound messages. Returns unsubscribe function."""
 
         async def wrapper(topic: str, payload: dict[str, Any]) -> None:
+            content_obj = payload.get("content", {})
+            text = content_obj.get("text", "") if isinstance(content_obj, dict) else ""
+            channel = content_obj.get("channel", "telegram") if isinstance(content_obj, dict) else "telegram"
+            chat_id = topic.split(":", 1)[1] if ":" in topic else ""
             msg = OutboundMessage(
-                channel=payload.get("channel", ""),
-                chat_id=payload.get("chatId", ""),
-                content=payload.get("content", ""),
+                channel=str(channel),
+                chat_id=chat_id,
+                content=str(text),
             )
             await handler(msg)
 
-        await self.subscribe("outbound:*")
-        self.on_notification("outbound:*", wrapper)
+        await self.subscribe("tg:*")
+
+        async def typed_wrapper(topic: str, payload: dict[str, Any]) -> None:
+            msg_type = str(payload.get("type", ""))
+            if msg_type != "tg_reply":
+                return
+            await wrapper(topic, payload)
+
+        self.on_notification("tg:*", typed_wrapper)
 
         _task_ref: list[asyncio.Task[Any]] = []
 
         def _unsubscribe() -> None:
             _task_ref.clear()
-            _task_ref.append(asyncio.create_task(self.unsubscribe("outbound:*")))
+            _task_ref.append(asyncio.create_task(self.unsubscribe("tg:*")))
 
         return _unsubscribe

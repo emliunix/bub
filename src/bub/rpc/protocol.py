@@ -35,6 +35,7 @@ class ServerInfo(ProtocolModel):
 class ServerCapabilities(ProtocolModel):
     subscribe: bool
     publish: bool
+    process_message: bool
     topics: list[str]
 
 
@@ -55,7 +56,6 @@ class SubscribeParams(ProtocolModel):
 
 class SubscribeResult(ProtocolModel):
     success: bool
-    subscription_id: str = "sub_unknown"
 
 
 class UnsubscribeParams(ProtocolModel):
@@ -72,8 +72,20 @@ class SendMessageParams(ProtocolModel):
 
 
 class SendMessageResult(ProtocolModel):
-    success: bool
-    stop_propagation: bool = False
+    accepted: bool
+    message_id: str
+    delivered_to: int
+
+
+class ProcessMessageParams(ProtocolModel):
+    topic: str
+    payload: dict[str, JsonValue]
+
+
+class ProcessMessageResult(ProtocolModel):
+    processed: bool
+    status: str
+    message: str
 
 
 class PingParams(ProtocolModel):
@@ -84,29 +96,8 @@ class PingResult(ProtocolModel):
     timestamp: str
 
 
-class PublishInboundParams(ProtocolModel):
-    channel: str
-    sender_id: str
-    chat_id: str
-    content: str
-
-
-class PublishInboundResult(ProtocolModel):
-    success: bool
-
-
-class PublishOutboundParams(ProtocolModel):
-    channel: str
-    chat_id: str
-    content: str
-
-
-class PublishOutboundResult(ProtocolModel):
-    success: bool
-
-
 class AgentBusServerCallbacks(Protocol):
-    """Callbacks for server to call on client."""
+    """Callbacks for server request handlers."""
 
     async def handle_initialize(self, params: InitializeParams) -> InitializeResult: ...
     async def handle_subscribe(self, params: SubscribeParams) -> SubscribeResult: ...
@@ -116,10 +107,7 @@ class AgentBusServerCallbacks(Protocol):
 
 
 def register_server_callbacks(framework: JSONRPCFramework, callbacks: AgentBusServerCallbacks) -> None:
-    """Register server callbacks.
-
-    Server-side: registers callbacks that the server can call on the client.
-    """
+    """Register server callbacks."""
 
     async def _handle_initialize(params: dict[str, object]) -> dict[str, object]:
         params_model = InitializeParams.model_validate(params)
@@ -156,7 +144,7 @@ def register_server_callbacks(framework: JSONRPCFramework, callbacks: AgentBusSe
 class AgentBusClientCallbacks(Protocol):
     """Callbacks for client to handle server requests."""
 
-    async def send_message(self, params: SendMessageParams) -> SendMessageResult: ...
+    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult: ...
 
 
 def register_client_callbacks(framework: JSONRPCFramework, callbacks: AgentBusClientCallbacks) -> None:
@@ -165,87 +153,62 @@ def register_client_callbacks(framework: JSONRPCFramework, callbacks: AgentBusCl
     Client-side: registers handlers for requests from the server.
     """
 
-    async def _send_message(params: dict[str, object]) -> dict[str, object]:
-        params_model = SendMessageParams.model_validate(params)
-        result_model = await callbacks.send_message(params_model)
+    async def _process_message(params: dict[str, object]) -> dict[str, object]:
+        params_model = ProcessMessageParams.model_validate(params)
+        result_model = await callbacks.process_message(params_model)
         return result_model.model_dump(by_alias=True)
 
-    framework.register_method("sendMessage", _send_message)
+    framework.register_method("processMessage", _process_message)
 
 
 class AgentBusServerApi:
-    """Agent Bus protocol API.
-
-    Provides typed methods for Agent Bus operations.
-    """
+    """Server API for bus->peer requests."""
 
     def __init__(self, framework: JSONRPCFramework) -> None:
         self._framework = framework
 
-    async def send_message(self, params: SendMessageParams) -> SendMessageResult:
-        """Send message request.
-
-        Server-side: sends message request to client.
-        Returns SendMessageResult with stop_propagation flag.
-        """
+    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+        """Send processMessage request from bus to a peer."""
         params_dict = params.model_dump(by_alias=True)
-        result_dict = await self._framework.send_request("sendMessage", params_dict)
-        return SendMessageResult.model_validate(result_dict)
-
-    async def ping(self, params: PingParams) -> PingResult:
-        """Send ping request.
-
-        Client-side: sends ping request to server.
-        Returns timestamp.
-        """
-        params_dict = params.model_dump(by_alias=True)
-        result_dict = await self._framework.send_request("ping", params_dict)
-        return PingResult.model_validate(result_dict)
+        result_dict = await self._framework.send_request("processMessage", params_dict)
+        return ProcessMessageResult.model_validate(result_dict)
 
 
 class AgentBusClientApi:
-    """Client API for handling server notifications."""
+    """Client API for peer->bus requests."""
 
     def __init__(self, framework: JSONRPCFramework) -> None:
         self._framework = framework
 
     async def initialize(self, params: InitializeParams) -> InitializeResult:
-        """Send initialize request.
-
-        Client-side: sends initialization request to server.
-        Returns server info and capabilities.
-        """
+        """Send initialize request to server."""
         params_dict = params.model_dump(by_alias=True)
         result_dict = await self._framework.send_request("initialize", params_dict)
         return InitializeResult.model_validate(result_dict)
 
     async def subscribe(self, params: SubscribeParams) -> SubscribeResult:
-        """Send subscribe request.
-
-        Client-side: sends subscribe request to server.
-        Returns subscription ID.
-        """
+        """Send subscribe request to server."""
         params_dict = params.model_dump(by_alias=True)
         result_dict = await self._framework.send_request("subscribe", params_dict)
         return SubscribeResult.model_validate(result_dict)
 
     async def unsubscribe(self, params: UnsubscribeParams) -> UnsubscribeResult:
-        """Send unsubscribe request.
-
-        Client-side: sends unsubscribe request to server.
-        """
+        """Send unsubscribe request to server."""
         params_dict = params.model_dump(by_alias=True)
         result_dict = await self._framework.send_request("unsubscribe", params_dict)
         return UnsubscribeResult.model_validate(result_dict)
 
     async def send_message(self, params: SendMessageParams) -> SendMessageResult:
-        """Send message request.
-
-        Client-side: sends message to server for broadcasting to subscribers.
-        """
+        """Send message request to server."""
         params_dict = params.model_dump(by_alias=True)
         result_dict = await self._framework.send_request("sendMessage", params_dict)
         return SendMessageResult.model_validate(result_dict)
+
+    async def ping(self, params: PingParams) -> PingResult:
+        """Send ping request to server."""
+        params_dict = params.model_dump(by_alias=True)
+        result_dict = await self._framework.send_request("ping", params_dict)
+        return PingResult.model_validate(result_dict)
 
 
 __all__ = [
@@ -259,6 +222,8 @@ __all__ = [
     "JsonValue",
     "PingParams",
     "PingResult",
+    "ProcessMessageParams",
+    "ProcessMessageResult",
     "ProtocolModel",
     "SendMessageParams",
     "SendMessageResult",
