@@ -414,6 +414,8 @@ async def _run_telegram_bridge(  # noqa: C901
 
         await app.initialize()
         await app.start()
+        if app.updater is None:
+            raise RuntimeError("Telegram updater not initialized")
         await app.updater.start_polling(drop_pending_updates=True)
         logger.info("telegram.bridge.started url={}", url)
 
@@ -424,38 +426,6 @@ async def _run_telegram_bridge(  # noqa: C901
 
         try:
             await _wait_forever()
-        except KeyboardInterrupt:
-            logger.info("telegram.bridge.stopped")
-    finally:
-        await client.disconnect()
-        # Subscribe to tg:* to receive outbound messages (responses from agents)
-        # Note: telegram-bridge acts as a router, so it subscribes to entity topics
-        sub_result = await client.subscribe("tg:*")
-        logger.info("telegram.bridge.subscribed topic=tg:* result={}", sub_result)
-
-        try:
-            await _wait_forever()
-        except KeyboardInterrupt:
-            logger.info("telegram.bridge.stopped")
-    finally:
-        await client.disconnect()        logger.info("telegram.bridge.started url={}", url)
-
-        # Subscribe to tg:* to receive outbound messages (responses from agents)
-        # Note: telegram-bridge acts as a router, so it subscribes to entity topics
-        sub_result = await client.subscribe("tg:*")
-        logger.info("telegram.bridge.subscribed topic=tg:* result={}", sub_result)
-
-        try:
-            await _wait_forever()
-        except KeyboardInterrupt:
-            logger.info("telegram.bridge.stopped")
-    finally:
-        await client.disconnect()        try:
-            await _wait_forever()
-        except KeyboardInterrupt:
-            logger.info("telegram.bridge.stopped")
-    finally:
-        await client.disconnect()            await _wait_forever()
         except KeyboardInterrupt:
             logger.info("telegram.bridge.stopped")
     finally:

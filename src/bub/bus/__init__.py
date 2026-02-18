@@ -3,7 +3,12 @@
 WebSocket-based message bus implementation for agent communication.
 """
 
-from bub.bus.bus import AgentBusClient, AgentBusServer, AgentConnection
+from bub.bus.bus import (
+    AgentBusClient,
+    AgentBusServer,
+    AgentConnection,
+    WebSocketTransport,
+)
 from bub.bus.log import ActivityLogWriter
 from bub.bus.protocol import (
     AgentBusClientApi,
@@ -25,12 +30,24 @@ from bub.bus.protocol import (
     register_client_callbacks,
     register_server_callbacks,
 )
+from bub.bus.types import (
+    Address,
+    ClientId,
+    ConnectionId,
+    MessageHandler,
+    MessagePayload,
+    TestMessage,
+    Transport,
+)
 
 __all__ = [
+    # Bus classes
     "ActivityLogWriter",
     "AgentBusClient",
     "AgentBusServer",
     "AgentConnection",
+    "WebSocketTransport",
+    # Protocol API
     "AgentBusClientApi",
     "AgentBusServerApi",
     "InitializeParams",
@@ -49,4 +66,12 @@ __all__ = [
     "UnsubscribeResult",
     "register_client_callbacks",
     "register_server_callbacks",
+    # Types and protocols
+    "Address",
+    "ClientId",
+    "ConnectionId",
+    "MessageHandler",
+    "MessagePayload",
+    "TestMessage",
+    "Transport",
 ]

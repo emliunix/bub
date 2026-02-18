@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import create_engine, event, Index, Text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy import create_engine, Engine, event, Index, Text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
 
 
 class Base(DeclarativeBase):
@@ -67,8 +67,8 @@ class ActivityLogWriter:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._engine = None
-        self._session_factory = None
+        self._engine: Engine | None = None
+        self._session_factory: sessionmaker[Session] | None = None
         self._queue: asyncio.Queue[LogEntry | None] = asyncio.Queue()
         self._worker: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()

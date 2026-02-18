@@ -439,15 +439,3 @@ class FileTapeStore:
         tape_root.mkdir(parents=True, exist_ok=True)
         workspace_hash = md5(str(workspace_path.resolve()).encode("utf-8")).hexdigest()  # noqa: S324
         return TapePaths(home=home, tape_root=tape_root, workspace_hash=workspace_hash)
-    def _make_tape_file(self, tape: str) -> TapeFile:
-        """Create a new TapeFile for the given tape."""
-        encoded_name = quote(tape, safe="")
-        file_name = f"{self._paths.workspace_hash}__{encoded_name}{TAPE_FILE_SUFFIX}"
-        return TapeFile(self._paths.tape_root / file_name)
-
-    @staticmethod
-    def _resolve_paths(home: Path, workspace_path: Path) -> TapePaths:
-        tape_root = (home / "tapes").resolve()
-        tape_root.mkdir(parents=True, exist_ok=True)
-        workspace_hash = md5(str(workspace_path.resolve()).encode("utf-8")).hexdigest()  # noqa: S324
-        return TapePaths(home=home, tape_root=tape_root, workspace_hash=workspace_hash)

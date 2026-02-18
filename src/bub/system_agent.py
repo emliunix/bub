@@ -97,7 +97,7 @@ class SystemAgent:
                     with open(self.sessions_path) as f:
                         return json.load(f)
 
-                data = await asyncio.to_thread(_load)
+                data: dict[str, Any] = await asyncio.to_thread(_load)
                 logger.debug("system.agent.sessions_loaded count={}", len(data.get("sessions", {})))
                 return data
             except Exception as e:
@@ -170,8 +170,8 @@ class SystemAgent:
                     ["systemctl", "--user", "is-active", unit_name], capture_output=True, text=True, timeout=5
                 )
 
-            result = await asyncio.to_thread(_check)
-            is_active = result.returncode == 0 and result.stdout.strip() == "active"
+            result: subprocess.CompletedProcess[str] = await asyncio.to_thread(_check)
+            is_active: bool = result.returncode == 0 and result.stdout.strip() == "active"
             logger.debug("system.agent.systemd_check unit={} active={}", unit_name, is_active)
             return is_active
         except Exception as e:
@@ -384,7 +384,7 @@ class SystemAgent:
         if not self.client:
             return
 
-        payload = {
+        payload: dict[str, Any] = {
             "messageId": f"msg_{uuid.uuid4().hex}",
             "type": "spawn_result",
             "from": "agent:system",

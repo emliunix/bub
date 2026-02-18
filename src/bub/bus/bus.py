@@ -15,7 +15,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast, runtime_checkable
 
 import websockets
 import websockets.asyncio.client
@@ -46,6 +46,7 @@ from bub.bus.protocol import (
     register_client_callbacks,
     register_server_callbacks,
 )
+from bub.bus.types import Transport
 
 background_tasks: set[asyncio.Task[Any]] = set()
 
@@ -72,22 +73,45 @@ class WebSocketTransport:
 
 
 class AgentConnection:
-    """Server-side connection handler for a single client connection."""
+    """Server-side connection handler for a single client connection.
+
+    Implements the BusPeer protocol for message processing.
+    """
 
     def __init__(self, conn_id: str, server: AgentBusServer, api: AgentBusServerApi) -> None:
-        self.conn_id = conn_id
-        self.initialized = False
-        self.client_id: str | None = None
+        self._conn_id = conn_id
         self._server = server
-        self.api = api
-        self.subscriptions: set[str] = set()
+        self._api = api
+        self._initialized = False
+        self._client_id: str | None = None
+        self._subscriptions: set[str] = set()
+
+    @property
+    def client_id(self) -> str | None:
+        """The client's identifier (set after initialization)."""
+        return self._client_id
+
+    @property
+    def connection_id(self) -> str:
+        """The unique connection identifier."""
+        return self._conn_id
+
+    @property
+    def is_initialized(self) -> bool:
+        """Whether the peer has completed initialization."""
+        return self._initialized
+
+    @property
+    def subscriptions(self) -> set[str]:
+        """Set of address patterns this peer is subscribed to."""
+        return self._subscriptions
 
     async def handle_initialize(self, params: InitializeParams) -> InitializeResult:
         """Handle initialize request."""
-        if self.initialized:
+        if self._initialized:
             raise JSONRPCErrorException(-32001, "Already initialized")
-        self.client_id = params.client_id
-        self.initialized = True
+        self._client_id = params.client_id
+        self._initialized = True
 
         server_info = ServerInfo(name="bub-bus", version="0.2.0")
         capabilities = ServerCapabilities(
@@ -101,11 +125,11 @@ class AgentConnection:
             capabilities=capabilities,
         )
 
-        self.subscriptions.add(self.client_id)
+        self._subscriptions.add(self._client_id)
         logger.info(
             "wsbus.server.initialize_success client_id={} auto_subscribed={}",
-            self.client_id,
-            self.client_id,
+            self._client_id,
+            self._client_id,
         )
         return result
 
@@ -114,16 +138,16 @@ class AgentConnection:
         self._check_initialized()
         address = params.address
         if not address:
-            logger.warning("wsbus.server.subscribe_missing_address client_id={}", self.client_id)
+            logger.warning("wsbus.server.subscribe_missing_address client_id={}", self._client_id)
             raise RuntimeError("Address is required")
 
-        self.subscriptions.add(address)
+        self._subscriptions.add(address)
 
         logger.info(
             "wsbus.server.subscribe client_id={} address={} total_subs={}",
-            self.client_id,
+            self._client_id,
             address,
-            len(self.subscriptions),
+            len(self._subscriptions),
         )
 
         return SubscribeResult(success=True)
@@ -131,13 +155,13 @@ class AgentConnection:
     async def handle_unsubscribe(self, params: UnsubscribeParams) -> UnsubscribeResult:
         """Handle unsubscribe request."""
         self._check_initialized()
-        if params.address not in self.subscriptions:
+        if params.address not in self._subscriptions:
             raise JSONRPCErrorException(-32003, "Subscription not found")
-        self.subscriptions.remove(params.address)
+        self._subscriptions.remove(params.address)
 
         logger.info(
             "wsbus.server.unsubscribe client_id={} address={}",
-            self.client_id,
+            self._client_id,
             params.address,
         )
 
@@ -150,14 +174,14 @@ class AgentConnection:
 
     def _check_initialized(self) -> None:
         """Check if connection is initialized before handling non-initialize requests."""
-        if not self.initialized:
+        if not self._initialized:
             raise JSONRPCErrorException(-32001, "Not initialized")
 
     async def send_message(self, params: SendMessageParams) -> SendMessageResult:
         """Handle send message request - broadcast to all subscribers."""
         self._check_initialized()
         payload = cast(dict[str, object], params.payload)
-        sender = params.from_ or self.client_id
+        sender = params.from_ or self._client_id
         assert sender is not None, "impossible"
         self._server.validate_send_message(
             sender=sender,
@@ -176,11 +200,34 @@ class AgentConnection:
             acks=acks,
         )
 
+    async def process_message(self, from_addr: str, to: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Process an incoming message from the bus.
+
+        This implements the BusPeer protocol method.
+        """
+        process_params = ProcessMessageParams(
+            from_=from_addr,  # type: ignore[call-arg]
+            to=to,
+            message_id=payload.get("messageId", ""),
+            payload=payload,
+        )
+        result = await self._api.process_message(process_params)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "payload": result.payload,
+        }
+
 
 class AgentBusServer:
     """WebSocket server that manages multiple agent connections."""
 
-    def __init__(self, host: str = "localhost", port: int = 7892, activity_log_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 7892,
+        activity_log_path: Path | None = None,
+    ) -> None:
         self._host = host
         self._port = port
         self._server_id = f"bus-{uuid.uuid4().hex}"
@@ -188,6 +235,11 @@ class AgentBusServer:
         self._connections_lock = asyncio.Lock()
         self._server: websockets.Server | None = None
         self._activity_log = ActivityLogWriter(activity_log_path or Path("run/wsbus_activity.sqlite3"))
+
+    @property
+    def server_id(self) -> str:
+        """Unique server identifier."""
+        return self._server_id
 
     @property
     def url(self) -> str:
@@ -231,8 +283,12 @@ class AgentBusServer:
                 self._connections.pop(conn_id, None)
             logger.info("wsbus.client.disconnected conn_id={}", conn_id)
 
-    def _address_matches(self, address: str, patterns: set[str]) -> bool:
-        """Check if address matches any wildcard pattern."""
+    def address_matches(self, address: str, pattern: str) -> bool:
+        """Check if an address matches a pattern (supports wildcards)."""
+        return fnmatch(address, pattern)
+
+    def _address_matches_set(self, address: str, patterns: set[str]) -> bool:
+        """Check if address matches any wildcard pattern in the set."""
         return any(fnmatch(address, pattern) for pattern in patterns)
 
     def validate_send_message(self, *, sender: str, to: str, payload: dict[str, object]) -> None:
@@ -292,8 +348,8 @@ class AgentBusServer:
 
         tasks: list[asyncio.Task[ProcessMessageResult]] = []
         for other_conn in connections_snapshot:
-            if other_conn.initialized and self._address_matches(to, other_conn.subscriptions):
-                peer_id = other_conn.client_id or other_conn.conn_id
+            if other_conn.is_initialized and self._address_matches_set(to, other_conn.subscriptions):
+                peer_id = other_conn.client_id or other_conn.connection_id
                 matched_peers.append(peer_id)
                 logger.info("wsbus.server.publish sending to peer={}", peer_id)
 
@@ -369,9 +425,9 @@ class AgentBusServer:
             payload=payload,
         )
         try:
-            process_params = ProcessMessageParams(from_=sender, to=to, message_id=message_id, payload=payload)
+            process_params = ProcessMessageParams(from_=sender, to=to, message_id=message_id, payload=payload)  # type: ignore[call-arg]
             result = await asyncio.wait_for(
-                other_conn.api.process_message(process_params),
+                other_conn._api.process_message(process_params),
                 timeout=timeout,
             )
             await self._activity_log.log(
@@ -395,7 +451,12 @@ class AgentBusServer:
                 payload=payload,
                 error=f"Timeout after {timeout}s",
             )
-            logger.error("wsbus.publish.process_timeout peer={} to={} timeout={}s", peer_id, to, timeout)
+            logger.error(
+                "wsbus.publish.process_timeout peer={} to={} timeout={}s",
+                peer_id,
+                to,
+                timeout,
+            )
             return ProcessMessageResult(
                 success=False,
                 message=f"Timeout after {timeout}s",
@@ -416,14 +477,24 @@ class AgentBusServer:
             )
             logger.exception("wsbus.publish.process_error peer={} to={}", peer_id, to)
             return ProcessMessageResult(
-                success=False, message=str(exc), should_retry=False, retry_seconds=0, payload={"error": str(exc)}
+                success=False,
+                message=str(exc),
+                should_retry=False,
+                retry_seconds=0,
+                payload={"error": str(exc)},
             )
 
 
 class AgentBusClient:
     """WebSocket client for peers to connect to the bus with auto-reconnect support."""
 
-    def __init__(self, url: str, *, auto_reconnect: bool = True, max_reconnect_delay: float = 30.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        auto_reconnect: bool = True,
+        max_reconnect_delay: float = 30.0,
+    ) -> None:
         self._client_id = f"client-{uuid.uuid4().hex}"
         self._url = url
         self._ws: websockets.asyncio.client.ClientConnection | None = None
@@ -456,7 +527,11 @@ class AgentBusClient:
                 self._reconnect_delay = 1.0
                 self._reconnect_attempts = 0
                 return
-            except (websockets.exceptions.WebSocketException, ConnectionRefusedError, OSError) as e:
+            except (
+                websockets.exceptions.WebSocketException,
+                ConnectionRefusedError,
+                OSError,
+            ) as e:
                 if not self._auto_reconnect:
                     raise
                 self._reconnect_attempts += 1
@@ -511,7 +586,10 @@ class AgentBusClient:
         if self._stop_event.is_set():
             return
 
-        logger.info("wsbus.client.reconnecting subscriptions={}", len(self._subscribed_addresses))
+        logger.info(
+            "wsbus.client.reconnecting subscriptions={}",
+            len(self._subscribed_addresses),
+        )
 
         if self._framework:
             await self._framework.stop()
@@ -538,7 +616,10 @@ class AgentBusClient:
         if self._initialized_client_id:
             try:
                 await self.initialize(self._initialized_client_id)
-                logger.debug("wsbus.client.reinitialized client_id={}", self._initialized_client_id)
+                logger.debug(
+                    "wsbus.client.reinitialized client_id={}",
+                    self._initialized_client_id,
+                )
             except Exception as e:
                 logger.error("wsbus.client.reinitialize_failed error={}", e)
                 return
@@ -552,7 +633,11 @@ class AgentBusClient:
                 await self._api.subscribe(SubscribeParams(address=address))
                 logger.debug("wsbus.client.resubscribed address={}", address)
             except Exception as e:
-                logger.error("wsbus.client.resubscribe_failed address={} error={}", address, e)
+                logger.error(
+                    "wsbus.client.resubscribe_failed address={} error={}",
+                    address,
+                    e,
+                )
 
         logger.info("wsbus.client.reconnect_complete")
 
@@ -583,7 +668,9 @@ class AgentBusClient:
         return result
 
     async def subscribe(
-        self, address: str, handler: Callable[[str, dict[str, Any]], Any] | None = None
+        self,
+        address: str,
+        handler: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> SubscribeResult:
         """Subscribe to an address pattern."""
         if not self._api:
@@ -630,7 +717,11 @@ class AgentBusClient:
                 payload={"message": "No matching handlers"},
             )
         return ProcessMessageResult(
-            success=True, message="Processed", should_retry=False, retry_seconds=0, payload={"message": "Processed"}
+            success=True,
+            message="Processed",
+            should_retry=False,
+            retry_seconds=0,
+            payload={"message": "Processed"},
         )
 
     def _address_matches(self, address: str, pattern: str) -> bool:
@@ -663,32 +754,11 @@ class AgentBusClient:
                     except Exception:
                         logger.exception("wsbus.client.handler_error to={}", to)
 
-        logger.debug("wsbus.client.notification_matched to={} patterns={}", to, matched_patterns)
-        return matched_count
-
-    async def _next_message_id(self) -> str:
-        """Generate next sequential message ID."""
-        async with self._message_counter_lock:
-            self._message_counter += 1
-            return f"msg_{self._client_id}_{self._message_counter:010d}"
-
-    async def send_message(self, to: str, payload: dict[str, Any]) -> SendMessageResult:
-        """Send a message to the bus with auto-generated message ID."""
-        if not self._api:
-            raise RuntimeError("Not connected")
-        message_id = await self._next_message_id()
-        return await self._api.send_message(
-            SendMessageParams(from_=self._client_id, to=to, message_id=message_id, payload=payload)
+        logger.debug(
+            "wsbus.client.notification_matched to={} patterns={}",
+            to,
+            matched_patterns,
         )
-
-
-__all__ = [
-    "ActivityLogWriter",
-    "AgentBusClient",
-    "AgentBusServer",
-    "AgentConnection",
-    "WebSocketTransport",
-]        logger.debug("wsbus.client.notification_matched to={} patterns={}", to, matched_patterns)
         return matched_count
 
     async def _next_message_id(self) -> str:
@@ -703,7 +773,7 @@ __all__ = [
             raise RuntimeError("Not connected")
         message_id = await self._next_message_id()
         return await self._api.send_message(
-            SendMessageParams(from_=self._client_id, to=to, message_id=message_id, payload=payload)
+            SendMessageParams(from_=self._client_id, to=to, message_id=message_id, payload=payload)  # type: ignore[call-arg]
         )
 
 

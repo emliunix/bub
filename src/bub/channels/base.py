@@ -50,15 +50,4 @@ class BaseChannel(ABC):
 
     @property
     def is_running(self) -> bool:
-        return self._running            timestamp=datetime.now(UTC).isoformat(),
-            text=message.content,
-            sender_id=message.sender_id,
-            channel=message.channel,
-            username=message.metadata.get("username"),
-            full_name=message.metadata.get("full_name"),
-        )
-        await self.bus.send_message(to=f"tg:{message.chat_id}", payload=payload)
-
-    @property
-    def is_running(self) -> bool:
         return self._running

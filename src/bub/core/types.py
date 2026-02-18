@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from bub.app.runtime import AppRuntime
+    from bub.app.runtime import AgentRuntime
     from bub.channels.base import BaseChannel
 
 
@@ -31,7 +31,7 @@ class ParsedAssistantMessage:
 class HookContext(Protocol):
     """Context object passed to hooks."""
 
-    runtime: AppRuntime
+    runtime: AgentRuntime
 
     def register_channel(self, channel: type[BaseChannel]) -> None:
         """Register a custom channel."""

@@ -133,9 +133,4 @@ class ChannelManager:
             from bub.channels.websocket import WebSocketChannel
 
             result.append(WebSocketChannel)
-        return result            result.append(DiscordChannel)
-        if settings and settings.websocket_enabled:
-            from bub.channels.websocket import WebSocketChannel
-
-            result.append(WebSocketChannel)
         return result

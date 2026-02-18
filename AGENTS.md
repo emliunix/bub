@@ -299,7 +299,7 @@ Anti-pattern: Incremental small edits on complex files (creates inconsistent sta
 
 ## Journal Directory
 
-We maintain a `./journal` directory for daily development journals. Each journal entry is a markdown file named with the date (e.g., `2026-02-18.md`).
+We maintain a `./journal` directory for daily development journals. Journal files follow the format `YYYY-MM-DD-topic.md` (e.g., `2026-02-18-router-bug.md`).
 
 ### Purpose
 
@@ -310,24 +310,34 @@ We maintain a `./journal` directory for daily development journals. Each journal
 
 ```
 journal/
-├── 2026-02-18.md          # Today's work
-├── 2026-02-16.md          # Previous work
-└── README.md              # Index of journal entries (optional)
+├── 2026-02-18-router-bug.md    # Router issue investigation
+├── 2026-02-18-cli-refactor.md  # CLI refactoring work  
+└── 2026-02-16-protocol.md      # Protocol changes
 ```
+
+### Append-Only Style
+
+When writing to the journal:
+
+1. **Check the most recent journal file** for the current date
+2. **If it's the same topic**: Append to that file
+3. **If it's a different topic**: Create a new file with format `YYYY-MM-DD-topic.md`
+4. **If no journal exists for today**: Create a new file
+
+Example: If the latest file is `2026-02-18-router-bug.md` and you're continuing router debugging, append to it. If you're starting work on CLI changes, create `2026-02-18-cli-refactor.md`.
 
 ### How to Read (Warm Up)
 
-- Start with the newest entry.
-- Skim for: current focus, unresolved issues, key decisions, and follow-ups.
+- Find recent journal files relevant to your current task (check last 2-3 files)
+- Skim for: current focus, unresolved issues, key decisions, and follow-ups
+- Don't read everything—focus on what's relevant
 
-### How to Update (During/After Work)
+### What to Write
 
-- Append notes to today’s file (`journal/YYYY-MM-DD.md`).
-- If today’s file does not exist, create it.
-- Keep entries brief and structured; include:
-  - What changed and why
-  - Issues found + fix status
-  - Decisions made (especially protocol/schema choices)
-  - Tests or verification performed (only if explicitly run)
-  - Follow-ups / TODOs
+Keep entries brief and structured; include:
+- What changed and why
+- Issues found + fix status
+- Decisions made (especially protocol/schema choices)
+- Tests or verification performed (only if explicitly run)
+- Follow-ups / TODOs
 
