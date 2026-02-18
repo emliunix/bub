@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from loguru import logger
 
 from bub.bus.bus import AgentBusClient
-from bub.bus.protocol import SendMessageParams
 
 
 class MockTelegramBridge:
@@ -77,7 +76,7 @@ class MockTelegramBridge:
                     },
                 }
 
-                await self.client._api.send_message(SendMessageParams(to="system:spawn", payload=spawn_msg))
+                await self.client.send_message(to="system:spawn", payload=spawn_msg)
 
                 logger.info("mock.bridge.spawn_sent attempt={}/{} chat_id={}", attempt + 1, max_retries, self.chat_id)
 
@@ -128,7 +127,7 @@ class MockTelegramBridge:
                 }
 
                 # Send to tg:{chat_id} so agent's tg:* subscription matches
-                await self.client._api.send_message(SendMessageParams(to=f"tg:{self.chat_id}", payload=msg))
+                await self.client.send_message(to=f"tg:{self.chat_id}", payload=msg)
 
                 logger.info("mock.bridge.sent attempt={}/{} chat_id={}", attempt + 1, max_retries, self.chat_id)
                 return True

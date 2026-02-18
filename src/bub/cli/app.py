@@ -290,7 +290,9 @@ async def _run_agent_client(
                     channel=reply_type,
                 )
 
-                await client.send_message(to=f"{message.channel}:{message.chat_id}", payload=reply_payload)
+                # Map channel names to address prefixes
+                channel_prefix = "tg" if message.channel == "telegram" else message.channel
+                await client.send_message(to=f"{channel_prefix}:{message.chat_id}", payload=reply_payload)
 
                 logger.info("agent.responded chat_id={} content_len={}", message.chat_id, len(content))
 

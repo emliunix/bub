@@ -200,7 +200,7 @@ def create_tg_message_payload(
     return {
         "messageId": message_id,
         "type": "tg_message",
-        "from_": from_addr,
+        "from": from_addr,
         "timestamp": timestamp,
         "content": content,
     }
@@ -217,7 +217,7 @@ def create_tg_reply_payload(
     return {
         "messageId": message_id,
         "type": "tg_reply",
-        "from_": from_addr,
+        "from": from_addr,
         "timestamp": timestamp,
         "content": {
             "text": text,

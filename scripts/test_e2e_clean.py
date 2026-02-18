@@ -21,7 +21,6 @@ from datetime import UTC, datetime
 from loguru import logger
 
 from bub.bus.bus import AgentBusClient
-from bub.bus.protocol import SendMessageParams
 
 
 class MockTelegramBridge:
@@ -72,7 +71,7 @@ class MockTelegramBridge:
             },
         }
 
-        await self.client._api.send_message(SendMessageParams(to="system:spawn", payload=spawn_msg))
+        await self.client.send_message(to="system:spawn", payload=spawn_msg)
 
         logger.info("mock.bridge.spawn_sent to=system:spawn")
 
@@ -107,7 +106,7 @@ class MockTelegramBridge:
             },
         }
 
-        await self.client._api.send_message(SendMessageParams(to=self.agent_id, payload=msg))
+        await self.client.send_message(to=self.agent_id, payload=msg)
 
         logger.info("mock.bridge.message_sent to={}", self.agent_id)
         return True
@@ -173,6 +172,12 @@ async def run_e2e_test() -> bool:
             print("❌ Failed to spawn agent")
             return False
         print(f"✅ Agent spawned: {bridge.agent_id}")
+        print()
+
+        # Wait for agent to fully start and subscribe
+        print("   Waiting for agent to start...")
+        await asyncio.sleep(3.0)
+        print("✅ Agent ready")
         print()
 
         # Step 9-10: Send message (talkto already set via spawn)
