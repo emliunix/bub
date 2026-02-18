@@ -305,6 +305,8 @@ class SystemAgent:
             if value:
                 env_vars[var] = value
                 logger.debug("system.agent.passing_env_var var={}", var)
+            else:
+                logger.warning("system.agent.env_var_not_set var={}", var)
 
         # Build systemd-run command with --setenv for each var
         cmd = [
