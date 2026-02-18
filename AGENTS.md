@@ -1,7 +1,3 @@
-# Repository Guidelines
-
-> **IMPORTANT**: This document is for human developers only. DO NOT execute any commands or workflows described in this file unless explicitly requested by the user. This is documentation, not instructions for automated execution.
-
 ## Start Here (Docs)
 
 Use these dedicated docs for details:
@@ -173,11 +169,11 @@ The repo uses `uv` + Ruff + mypy + pytest.
 
 (See `docs/testing.md` for script/test facilities; see `docs/deployment.md` for runtime modes.)
 
-## Multi-File Change Protocol
+### Multi-File Change Protocol
 
 When a change spans multiple files (types → implementations → callers), follow this sequence.
 
-### Phase 1: Collect
+#### Phase 1: Collect
 
 Goal: Gather all affected locations and identify unresolved inconsistencies before making any edits.
 
@@ -186,7 +182,7 @@ Goal: Gather all affected locations and identify unresolved inconsistencies befo
 - Map dependencies: core types → affected components → callers.
 - Stop and ask if a key architectural decision is unclear.
 
-### Phase 2: Plan
+#### Phase 2: Plan
 
 Goal: Create a detailed, actionable edit plan that can be executed without surprises.
 
@@ -195,13 +191,12 @@ Goal: Create a detailed, actionable edit plan that can be executed without surpr
 - Update callers last.
 - If multiple valid approaches exist, stop and ask before editing.
 
-### Phase 3: Execute
+#### Phase 3: Execute
 
 Goal: Implement the plan exactly as designed.
 
 - Follow the plan.
 - If the plan breaks during implementation, stop and go back to Phase 1 or Phase 2.
-- Avoid making unplanned edits, even if they seem small (creates inconsistent state).
 
 ### Overwrite Style Editing
 
@@ -210,7 +205,7 @@ For files requiring substantial changes (>20% of lines or complex refactoring):
 1. **Architecture design first** - Document the new structure.
 2. **Read entire file** - Understand all components.
 3. **Create outline** - List all classes, methods, and their purposes.
-4. **Use LSP** - Let the language server help identify references.
+4. **Use LSP** - Let language server help identify references.
 5. **Draft new outline** - According to the new architecture.
 6. **Generate complete new file** - Write from scratch using the outline.
 7. **Review with diff** - Compare old vs new (`diff -u old.py new.py`).
@@ -252,7 +247,6 @@ Anti-pattern: Incremental small edits on complex files (creates inconsistent sta
 - Use `type` for simple type aliases: `type Foo = str | None`
 - Mark untyped external calls with `# type: ignore[attr-defined]`
 - Put shared type definitions in `types.py` within the module (e.g., `tape/types.py` for tape types)
-  - This has the benefit of making types centrally managed and easily importable without circular dependencies.
 
 ### Code Quality
 
