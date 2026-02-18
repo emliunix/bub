@@ -208,31 +208,82 @@ class TestSendMessageAcks:
 
     @pytest.mark.asyncio
     async def test_send_message_returns_acks(self):
-        """Test that send_message returns delivery acks."""
-        transport = InMemoryTransport("test-client")
-        framework = JSONRPCFramework(transport)
-        api = AgentBusClientApi(framework, client_id="test-client")
+        """Test that send_message returns delivery acks using paired transport."""
+        from .test_transport import PairedTransport
 
-        # Initialize
-        init_result = await api.initialize(InitializeParams(client_id="test-client"))
-        assert init_result.server_id.startswith("bus-")
+        paired = PairedTransport()
+        client_transport = paired.a
+        server_transport = paired.b
 
-        # Subscribe
-        sub_result = await api.subscribe(SubscribeParams(address="test:*"))
-        assert sub_result.success is True
+        # Set up server side
+        server_framework = JSONRPCFramework(server_transport)
+        client_framework = JSONRPCFramework(client_transport)
 
-        # Send message using send_message2 (auto-generates message_id)
-        result = await api.send_message2(
-            from_="test:sender",
-            to="test:topic",
-            payload={
-                "type": "test",
-                "content": {"text": "hello"},
-            },
-        )
+        # Register server handlers
+        async def handle_initialize(params: dict[str, object]) -> dict[str, object]:
+            return {
+                "serverId": "bus-test",
+                "serverInfo": {"name": "bub-bus", "version": "1.0.0"},
+                "capabilities": {"subscribe": True, "processMessage": True, "addresses": []},
+            }
 
-        assert result.accepted is True
-        assert result.message_id.startswith("msg_test-client")
+        async def handle_subscribe(params: dict[str, object]) -> dict[str, object]:
+            return {"success": True, "subscriptionId": "sub-001"}
+
+        async def handle_send_message(params: dict[str, object]) -> dict[str, object]:
+            return {
+                "accepted": True,
+                "messageId": params.get("messageId", "unknown"),
+                "acks": [{"success": True, "message": "Delivered", "payload": {}}],
+            }
+
+        server_framework.register_method("initialize", handle_initialize)
+        server_framework.register_method("subscribe", handle_subscribe)
+        server_framework.register_method("sendMessage", handle_send_message)
+
+        # Client side
+        api = AgentBusClientApi(client_framework, client_id="test-client")
+
+        # Start both frameworks concurrently
+        server_task = asyncio.create_task(server_framework.run())
+        client_task = asyncio.create_task(client_framework.run())
+
+        try:
+            # Wait a bit for frameworks to start
+            await asyncio.sleep(0.01)
+
+            # Initialize
+            init_result = await api.initialize(InitializeParams(client_id="test-client"))
+            assert init_result.server_id == "bus-test"
+
+            # Subscribe
+            sub_result = await api.subscribe(SubscribeParams(address="test:*"))
+            assert sub_result.success is True
+
+            # Send message using send_message2 (auto-generates message_id)
+            result = await api.send_message2(
+                from_="test:sender",
+                to="test:topic",
+                payload={
+                    "type": "test",
+                    "content": {"text": "hello"},
+                },
+            )
+
+            assert result.accepted is True
+            assert result.message_id.startswith("msg_test-client")
+
+        finally:
+            await client_framework.stop()
+            await server_framework.stop()
+            try:
+                await client_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
 
 
 class TestMultipleSubscribers:
@@ -279,26 +330,67 @@ class TestProcessMessage:
 
     @pytest.mark.asyncio
     async def test_process_message_success(self):
-        """Test successful message processing."""
-        transport = InMemoryTransport("test-agent")
-        framework = JSONRPCFramework(transport)
-        api = AgentBusServerApi(framework)
+        """Test successful message processing using paired transport."""
+        from .test_transport import PairedTransport
 
-        # Process a message
-        result = await api.process_message(
-            ProcessMessageParams(
-                from_="tg:123",
-                to="agent:test",
-                message_id="msg-001",
-                payload={
-                    "type": "tg_message",
-                    "content": {"text": "hello"},
-                },
+        paired = PairedTransport()
+        server_transport = paired.a
+        client_transport = paired.b
+
+        # Set up server side (bus calling client)
+        client_framework = JSONRPCFramework(client_transport)
+        server_framework = JSONRPCFramework(server_transport)
+
+        # Register client-side handler for processMessage
+        async def handle_process_message(params: dict[str, object]) -> dict[str, object]:
+            return {
+                "success": True,
+                "message": "Processed",
+                "shouldRetry": False,
+                "retrySeconds": 0,
+                "payload": {"message": "Processed"},
+            }
+
+        client_framework.register_method("processMessage", handle_process_message)
+
+        # Start both frameworks concurrently
+        server_task = asyncio.create_task(server_framework.run())
+        client_task = asyncio.create_task(client_framework.run())
+
+        try:
+            # Wait a bit for frameworks to start
+            await asyncio.sleep(0.01)
+
+            # Server side (bus)
+            api = AgentBusServerApi(server_framework)
+
+            # Process a message
+            result = await api.process_message(
+                ProcessMessageParams(
+                    from_="tg:123",
+                    to="agent:test",
+                    message_id="msg-001",
+                    payload={
+                        "type": "tg_message",
+                        "content": {"text": "hello"},
+                    },
+                )
             )
-        )
 
-        assert result.success is True
-        assert result.should_retry is False
+            assert result.success is True
+            assert result.should_retry is False
+
+        finally:
+            await server_framework.stop()
+            await client_framework.stop()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await client_task
+            except asyncio.CancelledError:
+                pass
 
 
 class TestWildcardSubscription:
