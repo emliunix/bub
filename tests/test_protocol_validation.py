@@ -23,7 +23,7 @@ def _server_url(server: AgentBusServer) -> str:
 @pytest.mark.asyncio
 async def test_protocol_full_flow() -> None:
     """Validate full protocol flow: connect, initialize, subscribe, receive all messages."""
-    server = AgentBusServer(host="localhost", port=0)
+    server = AgentBusServer(server=("localhost", 0))
     await server.start_server()
 
     try:
@@ -114,7 +114,7 @@ async def test_protocol_full_flow() -> None:
 @pytest.mark.asyncio
 async def test_server_rejects_uninitialized_requests() -> None:
     """Server should reject non-initialize requests before handshake."""
-    server = AgentBusServer(host="localhost", port=0)
+    server = AgentBusServer(server=("localhost", 0))
     await server.start_server()
 
     try:
@@ -141,7 +141,7 @@ async def test_server_rejects_uninitialized_requests() -> None:
 @pytest.mark.asyncio
 async def test_initialize_twice_fails() -> None:
     """Initialize should fail if called twice."""
-    server = AgentBusServer(host="localhost", port=0)
+    server = AgentBusServer(server=("localhost", 0))
     await server.start_server()
 
     try:
@@ -163,7 +163,7 @@ async def test_initialize_twice_fails() -> None:
 @pytest.mark.asyncio
 async def test_wildcard_subscription_receives_all() -> None:
     """Wildcard subscription should receive all messages matching pattern."""
-    server = AgentBusServer(host="localhost", port=0)
+    server = AgentBusServer(server=("localhost", 0))
     await server.start_server()
 
     try:
@@ -213,7 +213,7 @@ async def test_wildcard_subscription_receives_all() -> None:
 @pytest.mark.asyncio
 async def test_client_rejects_subscribe_before_initialize() -> None:
     """Client should reject subscribe before initialize."""
-    server = AgentBusServer(host="localhost", port=0)
+    server = AgentBusServer(server=("localhost", 0))
     await server.start_server()
 
     try:
@@ -233,7 +233,7 @@ async def test_client_rejects_subscribe_before_initialize() -> None:
 @pytest.mark.asyncio
 async def test_ping_pong() -> None:
     """Ping should return timestamp."""
-    server = AgentBusServer(host="localhost", port=0)
+    server = AgentBusServer(server=("localhost", 0))
     await server.start_server()
 
     try:

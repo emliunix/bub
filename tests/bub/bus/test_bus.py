@@ -27,7 +27,7 @@ class TestMessageFlow:
         - Client B is subscribed to "b:*"
         - B receives the message
         """
-        server = AgentBusServer(host="localhost", port=0)
+        server = AgentBusServer(server=("localhost", 0))
 
         # Create mock peers
         peer_a = MockPeer("client:a")
@@ -210,7 +210,7 @@ class TestServerIntegration:
     @pytest.mark.asyncio
     async def test_server_start_stop(self):
         """Test server can start and stop cleanly."""
-        server = AgentBusServer(host="localhost", port=0)
+        server = AgentBusServer(server=("localhost", 0))
 
         # Note: We don't actually start the server to avoid port binding in tests
         # This is a placeholder for when we have the mock transport integrated
@@ -220,7 +220,7 @@ class TestServerIntegration:
     @pytest.mark.asyncio
     async def test_address_matching(self):
         """Test address pattern matching logic."""
-        server = AgentBusServer(host="localhost", port=0)
+        server = AgentBusServer(server=("localhost", 0))
 
         # Test exact match
         assert server.address_matches("agent:worker-1", "agent:worker-1") is True
