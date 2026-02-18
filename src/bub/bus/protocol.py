@@ -238,8 +238,30 @@ class AgentBusServerApi:
 class AgentBusClientApi:
     """Client API for peer->bus requests."""
 
-    def __init__(self, framework: JSONRPCFramework) -> None:
+    def __init__(self, framework: JSONRPCFramework, client_id: str | None = None) -> None:
         self._framework = framework
+        self._client_id = client_id or f"api-{id(self):x}"
+        self._message_counter = 0
+
+    def _next_message_id(self) -> str:
+        """Generate next sequential message ID atomically."""
+        self._message_counter += 1
+        return f"msg_{self._client_id}_{self._message_counter:010d}"
+
+    async def send_message2(
+        self,
+        from_: str,
+        to: str,
+        payload: dict[str, JsonValue],
+    ) -> SendMessageResult:
+        """Send message with auto-generated message ID.
+
+        This is a convenience method that manages message_id generation
+        at the API instance level with atomic increment.
+        """
+        message_id = self._next_message_id()
+        params = SendMessageParams(from_=from_, to=to, message_id=message_id, payload=payload)  # type: ignore[call-arg]
+        return await self.send_message(params)
 
     async def initialize(self, params: InitializeParams) -> InitializeResult:
         """Send initialize request to server."""

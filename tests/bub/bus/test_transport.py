@@ -11,7 +11,7 @@ import json
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from bub.bus.types import Transport
+from bub.rpc.types import Transport
 
 
 class InMemoryTransport(Transport):

@@ -161,6 +161,13 @@ Subagents must not:
 
 For a component-wise view (bus/tape/agents/channels/CLI), see `docs/components.md`.
 
+## Type System Architecture
+
+When moving types between modules during refactoring:
+
+- **Migrate imports, don't re-export**: Update all affected imports to point to the new canonical location. Don't leave re-exports in the old location as a compatibility shim.
+- **Why**: Re-exports hide the true source of types, making the codebase harder to understand and maintain. They also break when the original module changes.
+
 ## Development Practices
 
 ### Build/Test Commands (Reference Only)

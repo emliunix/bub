@@ -46,9 +46,37 @@ from bub.bus.protocol import (
     register_client_callbacks,
     register_server_callbacks,
 )
-from bub.bus.types import Transport
+from bub.rpc.types import Listener, Transport
 
 background_tasks: set[asyncio.Task[Any]] = set()
+
+
+class WebSocketListener:
+    """WebSocket-based implementation of the Listener protocol."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self._host = host
+        self._port = port
+        self._server: websockets.Server | None = None
+
+    @property
+    def url(self) -> str:
+        return f"ws://{self._host}:{self._port}"
+
+    async def start(self, handler: Callable[[Transport], Awaitable[None]]) -> None:
+        """Start WebSocket server and forward connections to handler."""
+
+        async def _ws_handler(websocket: websockets.asyncio.server.ServerConnection) -> None:
+            transport = WebSocketTransport(websocket)
+            await handler(transport)
+
+        self._server = await websockets.serve(_ws_handler, self._host, self._port)
+
+    async def stop(self) -> None:
+        """Stop the WebSocket server."""
+        if self._server:
+            self._server.close()
+            await self._server.wait_closed()
 
 
 class WebSocketTransport:
@@ -224,17 +252,20 @@ class AgentBusServer:
 
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 7892,
+        server: tuple[str, int] | Listener,
         activity_log_path: Path | None = None,
     ) -> None:
-        self._host = host
-        self._port = port
         self._server_id = f"bus-{uuid.uuid4().hex}"
         self._connections: dict[str, AgentConnection] = {}
         self._connections_lock = asyncio.Lock()
-        self._server: websockets.Server | None = None
         self._activity_log = ActivityLogWriter(activity_log_path or Path("run/wsbus_activity.sqlite3"))
+
+        # Create WebSocketListener from tuple if needed
+        if isinstance(server, tuple):
+            host, port = server
+            self._listener: Listener = WebSocketListener(host, port)
+        else:
+            self._listener = server
 
     @property
     def server_id(self) -> str:
@@ -243,23 +274,21 @@ class AgentBusServer:
 
     @property
     def url(self) -> str:
-        return f"ws://{self._host}:{self._port}"
+        return self._listener.url
 
     async def start_server(self) -> None:
         """Start WebSocket server."""
         await self._activity_log.start()
-        self._server = await websockets.serve(self._handle_client, self._host, self._port)
+        await self._listener.start(self._handle_transport)
         logger.info("wsbus.server.started url={}", self.url)
 
     async def stop_server(self) -> None:
         """Stop WebSocket server."""
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
+        await self._listener.stop()
         await self._activity_log.stop()
         logger.info("wsbus.server.stopped")
 
-    async def _handle_client(self, websocket: ServerConnection) -> None:
+    async def _handle_transport(self, transport: Transport) -> None:
         """Handle incoming client connection."""
         conn_id = uuid.uuid4().hex
 
@@ -554,7 +583,7 @@ class AgentBusClient:
 
         transport = WebSocketTransport(self._ws)
         self._framework = JSONRPCFramework(transport)
-        self._api = AgentBusClientApi(self._framework)
+        self._api = AgentBusClientApi(self._framework, client_id=self._client_id)
 
         register_client_callbacks(self._framework, self)
 

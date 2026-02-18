@@ -44,7 +44,7 @@ def bus_serve() -> None:
 
     logger.info("bus.serve starting host={} port={}", bus_settings.host, bus_settings.port)
 
-    server = AgentBusServer(host=bus_settings.host, port=bus_settings.port)
+    server = AgentBusServer(server=(bus_settings.host, bus_settings.port))
 
     async def _run() -> None:
         await server.start_server()

@@ -1,12 +1,12 @@
 """Type definitions and protocols for the message bus.
 
-This module defines protocols for transport layer to enable testing with mock implementations.
+This module defines bus-specific types.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 # Type aliases
 Address = str
@@ -17,23 +17,6 @@ AckDict = dict[str, Any]
 
 # Handler type
 MessageHandler = Callable[[Address, MessagePayload], Awaitable[None]]
-
-
-@runtime_checkable
-class Transport(Protocol):
-    """Protocol for message transport layer.
-
-    Abstracts the underlying transport mechanism (WebSocket, in-memory, etc.)
-    This is the only external interface we need to mock for testing.
-    """
-
-    async def send_message(self, message: str) -> None:
-        """Send a message string through the transport."""
-        ...
-
-    async def receive_message(self) -> str:
-        """Receive a message string from the transport."""
-        ...
 
 
 class TestMessage:
@@ -71,5 +54,4 @@ __all__ = [
     "MessageHandler",
     "MessagePayload",
     "TestMessage",
-    "Transport",
 ]

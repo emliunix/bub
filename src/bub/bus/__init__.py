@@ -37,7 +37,6 @@ from bub.bus.types import (
     MessageHandler,
     MessagePayload,
     TestMessage,
-    Transport,
 )
 
 __all__ = [
@@ -73,5 +72,4 @@ __all__ = [
     "MessageHandler",
     "MessagePayload",
     "TestMessage",
-    "Transport",
 ]
