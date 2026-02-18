@@ -68,13 +68,15 @@ request = JSONRPCRequest(
 # Serialize to JSON
 json_str = request.model_dump_json(by_alias=True)
 
-# Transport protocol enables mocking
-class InMemoryTransport(Transport):
+# Transport protocol enables mocking for tests
+class MockTransport(Transport):
     async def send_message(self, message: str) -> None:
-        self._outgoing.put(message)
+        # Handle outgoing message
+        pass
     
     async def receive_message(self) -> str:
-        return await self._incoming.get()
+        # Return incoming message
+        return '{"jsonrpc":"2.0","result":{}}'
 ```
 
 ## Layer 2: JSON-RPC Framework Layer
@@ -101,8 +103,8 @@ class Transport(Protocol):
 ```
 
 **Transport implementations:**
-- `WebSocketTransport` - Wraps a WebSocket connection (in `bub/bus/bus.py`)
-- `InMemoryTransport` - For testing (queue-based, in `tests/`)
+- `WebSocketTransport` - Wraps a WebSocket connection
+- `PairedTransport` - For testing (creates two connected transports)
 - Any other bidirectional message transport implementing the `Transport` protocol
 
 ### JSONRPCFramework

@@ -1,76 +1,16 @@
-"""In-memory transport implementation for testing.
+"""Test transport implementations.
 
-Provides mock transport that doesn't require actual WebSocket connections,
+Provides mock transports that don't require actual WebSocket connections,
 enabling fast, deterministic tests of message bus logic.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Callable, Coroutine
 from typing import Any
 
 from bub.rpc.types import Transport
-
-
-class InMemoryTransport(Transport):
-    """In-memory transport for testing.
-
-    Simulates message sending/receiving without actual network I/O.
-    Used to test bus logic in isolation.
-    """
-
-    def __init__(self, name: str = "test"):
-        self._name = name
-        self._incoming: asyncio.Queue[str] = asyncio.Queue()
-        self._outgoing: asyncio.Queue[str] = asyncio.Queue()
-        self._closed = False
-        self._recv_count = 0
-        self._send_count = 0
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def recv_count(self) -> int:
-        return self._recv_count
-
-    @property
-    def send_count(self) -> int:
-        return self._send_count
-
-    async def send_message(self, message: str) -> None:
-        """Send a message - puts it in outgoing queue."""
-        if self._closed:
-            raise RuntimeError("Transport closed")
-        self._send_count += 1
-        await self._outgoing.put(message)
-
-    async def receive_message(self) -> str:
-        """Receive a message - waits on incoming queue."""
-        if self._closed:
-            raise RuntimeError("Transport closed")
-        message = await self._incoming.get()
-        self._recv_count += 1
-        return message
-
-    def inject_message(self, message: str) -> None:
-        """Inject a message into the incoming queue (for testing)."""
-        self._incoming.put_nowait(message)
-
-    def inject_json(self, data: dict[str, Any]) -> None:
-        """Inject a JSON message into the incoming queue."""
-        self.inject_message(json.dumps(data))
-
-    async def receive_outgoing(self) -> str:
-        """Receive a message from the outgoing queue (for verification)."""
-        return await self._outgoing.get()
-
-    def close(self) -> None:
-        """Close the transport."""
-        self._closed = True
 
 
 class PairedTransport:
@@ -173,7 +113,6 @@ class MockPeer:
 
 
 __all__ = [
-    "InMemoryTransport",
     "MockPeer",
     "PairedTransport",
 ]

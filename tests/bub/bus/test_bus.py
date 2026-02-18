@@ -18,11 +18,10 @@ from bub.bus.protocol import (
     AgentBusServerApi,
     InitializeParams,
     ProcessMessageParams,
-    SendMessageParams,
     SubscribeParams,
 )
 from bub.rpc.framework import JSONRPCFramework
-from .test_transport import InMemoryTransport, MockPeer
+from .test_transport import MockPeer
 
 
 class TestMessageFlow:
@@ -161,30 +160,6 @@ class TestDeadlockScenarios:
 
 class TestServerProtocol:
     """Test server protocol behavior."""
-
-    @pytest.mark.asyncio
-    async def test_server_rejects_uninitialized_requests(self):
-        """Server should reject non-initialize requests before handshake."""
-        transport = InMemoryTransport("test-client")
-        framework = JSONRPCFramework(transport)
-
-        # Don't register initialize - server should reject other requests
-        # This tests that the server enforces initialization order
-
-        # Send a subscribe request without initialization
-        subscribe_request = {
-            "jsonrpc": "2.0",
-            "method": "subscribe",
-            "params": {"address": "tg:*"},
-            "id": 1,
-        }
-
-        transport.inject_json(subscribe_request)
-
-        # Server should respond with error
-        # Note: This would need the actual server handler registration
-        # For now, this documents the expected behavior
-        pass
 
     @pytest.mark.asyncio
     async def test_address_matching(self):
