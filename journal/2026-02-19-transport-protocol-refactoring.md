@@ -98,3 +98,11 @@ Created comprehensive scripts documentation skill at `.agent/skills/scripts-docs
 
 1. `0524dab` - refactor: move Transport/Listener protocols to rpc.types
 2. `c60c4ea` - docs: add scripts-docs skill for maintaining script documentation
+3. `0655b5e` - docs: update testing.md with accurate last_modified dates for all scripts
+
+## Scripts Documentation Maintenance Complete
+
+✅ All 24 scripts documented in `docs/testing.md` with accurate last_modified dates
+✅ Fixed 8 scripts with incorrect dates (2026-02-18 → 2026-02-17)
+✅ Added 7 previously undocumented scripts
+✅ Created skill at `.agent/skills/scripts-docs/SKILL.md` with maintenance procedure

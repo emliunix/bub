@@ -292,7 +292,6 @@ class AgentBusServer:
         """Handle incoming client connection."""
         conn_id = uuid.uuid4().hex
 
-        transport = WebSocketTransport(websocket)
         framework = JSONRPCFramework(transport)
         api = AgentBusServerApi(framework)
 
