@@ -260,13 +260,8 @@ class AgentBusServer:
         return {
             "tg_message",
             "tg_reply",
-            "agent_event",
             "spawn_request",
-            "spawn_agent",
-            "spawn_agent_response",
             "spawn_result",
-            "configure",
-            "route_assigned",
         }
 
     async def _dispatch_process_message(

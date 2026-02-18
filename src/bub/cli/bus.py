@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
+import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 import typer
 from loguru import logger
 
-from bub.channels.events import InboundMessage, OutboundMessage
-from bub.channels.wsbus import AgentBusClient
+
+from bub.bus.bus import AgentBusClient
 from bub.config import BusSettings
 from bub.logging_utils import configure_logging
+from bub.bus.protocol import SendMessageParams
 
 bus_app = typer.Typer(help="Bus operations")
 
@@ -33,7 +37,7 @@ async def _wait_forever() -> None:
 @bus_app.command("serve")
 def bus_serve() -> None:
     """Start the WebSocket bus server."""
-    from bub.channels.wsbus import AgentBusServer
+    from bub.bus.bus import AgentBusServer
 
     configure_logging(profile="chat")
     bus_settings = BusSettings()
@@ -60,7 +64,9 @@ def bus_send(
     message: Annotated[list[str] | None, typer.Argument(help="Message to send")] = None,
     chat_id: Annotated[str, typer.Option("--chat-id", "-c", help="Chat ID")] = DEFAULT_CHAT_ID,
     channel: Annotated[str, typer.Option("--channel", help="Channel name")] = DEFAULT_CHANNEL,
-    topic: Annotated[str, typer.Option("--topic", help="Topic for responses")] = f"tg:{DEFAULT_CHAT_ID}",
+    address: Annotated[
+        str, typer.Option("--address", "-a", help="Address for responses (e.g., 'tg:123')")
+    ] = f"tg:{DEFAULT_CHAT_ID}",
     timeout: Annotated[int, typer.Option("--timeout", "-t", help="Receive timeout in seconds")] = DEFAULT_TIMEOUT,
     bus_url: Annotated[str | None, typer.Option("--bus-url", "-u", envvar="BUB_BUS_URL", help="Bus URL")] = None,
 ) -> None:
@@ -74,10 +80,12 @@ def bus_send(
         raise typer.Exit(1)
 
     url = bus_url or _resolve_bus_url()
-    asyncio.run(_send_and_listen(url, content, chat_id, channel, topic, timeout))
+    asyncio.run(_send_and_listen(url, content, chat_id, channel, address, timeout))
 
 
-async def _send_and_listen(url: str, content: str, chat_id: str, channel: str, topic: str, timeout: int) -> None:
+async def _send_and_listen(
+    url: str, content: str, chat_id: str, channel: str, response_address: str, timeout: int
+) -> None:
     client = AgentBusClient(url, auto_reconnect=False)
     received: list[str] = []
 
@@ -85,24 +93,29 @@ async def _send_and_listen(url: str, content: str, chat_id: str, channel: str, t
         await client.connect()
         await client.initialize(f"bus-send-{chat_id}")
 
-        async def on_outbound(msg: OutboundMessage) -> None:
-            received.append(msg.content)
-            typer.echo(f"\n--- response (chat_id={msg.chat_id}) ---")
-            typer.echo(msg.content)
+        async def on_outbound(topic: str, payload: dict) -> None:
+            msg_content = payload.get("content", "")
+            received.append(msg_content)
+            typer.echo(f"\n--- response ---")
+            typer.echo(msg_content)
             typer.echo("---")
 
-        await client.on_outbound(on_outbound)
+        await client.subscribe(response_address, on_outbound)
 
-        await client.publish_inbound(
-            InboundMessage(
-                channel=channel,
-                sender_id=chat_id,
-                chat_id=chat_id,
-                content=content,
-            )
-        )
+        message_payload = {
+            "messageId": f"msg_{chat_id}_{uuid.uuid4().hex[:8]}",
+            "type": "user_message",
+            "from": f"{channel}:{chat_id}",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "content": {
+                "text": content,
+                "channel": channel,
+                "chat_id": chat_id,
+            },
+        }
+        await client.send_message(to="agent", payload=message_payload)
         typer.echo(f"Sent: {content}")
-        typer.echo(f"Listening on topic={topic} (timeout={timeout}s)...")
+        typer.echo(f"Listening on address={response_address} (timeout={timeout}s)...")
 
         try:
             await asyncio.wait_for(_wait_forever(), timeout=timeout)
@@ -118,33 +131,32 @@ async def _send_and_listen(url: str, content: str, chat_id: str, channel: str, t
 
 @bus_app.command("recv")
 def bus_recv(
-    topic: Annotated[str, typer.Argument(help="Topic pattern to subscribe (e.g., 'tg:*')")] = "tg:*",
+    address: Annotated[str, typer.Argument(help="Address pattern to subscribe (e.g., 'tg:*')")] = "tg:*",
     bus_url: Annotated[str | None, typer.Option("--bus-url", "-u", envvar="BUB_BUS_URL", help="Bus URL")] = None,
 ) -> None:
     """Subscribe to a topic and print messages until Ctrl-C."""
     configure_logging(profile="chat")
     url = bus_url or _resolve_bus_url()
-    asyncio.run(_recv(url, topic))
+    asyncio.run(_recv(url, address))
 
 
-async def _recv(url: str, topic: str) -> None:
+async def _recv(url: str, address: str) -> None:
     client = AgentBusClient(url, auto_reconnect=False)
 
     try:
         await client.connect()
         await client.initialize("bus-recv")
-        await client.subscribe(topic)
-        typer.echo(f"Connected to {url}")
-        typer.echo(f"Subscribed to: {topic}")
 
-        async def on_message(topic_pattern: str, payload: dict) -> None:
+        async def on_message(address_pattern: str, payload: dict) -> None:
             import json
 
-            typer.echo(f"\n--- {topic_pattern} ---")
+            typer.echo(f"\n--- {address_pattern} ---")
             typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
             typer.echo("---")
 
-        client.on_notification(topic, on_message)
+        await client.subscribe(address, on_message)
+        typer.echo(f"Connected to {url}")
+        typer.echo(f"Subscribed to: {address}")
 
         try:
             await _wait_forever()
@@ -200,6 +212,10 @@ async def _run_telegram_bridge(  # noqa: C901
     client = AgentBusClient(url, auto_reconnect=True)
     bot_instance: Bot | None = None
 
+    # Track assigned agents per chat_id
+    chat_agents: dict[str, str] = {}  # chat_id -> agent_client_id
+    spawn_pending: dict[str, asyncio.Event] = {}  # chat_id -> Event
+
     async def send_to_telegram(chat_id: str, content: str) -> None:
         logger.info("telegram.bridge.send_to_telegram chat_id={} bot={}", chat_id, bot_instance)
         if bot_instance is None:
@@ -211,17 +227,108 @@ async def _run_telegram_bridge(  # noqa: C901
         except Exception:
             logger.exception("telegram.bridge.send_error chat_id={}", chat_id)
 
-    async def handle_outbound(msg: OutboundMessage) -> None:
-        logger.info("telegram.bridge.outbound chat_id={} len={}", msg.chat_id, len(msg.content))
-        await send_to_telegram(msg.chat_id, msg.content)
+    async def handle_outbound(topic: str, payload: dict) -> None:
+        content = payload.get("content", "")
+        chat_id = payload.get("content", {}).get("chat_id", "")
+        logger.info("telegram.bridge.outbound topic={} chat_id={} len={}", topic, chat_id, len(content))
+        await send_to_telegram(chat_id, content)
+
+    async def spawn_agent_for_chat(chat_id: str) -> str | None:
+        """Spawn an agent for this chat via system agent.
+
+        Note: System agent handles idempotency - if agent already exists and is
+        running, it will return success with the existing agent ID.
+        """
+        # Note: We removed the local systemd check. System agent is the authority
+        # and handles the "already running" case by returning the existing agent.
+
+        if chat_id in spawn_pending:
+            # Wait for existing spawn to complete
+            logger.info("telegram.bridge.spawn_waiting chat_id={}", chat_id)
+            await spawn_pending[chat_id].wait()
+            return chat_agents.get(chat_id)
+
+        # Create pending event
+        spawn_pending[chat_id] = asyncio.Event()
+
+        try:
+            logger.info("telegram.bridge.spawning_agent chat_id={}", chat_id)
+
+            # Send spawn request to system agent
+            spawn_msg = {
+                "messageId": f"spawn_{chat_id}_{uuid.uuid4().hex[:8]}",
+                "type": "spawn_request",
+                "from": "telegram-bridge",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "content": {
+                    "chat_id": chat_id,
+                    "channel": "telegram",
+                    "channel_type": "telegram",
+                },
+            }
+
+            # Send to system:spawn
+            await client.send_message(to="system:spawn", payload=spawn_msg)
+            logger.info("telegram.bridge.spawn_request_sent chat_id={}", chat_id)
+
+            # Wait for spawn response (timeout after 35 seconds)
+            try:
+                await asyncio.wait_for(spawn_pending[chat_id].wait(), timeout=35.0)
+            except asyncio.TimeoutError:
+                logger.error("telegram.bridge.spawn_timeout chat_id={}", chat_id)
+                return None
+
+            agent_id = chat_agents.get(chat_id)
+            if agent_id:
+                logger.info("telegram.bridge.spawn_success chat_id={} agent={}", chat_id, agent_id)
+            else:
+                logger.error("telegram.bridge.spawn_failed chat_id={}", chat_id)
+
+            return agent_id
+
+        except Exception as e:
+            logger.exception("telegram.bridge.spawn_error")
+            return None
+        finally:
+            del spawn_pending[chat_id]
+
+    async def handle_spawn_response(topic: str, payload: dict) -> None:
+        """Handle spawn response from system agent."""
+        msg_type = payload.get("type", "")
+        if msg_type != "spawn_result":
+            return
+
+        content = payload.get("content", {})
+        success = content.get("success", False)
+        agent_id = content.get("client_id", "")
+
+        # Find pending spawn and set the result
+        for chat_id, event in list(spawn_pending.items()):
+            if success and agent_id:
+                chat_agents[chat_id] = agent_id
+                logger.info("telegram.bridge.spawn_response chat_id={} agent={}", chat_id, agent_id)
+            else:
+                logger.error(
+                    "telegram.bridge.spawn_failed_response chat_id={} error={}",
+                    chat_id,
+                    content.get("error", "unknown"),
+                )
+
+            event.set()
+            break
 
     try:
         await client.connect()
         await client.initialize("telegram-bridge")
 
-        await client.on_outbound(handle_outbound)
+        await client.subscribe("tg:*", handle_outbound)
+
+        # Subscribe to spawn responses from system agent
+        await client.subscribe("telegram-bridge", handle_spawn_response)
+        logger.info("telegram.bridge.spawn_handler_registered")
 
         builder = Application.builder().token(token)
+
         if proxy:
             builder = builder.proxy(proxy).get_updates_proxy(proxy)
 
@@ -231,7 +338,8 @@ async def _run_telegram_bridge(  # noqa: C901
         async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if update.message is None:
                 return
-            if allow_chats and str(update.message.chat_id) not in allow_chats:
+            chat_id = str(update.message.chat_id)
+            if allow_chats and chat_id not in allow_chats:
                 await update.message.reply_text("You are not allowed.")
                 return
             await update.message.reply_text("Bub is online.")
@@ -256,19 +364,35 @@ async def _run_telegram_bridge(  # noqa: C901
 
             logger.info("telegram.bridge.inbound chat_id={} content={}", chat_id, text[:50])
 
+            # Ensure we have an agent for this chat
+            agent_id = await spawn_agent_for_chat(chat_id)
+            if not agent_id:
+                logger.error("telegram.bridge.no_agent chat_id={}", chat_id)
+                await update.message.reply_text("Failed to start conversation agent. Please try again.")
+                return
+
             with suppress(Exception):
                 await context.bot.send_chat_action(chat_id=int(chat_id), action="typing")
 
             try:
-                await client.publish_inbound(
-                    InboundMessage(
-                        channel="telegram",
-                        sender_id=str(user.id),
-                        chat_id=chat_id,
-                        content=text,
-                        metadata={"username": user.username, "full_name": user.full_name},
-                    )
+                # Send directly to the assigned agent
+                await client.send_message(
+                    to=agent_id,
+                    payload={
+                        "messageId": f"msg_{uuid.uuid4().hex}",
+                        "type": "tg_message",
+                        "from": f"tg:{chat_id}",
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "content": {
+                            "text": text,
+                            "senderId": str(user.id),
+                            "channel": "telegram",
+                            "username": user.username,
+                            "full_name": user.full_name,
+                        },
+                    },
                 )
+                logger.info("telegram.bridge.sent_to_agent chat_id={} agent={}", chat_id, agent_id)
             except Exception:
                 logger.exception("telegram.bridge.publish_error")
 
@@ -280,9 +404,10 @@ async def _run_telegram_bridge(  # noqa: C901
         await app.updater.start_polling(drop_pending_updates=True)
         logger.info("telegram.bridge.started url={}", url)
 
-        # Explicitly subscribe to outbound
-        sub_result = await client.subscribe("outbound:*")
-        logger.info("telegram.bridge.subscribed result={}", sub_result)
+        # Subscribe to tg:* to receive outbound messages (responses from agents)
+        # Note: telegram-bridge acts as a router, so it subscribes to entity topics
+        sub_result = await client.subscribe("tg:*")
+        logger.info("telegram.bridge.subscribed topic=tg:* result={}", sub_result)
 
         try:
             await _wait_forever()

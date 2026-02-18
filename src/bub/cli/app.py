@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from loguru import logger
@@ -13,9 +13,8 @@ from loguru import logger
 from bub.app import build_runtime
 from bub.app.runtime import AgentRuntime
 from bub.channels import ChannelManager
-from bub.channels.bus import MessageBus
 from bub.channels.telegram import TelegramChannel, TelegramConfig
-from bub.channels.wsbus import AgentBusClient
+from bub.bus.bus import AgentBusClient
 from bub.cli.bus import bus_app
 from bub.cli.interactive import InteractiveCli
 from bub.cli.tape import tape_app
@@ -173,8 +172,12 @@ def agent(
     workspace: Annotated[Path | None, typer.Option("--workspace", "-w")] = None,
     model: Annotated[str | None, typer.Option("--model")] = None,
     max_tokens: Annotated[int | None, typer.Option("--max-tokens")] = None,
-    session_id: Annotated[str, typer.Option("--session-id", envvar="BUB_SESSION_ID")] = "bus",
+    client_id: Annotated[str, typer.Option("--client-id")] = "agent:default",
+    talkto: Annotated[str | None, typer.Option("--talkto")] = None,
     bus_url: Annotated[str | None, typer.Option("--bus-url", envvar="BUB_BUS_URL")] = None,
+    reply_type: Annotated[
+        str | None, typer.Option("--reply-type", help="Type of reply channel (telegram, discord, etc.)")
+    ] = "telegram",
 ) -> None:
     """Run agent connected to WebSocket message bus.
 
@@ -201,10 +204,12 @@ def agent(
         raise typer.BadParameter("bus URL required; set --bus-url or BUB_BUS_URL")
 
     logger.info(
-        "agent.start workspace={} bus_url={} session_id={}",
+        "agent.start workspace={} bus_url={} client_id={} talkto={} reply_type={}",
         str(resolved_workspace),
         url,
-        session_id,
+        client_id,
+        talkto,
+        reply_type,
     )
 
     with build_runtime(
@@ -213,10 +218,12 @@ def agent(
         max_tokens=max_tokens,
         enable_scheduler=False,
     ) as runtime:
-        asyncio.run(_run_agent_client(url, runtime, session_id))
+        asyncio.run(_run_agent_client(url, runtime, client_id, talkto, reply_type or "telegram"))
 
 
-async def _run_agent_client(bus_url: str, runtime: AgentRuntime, session_id: str) -> None:
+async def _run_agent_client(
+    bus_url: str, runtime: AgentRuntime, client_id: str, talkto: str | None, reply_type: str = "telegram"
+) -> None:
     """Run WebSocket client that processes messages with AgentRuntime."""
     from bub.channels.events import InboundMessage, OutboundMessage
 
@@ -225,56 +232,79 @@ async def _run_agent_client(bus_url: str, runtime: AgentRuntime, session_id: str
     try:
         # Connect to server
         await client.connect()
-        await client.initialize(f"agent-{session_id}")
-        logger.info("agent.connected url={}", bus_url)
+        await client.initialize(client_id)
+        logger.info("agent.connected url={} client_id={}", bus_url, client_id)
 
-        # Subscribe to inbound messages
-        async def handle_inbound(message: InboundMessage) -> None:
-            """Process inbound message and send response."""
-            logger.info(
-                "agent.processing chat_id={} content={}",
-                message.chat_id,
-                message.content[:50],
-            )
+        # Subscribe to inbound messages (tg:* pattern) and direct messages (our client_id)
+        async def handle_message(topic: str, payload: dict[str, Any]) -> None:
+            """Process message from bus."""
+            msg_type = payload.get("type", "")
 
-            # Process with AgentRuntime
-            result: LoopResult = await runtime.handle_input(f"{message.channel}:{message.chat_id}", message.content)
+            if msg_type == "tg_message":
+                content_obj = payload.get("content", {})
+                if not isinstance(content_obj, dict):
+                    return
 
-            # Build response
-            parts = []
-            if result.immediate_output:
-                parts.append(result.immediate_output)
-            if result.assistant_output:
-                parts.append(result.assistant_output)
-            if result.error:
-                parts.append(f"Error: {result.error}")
+                text = content_obj.get("text", "")
+                sender_id = content_obj.get("senderId", "")
+                channel = content_obj.get("channel", "telegram")
 
-            content = "\n\n".join(parts).strip()
-            if not content:
-                content = "(no response)"
-
-            # Publish outbound message
-            await client.publish_outbound(
-                OutboundMessage(
-                    channel=message.channel,
-                    chat_id=message.chat_id,
-                    content=content,
+                message = InboundMessage(
+                    channel=str(channel),
+                    sender_id=str(sender_id),
+                    chat_id=str(sender_id),  # For Telegram, chat_id is sender_id in private chats
+                    content=str(text),
                 )
-            )
 
-            logger.info("agent.responded chat_id={} content_len={}", message.chat_id, len(content))
+                logger.info(
+                    "agent.processing chat_id={} content={}",
+                    message.chat_id,
+                    message.content[:50],
+                )
 
-        # Subscribe to inbound messages
-        unsub = await client.on_inbound(handle_inbound)
-        logger.info("agent.listening session_id={}", session_id)
+                # Process with AgentRuntime
+                result: LoopResult = await runtime.handle_input(f"{message.channel}:{message.chat_id}", message.content)
+
+                # Build response
+                parts = []
+                if result.immediate_output:
+                    parts.append(result.immediate_output)
+                if result.assistant_output:
+                    parts.append(result.assistant_output)
+                if result.error:
+                    parts.append(f"Error: {result.error}")
+
+                content = "\n\n".join(parts).strip()
+                if not content:
+                    content = "(no response)"
+
+                # Send response using new API
+                from datetime import UTC, datetime
+                from bub.message.messages import create_tg_reply_payload
+
+                reply_payload = create_tg_reply_payload(
+                    message_id=f"msg_{client_id}_{datetime.now(UTC).timestamp()}",
+                    from_addr=client_id,
+                    timestamp=datetime.now(UTC).isoformat(),
+                    text=content,
+                    channel=reply_type,
+                )
+
+                await client.send_message(to=f"{message.channel}:{message.chat_id}", payload=reply_payload)
+
+                logger.info("agent.responded chat_id={} content_len={}", message.chat_id, len(content))
+
+        # Subscribe to our client_id for direct messages
+        await client.subscribe(client_id, handle_message)
+        # Also subscribe to tg:* pattern for broadcast messages
+        await client.subscribe("tg:*", handle_message)
+        logger.info("agent.listening client_id={}", client_id)
 
         # Keep running
         try:
             await asyncio.Event().wait()
         except KeyboardInterrupt:
             logger.info("agent.interrupted")
-        finally:
-            unsub()
 
     except Exception:
         logger.exception("agent.error")
@@ -282,6 +312,28 @@ async def _run_agent_client(bus_url: str, runtime: AgentRuntime, session_id: str
     finally:
         await client.disconnect()
         logger.info("agent.disconnected")
+
+
+@app.command()
+def system_agent(
+    bus_url: Annotated[str, typer.Option("--bus-url", "-u")] = "ws://localhost:7892",
+) -> None:
+    """Run the system agent that spawns conversation agents."""
+    configure_logging()
+    logger.info("system_agent.start bus_url={}", bus_url)
+
+    from bub.system_agent import SystemAgent
+
+    agent = SystemAgent(bus_url=bus_url)
+    try:
+        asyncio.run(agent.start())
+    except KeyboardInterrupt:
+        logger.info("system_agent.interrupted")
+    except Exception:
+        logger.exception("system_agent.error")
+        raise
+    finally:
+        logger.info("system_agent.stop")
 
 
 @app.command()
@@ -310,29 +362,12 @@ def telegram(
         logger.error("telegram.missing_token workspace={}", str(resolved_workspace))
         raise typer.BadParameter(TELEGRAM_TOKEN_ERROR)
 
-    with build_runtime(resolved_workspace, model=model, max_tokens=max_tokens) as runtime:
-        bus = MessageBus()
-        manager = ChannelManager(bus, runtime)
-        manager.register(
-            TelegramChannel(
-                bus,
-                TelegramConfig(
-                    token=bus_settings.telegram_token,
-                    allow_from=set(bus_settings.telegram_allow_from),
-                    allow_chats=set(bus_settings.telegram_allow_chats),
-                    proxy=bus_settings.telegram_proxy,
-                ),
-            )
-        )
-        try:
-            asyncio.run(_serve_channels(manager))
-        except KeyboardInterrupt:
-            logger.info("telegram.interrupted")
-        except Exception:
-            logger.exception("telegram.crash")
-            raise
-        finally:
-            logger.info("telegram.stop workspace={}", str(resolved_workspace))
+    # TODO: Old blinker MessageBus removed - telegram command temporarily disabled
+    # Need to use AgentBusClient or the new WebSocket-based architecture
+    raise typer.BadParameter(
+        "Telegram command temporarily disabled - MessageBus architecture changed. "
+        "Use 'bub agent' command with WebSocket bus instead."
+    )
 
 
 async def _serve_channels(manager: ChannelManager) -> None:

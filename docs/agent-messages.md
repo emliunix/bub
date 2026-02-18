@@ -7,13 +7,14 @@ For the protocol specification, see `agent-protocol.md`.
 ## Table of Contents
 
 - [Message Structure](#message-structure)
-- [Message Types](#message-types)
+- [Active Message Types](#active-message-types)
   - [`spawn_request`](#spawn_request)
   - [`spawn_result`](#spawn_result)
-  - [`route_assigned`](#route_assigned)
-  - [`configure`](#configure)
   - [`tg_message`](#tg_message)
   - [`tg_reply`](#tg_reply)
+- [Planned Message Types](#planned-message-types)
+  - [`configure`](#configure)
+  - [`route_assigned`](#route_assigned)
   - [`agent_event`](#agent_event)
 - [Content Field Reference](#content-field-reference)
 - [Addressing Notes](#addressing-notes)
@@ -31,27 +32,37 @@ Optional fields commonly used:
 - `timestamp` (RFC3339 string): When the message was created.
 - `messageId` (string): Application-level message ID for Bub's internal tracking.
 
-## Message Types
+## Active Message Types
+
+These message types are currently implemented and used in production code.
 
 ### `spawn_request`
 
-Request to spawn a new conversation agent.
+**Direction**: telegram-bridge → system_agent  
+**Purpose**: Request to spawn a new conversation agent.
 
 ```json
 {
   "type": "spawn_request",
-  "from": "tg:123456789",
+  "from": "telegram-bridge",
   "timestamp": "2026-02-17T12:00:00Z",
   "content": {
     "chat_id": "123456789",
-    "channel": "telegram"
+    "channel": "telegram",
+    "channel_type": "telegram"
   }
 }
 ```
 
+**Fields:**
+- `chat_id` (string): Telegram chat identifier
+- `channel` (string): Channel identifier for routing
+- `channel_type` (string): Type of channel for replies (e.g., "telegram", "discord")
+
 ### `spawn_result`
 
-Response indicating spawn success/failure.
+**Direction**: system_agent → requester  
+**Purpose**: Response indicating spawn success/failure.
 
 ```json
 {
@@ -66,7 +77,74 @@ Response indicating spawn success/failure.
 }
 ```
 
+### `tg_message`
+
+**Direction**: telegram-bridge → agent  
+**Purpose**: User message from Telegram (or Discord) to be processed by an agent.
+
+```json
+{
+  "type": "tg_message",
+  "from": "tg:123456789",
+  "timestamp": "2026-02-17T12:00:03Z",
+  "content": {
+    "text": "Hello, how are you?",
+    "senderId": "123456789",
+    "channel": "telegram",
+    "username": "johndoe",
+    "full_name": "John Doe"
+  }
+}
+```
+
+**Fields:**
+- `text` (string): Message content
+- `senderId` (string): Telegram user ID of the sender
+- `channel` (string): Channel name ("telegram" or "discord")
+- `username` (string, optional): Telegram username
+- `full_name` (string, optional): Full name of the sender
+
+### `tg_reply`
+
+**Direction**: agent → telegram-bridge  
+**Purpose**: Agent reply to be sent back to Telegram.
+
+```json
+{
+  "type": "tg_reply",
+  "from": "agent:worker-abc123",
+  "timestamp": "2026-02-17T12:00:04Z",
+  "content": {
+    "text": "I'm doing well, thank you!",
+    "channel": "telegram"
+  }
+}
+```
+
+## Planned Message Types
+
+These message types are defined in documentation but **not yet implemented**. They require further design before being added to the codebase.
+
+### `configure`
+
+> **Status**: Planned - needs design
+
+Configure an agent's session parameters.
+
+```json
+{
+  "type": "configure",
+  "from": "tg:123456789",
+  "timestamp": "2026-02-17T12:00:02Z",
+  "content": {
+    "talkto": "tg:123456789"
+  }
+}
+```
+
 ### `route_assigned`
+
+> **Status**: Planned - needs design
 
 Notification that a route has been assigned.
 
@@ -82,61 +160,9 @@ Notification that a route has been assigned.
 }
 ```
 
-### `configure`
-
-Configure an agent's session parameters.
-
-```json
-{
-  "type": "configure",
-  "from": "tg:123456789",
-  "timestamp": "2026-02-17T12:00:02Z",
-  "content": {
-    "talkto": "tg:123456789"
-  }
-}
-```
-
-### `tg_message`
-
-User message from Telegram.
-
-```json
-{
-  "type": "tg_message",
-  "from": "tg:123456789",
-  "timestamp": "2026-02-17T12:00:03Z",
-  "content": {
-    "text": "Hello, how are you?",
-    "senderId": "123456789",
-    "channel": "telegram"
-  }
-}
-```
-
-**Telegram-Specific Fields:**
-- `message_id` (string): Original Telegram message ID from Telegram Bot API (stored in metadata). Used for reply threading.
-- `senderId` (string): Telegram user ID of the sender.
-- `channel` (string): Always "telegram" for Telegram messages.
-- `username` (string, optional): Telegram username.
-- `full_name` (string, optional): Full name of the sender.
-
-### `tg_reply`
-
-Agent reply to be sent to Telegram.
-
-```json
-{
-  "type": "tg_reply",
-  "from": "agent:worker-abc123",
-  "timestamp": "2026-02-17T12:00:04Z",
-  "content": {
-    "text": "I'm doing well, thank you!"
-  }
-}
-```
-
 ### `agent_event`
+
+> **Status**: Planned - needs design
 
 Agent lifecycle or control event.
 
@@ -147,27 +173,38 @@ Agent lifecycle or control event.
   "timestamp": "2026-02-17T12:00:06Z",
   "content": {
     "event": "spawned",
-    "agent_id": "agent:worker-abc123"
+    "data": {
+      "agent_id": "agent:worker-abc123"
+    }
   }
 }
 ```
 
 ## Content Field Reference
 
-### Common Content Fields
+### Active Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `text` | string | Text message content |
-| `chat_id` | string | Telegram chat identifier |
-| `channel` | string | Channel name (e.g., "telegram") |
-| `client_id` | string | Agent identifier |
-| `agent_id` | string | Agent identifier |
-| `talkto` | string | Default destination for responses |
-| `success` | boolean | Operation success indicator |
-| `status` | string | Status string (running, stopped, spawning, etc.) |
-| `event` | string | Event type identifier |
-| `message_id` | string | Original Telegram message ID (for reply threading) |
+| Field | Type | Used In | Description |
+|-------|------|---------|-------------|
+| `text` | string | tg_message, tg_reply | Message content |
+| `chat_id` | string | spawn_request | Telegram chat identifier |
+| `channel` | string | tg_message, tg_reply, spawn_request | Channel name for routing |
+| `channel_type` | string | spawn_request | Reply channel type (telegram, discord, etc.) |
+| `senderId` | string | tg_message | Telegram user ID |
+| `username` | string | tg_message | Telegram username |
+| `full_name` | string | tg_message | Full name of sender |
+| `success` | boolean | spawn_result | Operation success indicator |
+| `client_id` | string | spawn_result | Assigned agent identifier |
+| `status` | string | spawn_result | Status (running, spawning, etc.) |
+
+### Planned Fields
+
+| Field | Type | Planned For | Description |
+|-------|------|-------------|-------------|
+| `talkto` | string | configure | Default destination for responses |
+| `agent_id` | string | route_assigned, agent_event | Agent identifier |
+| `event` | string | agent_event | Event type identifier |
+| `data` | object | agent_event | Event-specific data |
 
 ## Addressing Notes
 
@@ -183,3 +220,6 @@ In most cases, these will be the same, but the distinction allows for:
 ## Version
 
 This document describes message types as of protocol v2.
+
+**Active Types**: 4 (spawn_request, spawn_result, tg_message, tg_reply)  
+**Planned Types**: 3 (configure, route_assigned, agent_event)
