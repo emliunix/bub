@@ -1,22 +1,24 @@
 #!/bin/bash
 # Production deployment script for Bub with systemd-run
-# Usage: ./deploy-production.sh <command> [component]
+# Usage: ./deploy-production.sh <command> [component|all]
 #
 # Commands:
-#   start <component>   - Start a component (bus|agent|tape|telegram-bridge)
-#   stop <component>    - Stop a component (or 'all' to stop all)
-#   logs <component>    - View logs of a component (or 'all' for all components)
-#   status <component>  - Check status of a component
-#   list               - List all running bub components
+#   start [component|all]  - Start a component or all components (bus|system-agent|tape|telegram-bridge)
+#   stop [component|all]   - Stop a component or all components
+#   logs [component|all]   - View logs of a component or all components
+#   status [component]     - Check status of a component
+#   list                   - List all running bub components (including dynamic agents from sessions.json)
 #
 # Examples:
 #   ./deploy-production.sh start bus
-#   ./deploy-production.sh start agent
+#   ./deploy-production.sh start all              # Start all main components
+#   ./deploy-production.sh start system-agent
 #   ./deploy-production.sh start tape
-#   ./deploy-production.sh logs agent
-#   ./deploy-production.sh logs all       # View logs from all components
-#   ./deploy-production.sh stop all       # Stop all components
+#   ./deploy-production.sh logs system-agent
+#   ./deploy-production.sh logs all               # View logs from all components
+#   ./deploy-production.sh stop all               # Stop all components
 #   ./deploy-production.sh stop bus
+#   ./deploy-production.sh stop agent:worker-xxx  # Stop a specific dynamic agent
 
 set -e
 
@@ -32,7 +34,6 @@ mkdir -p "${RUN_DIR}"
 # Format: name|command|working_dir|description
 COMPONENTS=(
     "bus|bub bus serve|${PROJECT_ROOT}|WebSocket message bus server (pure router)"
-    "agent|bub agent|${PROJECT_ROOT}|Agent worker"
     "tape|bub tape serve|${PROJECT_ROOT}|Tape store service"
     "telegram-bridge|bub bus telegram|${PROJECT_ROOT}|Telegram bridge (connects to bus as client)"
     "system-agent|bub system-agent|${PROJECT_ROOT}|System agent (spawns conversation agents)"
@@ -90,13 +91,73 @@ get_component_info() {
     return 1
 }
 
+# Helper: check if a dynamic agent exists in sessions.json
+dynamic_agent_exists() {
+    local agent_name="$1"
+    local sessions_file="${RUN_DIR}/sessions.json"
+    
+    if [ ! -f "${sessions_file}" ]; then
+        return 1
+    fi
+    
+    python3 -c "
+import json
+import sys
+try:
+    with open('${sessions_file}') as f:
+        data = json.load(f)
+    sessions = data.get('sessions', {})
+    for session in sessions.values():
+        client_id = session.get('client_id', '')
+        unit = session.get('systemd_unit', '')
+        if client_id == '${agent_name}' or unit == '${agent_name}':
+            print(unit)
+            sys.exit(0)
+    sys.exit(1)
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# Helper: get all dynamic agents from sessions.json
+get_dynamic_agents() {
+    local sessions_file="${RUN_DIR}/sessions.json"
+    
+    if [ ! -f "${sessions_file}" ]; then
+        return
+    fi
+    
+    python3 -c "
+import json
+import sys
+try:
+    with open('${sessions_file}') as f:
+        data = json.load(f)
+    sessions = data.get('sessions', {})
+    for session in sessions.values():
+        unit = session.get('systemd_unit', '')
+        client_id = session.get('client_id', '')
+        status = session.get('status', 'unknown')
+        if unit:
+            print(f'{unit}|{client_id}|{status}')
+except Exception as e:
+    pass
+" 2>/dev/null
+}
+
 # Start a component using systemd-run
 start_component() {
     local component="$1"
     
+    # Special case: start all components
+    if [ "${component}" = "all" ]; then
+        start_all_components
+        return $?
+    fi
+    
     if ! component_exists "${component}"; then
         echo "❌ Unknown component: ${component}"
-        echo "Available components: bus, agent, tape, telegram-bridge"
+        echo "Available components: bus, system-agent, tape, telegram-bridge"
         exit 1
     fi
     
@@ -163,6 +224,28 @@ start_component() {
     echo "   Stop: $0 stop ${component}"
 }
 
+# Start all main components
+start_all_components() {
+    echo "🚀 Starting all main components..."
+    echo ""
+    
+    local started_count=0
+    
+    for comp_def in "${COMPONENTS[@]}"; do
+        IFS='|' read -r name cmd dir desc <<< "${comp_def}"
+        echo "   Starting ${name}..."
+        if start_component "${name}" 2>/dev/null; then
+            ((started_count++))
+        fi
+        echo ""
+    done
+    
+    echo "✅ Started ${started_count} component(s)"
+    echo ""
+    echo "   View all logs: $0 logs all"
+    echo "   Stop all: $0 stop all"
+}
+
 # Stop a component (or all components)
 stop_component() {
     local component="$1"
@@ -175,31 +258,51 @@ stop_component() {
         return $?
     fi
 
-    if ! component_exists "${component}"; then
-        echo "❌ Unknown component: ${component}"
-        exit 1
+    # Check if it's a main component
+    if component_exists "${component}"; then
+        local unit_name
+        unit_name=$(get_unit_name "${component}")
+
+        if [ -z "${unit_name}" ]; then
+            echo "⚠️  No unit name found for ${component}"
+            echo "   It may not have been started with this script"
+            return 1
+        fi
+
+        echo "🛑 Stopping ${component}..."
+        echo "   Unit: ${unit_name}"
+
+        if systemctl --user is-active --quiet "${unit_name}" 2>/dev/null; then
+            systemctl --user stop "${unit_name}" "${extra_args[@]}"
+            echo "✅ ${component} stopped"
+        else
+            echo "⚠️  ${component} was not running"
+        fi
+
+        remove_unit_name "${component}"
+        return 0
+    fi
+    
+    # Check if it's a dynamic agent from sessions.json
+    local dynamic_unit
+    dynamic_unit=$(dynamic_agent_exists "${component}")
+    
+    if [ -n "${dynamic_unit}" ]; then
+        echo "🛑 Stopping dynamic agent ${component}..."
+        echo "   Unit: ${dynamic_unit}"
+        
+        if systemctl --user is-active --quiet "${dynamic_unit}" 2>/dev/null; then
+            systemctl --user stop "${dynamic_unit}" "${extra_args[@]}"
+            echo "✅ Dynamic agent ${component} stopped"
+        else
+            echo "⚠️  Dynamic agent ${component} was not running"
+        fi
+        return 0
     fi
 
-    local unit_name
-    unit_name=$(get_unit_name "${component}")
-
-    if [ -z "${unit_name}" ]; then
-        echo "⚠️  No unit name found for ${component}"
-        echo "   It may not have been started with this script"
-        return 1
-    fi
-
-    echo "🛑 Stopping ${component}..."
-    echo "   Unit: ${unit_name}"
-
-    if systemctl --user is-active --quiet "${unit_name}" 2>/dev/null; then
-        systemctl --user stop "${unit_name}" "${extra_args[@]}"
-        echo "✅ ${component} stopped"
-    else
-        echo "⚠️  ${component} was not running"
-    fi
-
-    remove_unit_name "${component}"
+    echo "❌ Unknown component or agent: ${component}"
+    echo "   Use '$0 list' to see available components and agents"
+    return 1
 }
 
 # Stop dynamically spawned agents from sessions.json
@@ -398,6 +501,9 @@ list_components() {
     echo ""
     
     local found=0
+    
+    # List main components
+    echo "   Main Components:"
     for comp_def in "${COMPONENTS[@]}"; do
         IFS='|' read -r name cmd dir desc <<< "${comp_def}"
         local unit_name
@@ -405,24 +511,44 @@ list_components() {
         
         if [ -n "${unit_name}" ]; then
             if systemctl --user is-active --quiet "${unit_name}" 2>/dev/null; then
-                echo "✅ ${name}: running"
-                echo "   Unit: ${unit_name}"
-                echo "   ${desc}"
+                echo "   ✅ ${name}: running"
+                echo "      Unit: ${unit_name}"
+                echo "      ${desc}"
                 found=1
             else
-                echo "⚠️  ${name}: stopped (stale unit file)"
+                echo "   ⚠️  ${name}: stopped (stale unit file)"
                 remove_unit_name "${name}"
             fi
             echo ""
         fi
     done
     
+    # List dynamic agents from sessions.json
+    local dynamic_agents
+    dynamic_agents=$(get_dynamic_agents)
+    
+    if [ -n "${dynamic_agents}" ]; then
+        echo "   Dynamic Agents (from sessions.json):"
+        while IFS='|' read -r unit client_id status; do
+            if systemctl --user is-active --quiet "${unit}" 2>/dev/null; then
+                echo "   ✅ ${client_id}: ${status}"
+                echo "      Unit: ${unit}"
+                found=1
+            else
+                echo "   ⚠️  ${client_id}: ${status} (not running)"
+                echo "      Unit: ${unit}"
+            fi
+            echo ""
+        done <<< "${dynamic_agents}"
+    fi
+    
     if [ ${found} -eq 0 ]; then
         echo "   No components are currently running"
         echo ""
         echo "   Start components with:"
+        echo "     $0 start all              # Start all main components"
         echo "     $0 start bus"
-        echo "     $0 start agent"
+        echo "     $0 start system-agent"
         echo "     $0 start tape"
         echo "     $0 start telegram-bridge"
     fi
@@ -432,33 +558,39 @@ list_components() {
 show_help() {
     echo "Bub Production Deployment Script"
     echo ""
-    echo "Usage: $0 <command> [component]"
+    echo "Usage: $0 <command> [component|all]"
     echo ""
     echo "Commands:"
-    echo "  start <component>   Start a component (bus|agent|tape|telegram-bridge)"
-    echo "  stop <component>    Stop a component (use 'all' to stop all)"
-    echo "  logs <component>    View logs of a component (use 'all' for all components)"
-    echo "  status <component>  Check status of a component"
-    echo "  list                List all running bub components"
+    echo "  start [component|all]  Start a component or all components"
+    echo "  stop [component|all]   Stop a component or all components"
+    echo "  logs [component|all]   View logs of a component or all components"
+    echo "  status <component>     Check status of a component"
+    echo "  list                   List all running bub components (including dynamic agents)"
     echo ""
-    echo "Components:"
+    echo "Main Components:"
     echo "  bus              - WebSocket message bus server (pure router)"
-    echo "  agent            - Agent worker"
+    echo "  system-agent     - System agent (spawns conversation agents)"
     echo "  tape             - Tape store service"
     echo "  telegram-bridge  - Telegram bridge (connects to bus as client)"
-    echo "  all              - Virtual component: all running components (logs/stop only)"
+    echo "  all              - Virtual component: all components"
+    echo ""
+    echo "Dynamic Agents:"
+    echo "  agent:worker-xxx - Individual conversation agents (spawned by system-agent)"
+    echo "                   These are tracked in sessions.json and can be stopped by name"
     echo ""
     echo "Examples:"
+    echo "  $0 start all              # Start all main components"
     echo "  $0 start bus              # Start the bus server"
-    echo "  $0 start agent            # Start the agent"
+    echo "  $0 start system-agent     # Start the system agent"
     echo "  $0 start tape             # Start the tape service"
     echo "  $0 start telegram-bridge  # Start the Telegram bridge"
-    echo "  $0 logs agent             # View agent logs"
+    echo "  $0 logs system-agent      # View system agent logs"
     echo "  $0 logs all               # View logs from all components"
+    echo "  $0 stop all               # Stop all components (main + dynamic agents)"
     echo "  $0 stop bus               # Stop the bus server"
-    echo "  $0 stop all               # Stop all components"
+    echo "  $0 stop agent:worker-xxx  # Stop a specific dynamic agent"
     echo "  $0 status tape            # Check tape service status"
-    echo "  $0 list                   # List all running components"
+    echo "  $0 list                   # List all running components and agents"
 }
 
 # Main command dispatcher
@@ -470,8 +602,8 @@ main() {
         start)
             if [ -z "${component}" ]; then
                 echo "❌ Missing component name"
-                echo "Usage: $0 start <component>"
-                echo "Components: bus, agent, tape, telegram-bridge"
+                echo "Usage: $0 start <component|all>"
+                echo "Components: bus, system-agent, tape, telegram-bridge, all"
                 exit 1
             fi
             start_component "${component}"
@@ -479,8 +611,9 @@ main() {
         stop)
             if [ -z "${component}" ]; then
                 echo "❌ Missing component name"
-                echo "Usage: $0 stop <component>"
-                echo "Components: bus, agent, tape, telegram-bridge, all"
+                echo "Usage: $0 stop <component|all>"
+                echo "Components: bus, system-agent, tape, telegram-bridge, all"
+                echo "Agents: agent:worker-xxx (from sessions.json)"
                 exit 1
             fi
             shift 2
@@ -489,8 +622,8 @@ main() {
         logs)
             if [ -z "${component}" ]; then
                 echo "❌ Missing component name"
-                echo "Usage: $0 logs <component>"
-                echo "Components: bus, agent, tape, telegram-bridge, all"
+                echo "Usage: $0 logs <component|all>"
+                echo "Components: bus, system-agent, tape, telegram-bridge, all"
                 exit 1
             fi
             shift 2

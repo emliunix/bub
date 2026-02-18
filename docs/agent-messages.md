@@ -222,4 +222,120 @@ In most cases, these will be the same, but the distinction allows for:
 This document describes message types as of protocol v2.
 
 **Active Types**: 4 (spawn_request, spawn_result, tg_message, tg_reply)  
+**Planned Types**: 3 (configure, route_assigned, agent_event)**Direction**: agent → telegram-bridge  
+**Purpose**: Agent reply to be sent back to Telegram.
+
+```json
+{
+  "type": "tg_reply",
+  "from": "agent:worker-abc123",
+  "timestamp": "2026-02-17T12:00:04Z",
+  "content": {
+    "text": "I'm doing well, thank you!",
+    "channel": "telegram"
+  }
+}
+```
+
+## Planned Message Types
+
+These message types are defined in documentation but **not yet implemented**. They require further design before being added to the codebase.
+
+### `configure`
+
+> **Status**: Planned - needs design
+
+Configure an agent's session parameters.
+
+```json
+{
+  "type": "configure",
+  "from": "tg:123456789",
+  "timestamp": "2026-02-17T12:00:02Z",
+  "content": {
+    "talkto": "tg:123456789"
+  }
+}
+```
+
+### `route_assigned`
+
+> **Status**: Planned - needs design
+
+Notification that a route has been assigned.
+
+```json
+{
+  "type": "route_assigned",
+  "from": "agent:system",
+  "timestamp": "2026-02-17T12:00:01Z",
+  "content": {
+    "chat_id": "123456789",
+    "agent_id": "agent:worker-abc123"
+  }
+}
+```
+
+### `agent_event`
+
+> **Status**: Planned - needs design
+
+Agent lifecycle or control event.
+
+```json
+{
+  "type": "agent_event",
+  "from": "agent:system",
+  "timestamp": "2026-02-17T12:00:06Z",
+  "content": {
+    "event": "spawned",
+    "data": {
+      "agent_id": "agent:worker-abc123"
+    }
+  }
+}
+```
+
+## Content Field Reference
+
+### Active Fields
+
+| Field | Type | Used In | Description |
+|-------|------|---------|-------------|
+| `text` | string | tg_message, tg_reply | Message content |
+| `chat_id` | string | spawn_request | Telegram chat identifier |
+| `channel` | string | tg_message, tg_reply, spawn_request | Channel name for routing |
+| `channel_type` | string | spawn_request | Reply channel type (telegram, discord, etc.) |
+| `senderId` | string | tg_message | Telegram user ID |
+| `username` | string | tg_message | Telegram username |
+| `full_name` | string | tg_message | Full name of sender |
+| `success` | boolean | spawn_result | Operation success indicator |
+| `client_id` | string | spawn_result | Assigned agent identifier |
+| `status` | string | spawn_result | Status (running, spawning, etc.) |
+
+### Planned Fields
+
+| Field | Type | Planned For | Description |
+|-------|------|-------------|-------------|
+| `talkto` | string | configure | Default destination for responses |
+| `agent_id` | string | route_assigned, agent_event | Agent identifier |
+| `event` | string | agent_event | Event type identifier |
+| `data` | object | agent_event | Event-specific data |
+
+## Addressing Notes
+
+### Protocol vs Application From
+
+- **Protocol-level** (`params.from`): Used by the bus for routing and tracking. Always present in `processMessage`.
+- **Application-level** (`payload.from`): Used by agents for content-level addressing. Optional, may mirror protocol-level or provide additional context.
+
+In most cases, these will be the same, but the distinction allows for:
+- Forwarded messages (protocol-from is forwarder, payload-from is original sender)
+- System-generated messages (protocol-from is bus/system, payload-from indicates logical source)
+
+## Version
+
+This document describes message types as of protocol v2.
+
+**Active Types**: 4 (spawn_request, spawn_result, tg_message, tg_reply)  
 **Planned Types**: 3 (configure, route_assigned, agent_event)

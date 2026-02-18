@@ -26,11 +26,25 @@ class RemoteTapeStore:
         """Close the HTTP client."""
         self._client.close()
 
-    def create_tape(self, tape: str, title: str | None = None) -> str:
-        """Create a new tape."""
+    def create_tape(self, tape: str, title: str | None = None, *, replace_if_exists: bool = False) -> str:
+        """Create a new tape.
+
+        Args:
+            tape: Unique identifier for the tape
+            title: Optional title for the tape
+            replace_if_exists: If True, overwrite existing tape metadata.
+                              If False (default), skip if tape already exists.
+
+        Returns:
+            The tape ID
+        """
         response = self._client.post(
             self._url("/tapes"),
-            json={"tape_id": tape, "title": title},
+            json={
+                "tape_id": tape,
+                "title": title,
+                "replace_if_exists": replace_if_exists,
+            },
         )
         response.raise_for_status()
         return tape

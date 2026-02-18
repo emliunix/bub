@@ -6,7 +6,7 @@ import pytest
 
 from typing import Any
 
-from bub.bus.bus import AgentBusClient, AgentBusServer
+from bub.channels.wsbus import AgentBusClient, AgentBusServer
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ class TestAgentBusClient:
 
         # Send a message using the new API
         from datetime import UTC, datetime
-        from bub.message.messages import create_tg_message_payload
+        from bub.rpc.messages import create_tg_message_payload
 
         payload = create_tg_message_payload(
             message_id="msg_test",
@@ -103,6 +103,17 @@ class TestAgentBusClient:
             text="test message",
             sender_id="456",
             channel="telegram",
+        )
+        await client.send_message(to="tg:123", payload=payload)
+
+        await asyncio.sleep(0.2)
+
+        assert len(received) == 1
+        assert received[0]["type"] == "tg_message"
+        assert received[0]["content"]["text"] == "test message"
+
+        await client.disconnect()
+        await server.stop_server()            channel="telegram",
         )
         await client.send_message(to="tg:123", payload=payload)
 

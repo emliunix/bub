@@ -37,6 +37,7 @@ class CreateTapeRequest(BaseModel):
 
     tape_id: str
     title: str | None = None
+    replace_if_exists: bool = False
 
 
 class ForkRequest(BaseModel):
@@ -147,7 +148,11 @@ def create_app(tape_store: Any) -> FastAPI:
     @app.post("/tapes", response_model=dict)
     async def create_tape(req: CreateTapeRequest):
         store = get_store()
-        store.create_tape(req.tape_id, title=req.title)
+        store.create_tape(
+            req.tape_id,
+            title=req.title,
+            replace_if_exists=req.replace_if_exists,
+        )
         return {"tape_id": req.tape_id, "status": "created"}
 
     @app.get("/tapes/{tape_id}", response_model=dict)

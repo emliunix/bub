@@ -82,6 +82,37 @@ class TestTapeCrud:
         assert manifest.tapes["fork"].parent == ("main", 100)
         assert manifest.tapes["fork"].file == "main.jsonl"
 
+    def test_create_tape_no_replace_by_default(self):
+        """Test that create_tape does not replace existing tape by default."""
+        manifest = Manifest()
+        manifest.create_tape("main", title="Original")
+
+        # Second call should not replace the existing tape
+        result = manifest.create_tape("main", title="New")
+
+        assert result.title == "Original"
+        assert manifest.tapes["main"].title == "Original"
+
+    def test_create_tape_with_replace_if_exists(self):
+        """Test that create_tape replaces existing tape when replace_if_exists=True."""
+        manifest = Manifest()
+        manifest.create_tape("main", title="Original")
+
+        # Second call with replace_if_exists=True should replace
+        result = manifest.create_tape("main", title="Replaced", replace_if_exists=True)
+
+        assert result.title == "Replaced"
+        assert manifest.tapes["main"].title == "Replaced"
+
+    def test_create_tape_returns_existing_instance_when_no_replace(self):
+        """Test that create_tape returns the same instance when not replacing."""
+        manifest = Manifest()
+        first = manifest.create_tape("main", title="First")
+        second = manifest.create_tape("main", title="Second")
+
+        assert first is second
+        assert manifest.tapes["main"].title == "First"
+
 
 class TestAnchorCrud:
     def test_create_anchor(self):

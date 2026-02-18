@@ -226,4 +226,9 @@ async def main() -> int:
 
 if __name__ == "__main__":
     exit_code = asyncio.run(main())
+    sys.exit(exit_code)    return 0 if success else 1
+
+
+if __name__ == "__main__":
+    exit_code = asyncio.run(main())
     sys.exit(exit_code)

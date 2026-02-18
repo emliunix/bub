@@ -94,18 +94,55 @@ class WebSocketChannel(BaseChannel):
         )
 
         # Send message via WebSocket bus
+        original_message_id = message.metadata.get("original_message_id", "") if message.metadata else ""
         payload = create_tg_reply_payload(
             message_id=f"msg_ws_{datetime.now(UTC).timestamp()}",
             from_addr="websocket:client",
+            reply_to_message_id=original_message_id,
             timestamp=datetime.now(UTC).isoformat(),
             text=message.content,
             channel=message.channel,
+            chat_id=message.chat_id,
         )
         await self._client.send_message(to=f"{message.channel}:{message.chat_id}", payload=payload)
 
     async def _handle_inbound_from_server(self, address: str, payload: dict[str, Any]) -> None:
         """Handle message received from WebSocket server."""
         if not self._running:
+            return
+
+        # Extract message info from payload
+        content = payload.get("content", {})
+        if not isinstance(content, dict):
+            return
+
+        channel = content.get("channel", "websocket")
+        chat_id = address.split(":", 1)[1] if ":" in address else ""
+        sender_id = content.get("senderId", "")
+        text = content.get("text", "")
+
+        logger.debug(
+            "websocket.inbound channel={} chat_id={} sender_id={} content_len={}",
+            channel,
+            chat_id,
+            sender_id,
+            len(text),
+        )
+
+        # Create InboundMessage for the bus
+        inbound_msg = InboundMessage(
+            channel=str(channel),
+            sender_id=str(sender_id),
+            chat_id=chat_id,
+            content=str(text),
+            metadata={k: v for k, v in content.items() if k not in ("text", "senderId", "channel")},
+        )
+
+        # Publish to local message bus via parent
+        await self.publish_inbound(inbound_msg)        await self.publish_inbound(inbound_msg)        )
+
+        # Publish to local message bus
+        await self.bus.publish_inbound(inbound_msg)        if not self._running:
             return
 
         # Extract message info from payload

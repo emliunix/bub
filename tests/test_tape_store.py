@@ -207,3 +207,47 @@ class TestManifestPersistence:
         anchor = loaded.get_anchor("phase1")
         assert anchor is not None
         assert anchor.entry_id == 50
+
+
+class TestTapeStoreCreateReplace:
+    """Test replace_if_exists behavior in FileTapeStore.create_tape()."""
+
+    def test_create_tape_no_replace_by_default(self, tmp_path):
+        """Test that create_tape does not replace existing tape by default."""
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        store.create_tape("main", title="Original")
+        store.create_tape("main", title="New")  # Should not replace
+
+        assert store.get_title("main") == "Original"
+
+    def test_create_tape_with_replace_if_exists(self, tmp_path):
+        """Test that create_tape replaces existing tape when replace_if_exists=True."""
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        store.create_tape("main", title="Original")
+        store.create_tape("main", title="Replaced", replace_if_exists=True)
+
+        assert store.get_title("main") == "Replaced"
+
+    def test_create_tape_idempotent(self, tmp_path):
+        """Test that calling create_tape multiple times is idempotent by default."""
+        home = tmp_path / "home"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        store = FileTapeStore(home, workspace)
+
+        # First call sets the title
+        store.create_tape("session1", title="First")
+        # Multiple subsequent calls should not change the title
+        store.create_tape("session1", title="Second")
+        store.create_tape("session1", title="Third")
+
+        # Title should still be "First"
+        assert store.get_title("session1") == "First"

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
+import sqlite3
 import uuid
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
@@ -24,13 +26,11 @@ from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
 from bub.rpc.framework import JSONRPCErrorException, JSONRPCFramework
-from bub.bus.log import ActivityLogWriter
-from bub.bus.protocol import (
+from bub.rpc.protocol import (
     AgentBusClientApi,
     AgentBusServerApi,
     InitializeParams,
     InitializeResult,
-    MessageAck,
     PingParams,
     PingResult,
     ProcessMessageParams,
@@ -48,6 +48,100 @@ from bub.bus.protocol import (
 )
 
 background_tasks: set[asyncio.Task[Any]] = set()
+
+
+class ActivityLogWriter:
+    """Async append-only SQLite activity logger."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+        self._queue: asyncio.Queue[dict[str, str]] = asyncio.Queue()
+        self._worker: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(self._init_db)
+        self._worker = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._worker is None:
+            return
+        await self._queue.put({})
+        await self._worker
+        self._worker = None
+
+    async def log(
+        self,
+        *,
+        event: str,
+        message_id: str,
+        rpc_id: str | None = None,
+        actor: str | None = None,
+        to: str | None = None,
+        status: str | None = None,
+        payload: dict[str, object] | None = None,
+        error: str | None = None,
+    ) -> None:
+        entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "event": event,
+            "message_id": message_id,
+            "rpc_id": rpc_id or "",
+            "actor": actor or "",
+            "to": to or "",
+            "status": status or "",
+            "payload_json": json.dumps(payload or {}, ensure_ascii=False),
+            "error": error or "",
+        }
+        await self._queue.put(entry)
+
+    async def _run(self) -> None:
+        while True:
+            entry = await self._queue.get()
+            if not entry:
+                return
+            await asyncio.to_thread(self._insert, entry)
+
+    def _init_db(self) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS activity_log (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ts TEXT NOT NULL,
+                  event TEXT NOT NULL,
+                  message_id TEXT NOT NULL,
+                  rpc_id TEXT,
+                  actor TEXT,
+                  to_address TEXT,
+                  status TEXT,
+                  payload_json TEXT,
+                  error TEXT
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_message_id ON activity_log(message_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts)")
+
+    def _insert(self, entry: dict[str, str]) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO activity_log (ts, event, message_id, rpc_id, actor, to_address, status, payload_json, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry["ts"],
+                    entry["event"],
+                    entry["message_id"],
+                    entry["rpc_id"],
+                    entry["actor"],
+                    entry["to"],
+                    entry["status"],
+                    entry["payload_json"],
+                    entry["error"],
+                ),
+            )
 
 
 class WebSocketTransport:
@@ -92,6 +186,7 @@ class AgentConnection:
         server_info = ServerInfo(name="bub-bus", version="0.2.0")
         capabilities = ServerCapabilities(
             subscribe=True,
+            publish=True,
             process_message=True,
             addresses=["tg:*", "agent:*", "system:*"],
         )
@@ -157,22 +252,21 @@ class AgentConnection:
         """Handle send message request - broadcast to all subscribers."""
         self._check_initialized()
         payload = cast(dict[str, object], params.payload)
-        sender = params.from_ or self.client_id
-        assert sender is not None, "impossible"
         self._server.validate_send_message(
-            sender=sender,
+            sender=self.client_id or self.conn_id,
             to=params.to,
             payload=payload,
         )
-        acks = await self._server._dispatch_process_message(
+        acks = await self._server.publish(
             params.to,
             payload,
             message_id=params.message_id,
-            sender=sender,
+            sender=self.client_id or self.conn_id,
         )
         return SendMessageResult(
             accepted=True,
             message_id=params.message_id,
+            delivered_to=len(acks),
             acks=acks,
         )
 
@@ -260,11 +354,16 @@ class AgentBusServer:
         return {
             "tg_message",
             "tg_reply",
+            "agent_event",
             "spawn_request",
+            "spawn_agent",
+            "spawn_agent_response",
             "spawn_result",
+            "configure",
+            "route_assigned",
         }
 
-    async def _dispatch_process_message(
+    async def publish(
         self,
         to: str,
         payload: dict[str, object],
@@ -273,8 +372,8 @@ class AgentBusServer:
         sender: str,
         rpc_id: str | None = None,
         timeout: float = 30.0,
-    ) -> list[MessageAck]:
-        """Dispatch processMessage to all matching subscribers and return stripped acks."""
+    ) -> list[ProcessMessageResult]:
+        """Publish message to all subscribers and return list of results (one per recipient)."""
         logger.info("wsbus.server.publish to={} payload_keys={}", to, list(payload.keys()))
         await self._activity_log.log(
             event="send_start",
@@ -298,33 +397,18 @@ class AgentBusServer:
                 logger.info("wsbus.server.publish sending to peer={}", peer_id)
 
                 task = asyncio.create_task(
-                    self._process_message_for_peer(
-                        other_conn, to, payload, message_id, rpc_id, peer_id, sender, timeout
-                    )
+                    self._process_message_for_peer(other_conn, to, payload, message_id, rpc_id, peer_id, timeout)
                 )
                 tasks.append(task)
 
-        acks: list[MessageAck] = []
+        acks: list[ProcessMessageResult] = []
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for result in results:
                 if isinstance(result, BaseException):
-                    acks.append(
-                        MessageAck(
-                            success=False,
-                            message=str(result),
-                            payload={"error": str(result)},
-                        )
-                    )
+                    acks.append(ProcessMessageResult(processed=False, status="error", payload={"error": str(result)}))
                 else:
-                    # Strip retry fields from ProcessMessageResult
-                    acks.append(
-                        MessageAck(
-                            success=result.success,
-                            message=result.message,
-                            payload=result.payload,
-                        )
-                    )
+                    acks.append(result)
 
         if matched_peers:
             logger.info(
@@ -355,7 +439,6 @@ class AgentBusServer:
         message_id: str,
         rpc_id: str | None,
         peer_id: str,
-        sender: str,
         timeout: float,
     ) -> ProcessMessageResult:
         """Process message for a single peer and return result."""
@@ -369,7 +452,7 @@ class AgentBusServer:
             payload=payload,
         )
         try:
-            process_params = ProcessMessageParams(from_=sender, to=to, message_id=message_id, payload=payload)
+            process_params = ProcessMessageParams(to=to, message_id=message_id, payload=payload)
             result = await asyncio.wait_for(
                 other_conn.api.process_message(process_params),
                 timeout=timeout,
@@ -380,7 +463,7 @@ class AgentBusServer:
                 rpc_id=rpc_id,
                 actor=peer_id,
                 to=to,
-                status="ok" if result.success else "error",
+                status=result.status,
                 payload=payload,
             )
             return result
@@ -397,11 +480,7 @@ class AgentBusServer:
             )
             logger.error("wsbus.publish.process_timeout peer={} to={} timeout={}s", peer_id, to, timeout)
             return ProcessMessageResult(
-                success=False,
-                message=f"Timeout after {timeout}s",
-                should_retry=False,
-                retry_seconds=0,
-                payload={"error": f"Timeout after {timeout}s"},
+                processed=False, status="timeout", payload={"error": f"Timeout after {timeout}s"}
             )
         except Exception as exc:
             await self._activity_log.log(
@@ -415,9 +494,7 @@ class AgentBusServer:
                 error=str(exc),
             )
             logger.exception("wsbus.publish.process_error peer={} to={}", peer_id, to)
-            return ProcessMessageResult(
-                success=False, message=str(exc), should_retry=False, retry_seconds=0, payload={"error": str(exc)}
-            )
+            return ProcessMessageResult(processed=False, status="error", payload={"error": str(exc)})
 
 
 class AgentBusClient:
@@ -622,16 +699,8 @@ class AgentBusClient:
         payload = cast(dict[str, Any], params.payload)
         matched = await self._dispatch_message(params.to, payload)
         if matched == 0:
-            return ProcessMessageResult(
-                success=False,
-                message="No matching handlers",
-                should_retry=False,
-                retry_seconds=0,
-                payload={"message": "No matching handlers"},
-            )
-        return ProcessMessageResult(
-            success=True, message="Processed", should_retry=False, retry_seconds=0, payload={"message": "Processed"}
-        )
+            return ProcessMessageResult(processed=False, status="ignored", payload={"message": "No matching handlers"})
+        return ProcessMessageResult(processed=True, status="ok", payload={"message": "Processed"})
 
     def _address_matches(self, address: str, pattern: str) -> bool:
         """Check if address matches wildcard pattern."""
@@ -677,34 +746,9 @@ class AgentBusClient:
         if not self._api:
             raise RuntimeError("Not connected")
         message_id = await self._next_message_id()
-        return await self._api.send_message(
-            SendMessageParams(from_=self._client_id, to=to, message_id=message_id, payload=payload)
-        )
+        return await self._api.send_message(SendMessageParams(to=to, message_id=message_id, payload=payload))
 
-
-__all__ = [
-    "ActivityLogWriter",
-    "AgentBusClient",
-    "AgentBusServer",
-    "AgentConnection",
-    "WebSocketTransport",
-]        logger.debug("wsbus.client.notification_matched to={} patterns={}", to, matched_patterns)
-        return matched_count
-
-    async def _next_message_id(self) -> str:
-        """Generate next sequential message ID."""
-        async with self._message_counter_lock:
-            self._message_counter += 1
-            return f"msg_{self._client_id}_{self._message_counter:010d}"
-
-    async def send_message(self, to: str, payload: dict[str, Any]) -> SendMessageResult:
-        """Send a message to the bus with auto-generated message ID."""
-        if not self._api:
-            raise RuntimeError("Not connected")
-        message_id = await self._next_message_id()
-        return await self._api.send_message(
-            SendMessageParams(from_=self._client_id, to=to, message_id=message_id, payload=payload)
-        )
+        return await self._api.send_message(SendMessageParams(to=to, message_id=message_id, payload=payload))
 
 
 __all__ = [

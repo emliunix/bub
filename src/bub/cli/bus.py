@@ -229,7 +229,7 @@ async def _run_telegram_bridge(  # noqa: C901
 
     async def handle_outbound(topic: str, payload: dict) -> None:
         content = payload.get("content", "")
-        chat_id = payload.get("content", {}).get("chat_id", "")
+        chat_id = payload.get("chat_id", "")
         logger.info("telegram.bridge.outbound topic={} chat_id={} len={}", topic, chat_id, len(content))
         await send_to_telegram(chat_id, content)
 
@@ -375,6 +375,14 @@ async def _run_telegram_bridge(  # noqa: C901
                 await context.bot.send_chat_action(chat_id=int(chat_id), action="typing")
 
             try:
+                # Extract Telegram metadata
+                telegram_message_id = update.message.message_id
+                telegram_chat_id = update.message.chat.id
+                is_group = update.message.chat.type in ["group", "supergroup"]
+                reply_to_telegram_message_id = (
+                    update.message.reply_to_message.message_id if update.message.reply_to_message else None
+                )
+
                 # Send directly to the assigned agent
                 await client.send_message(
                     to=agent_id,
@@ -386,9 +394,14 @@ async def _run_telegram_bridge(  # noqa: C901
                         "content": {
                             "text": text,
                             "senderId": str(user.id),
+                            "chat_id": chat_id,
                             "channel": "telegram",
                             "username": user.username,
                             "full_name": user.full_name,
+                            "telegram_message_id": telegram_message_id,
+                            "telegram_chat_id": telegram_chat_id,
+                            "is_group": is_group,
+                            "reply_to_telegram_message_id": reply_to_telegram_message_id,
                         },
                     },
                 )
@@ -411,6 +424,38 @@ async def _run_telegram_bridge(  # noqa: C901
 
         try:
             await _wait_forever()
+        except KeyboardInterrupt:
+            logger.info("telegram.bridge.stopped")
+    finally:
+        await client.disconnect()
+        # Subscribe to tg:* to receive outbound messages (responses from agents)
+        # Note: telegram-bridge acts as a router, so it subscribes to entity topics
+        sub_result = await client.subscribe("tg:*")
+        logger.info("telegram.bridge.subscribed topic=tg:* result={}", sub_result)
+
+        try:
+            await _wait_forever()
+        except KeyboardInterrupt:
+            logger.info("telegram.bridge.stopped")
+    finally:
+        await client.disconnect()        logger.info("telegram.bridge.started url={}", url)
+
+        # Subscribe to tg:* to receive outbound messages (responses from agents)
+        # Note: telegram-bridge acts as a router, so it subscribes to entity topics
+        sub_result = await client.subscribe("tg:*")
+        logger.info("telegram.bridge.subscribed topic=tg:* result={}", sub_result)
+
+        try:
+            await _wait_forever()
+        except KeyboardInterrupt:
+            logger.info("telegram.bridge.stopped")
+    finally:
+        await client.disconnect()        try:
+            await _wait_forever()
+        except KeyboardInterrupt:
+            logger.info("telegram.bridge.stopped")
+    finally:
+        await client.disconnect()            await _wait_forever()
         except KeyboardInterrupt:
             logger.info("telegram.bridge.stopped")
     finally:

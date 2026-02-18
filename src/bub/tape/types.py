@@ -56,8 +56,24 @@ class Manifest:
         file: str | None = None,
         title: str | None = None,
         parent: tuple[str, int] | None = None,
+        *,
+        replace_if_exists: bool = False,
     ) -> TapeMeta:
-        """Create a new tape in the manifest."""
+        """Create a new tape in the manifest.
+
+        Args:
+            tape_id: Unique identifier for the tape
+            file: Optional file path, defaults to "{tape_id}.jsonl"
+            title: Optional title for the tape
+            parent: Optional parent reference (tape_id, entry_id)
+            replace_if_exists: If True, overwrite existing tape metadata.
+                              If False (default), skip if tape already exists.
+
+        Returns:
+            The created or existing TapeMeta
+        """
+        if not replace_if_exists and tape_id in self._tapes:
+            return self._tapes[tape_id]
         if file is None:
             file = f"{tape_id}.jsonl"
         meta = TapeMeta(id=tape_id, file=file, title=title, parent=parent)

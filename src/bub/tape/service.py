@@ -51,6 +51,8 @@ class TapeService:
     def __init__(self, llm: LLM, tape_name: str, *, store: TapeStore) -> None:
         self._llm = llm
         self._store = store
+        # Ensure tape exists in manifest (safe to call multiple times)
+        store.create_tape(tape_name)
         self._tape = llm.tape(tape_name)
 
     @property

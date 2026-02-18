@@ -171,11 +171,26 @@ class FileTapeStore:
     # Tape operations
     # -------------------------------------------------------------------------
 
-    def create_tape(self, tape: str, title: str | None = None) -> str:
-        """Create a new tape. Returns the tape ID."""
-        logger.debug("tape.store.create tape={} title={}", tape, title)
+    def create_tape(self, tape: str, title: str | None = None, *, replace_if_exists: bool = False) -> str:
+        """Create a new tape. Returns the tape ID.
+
+        Args:
+            tape: Unique identifier for the tape
+            title: Optional title for the tape
+            replace_if_exists: If True, overwrite existing tape metadata.
+                              If False (default), skip if tape already exists.
+
+        Returns:
+            The tape ID
+        """
+        logger.debug(
+            "tape.store.create tape={} title={} replace_if_exists={}",
+            tape,
+            title,
+            replace_if_exists,
+        )
         manifest = self._load_manifest()
-        manifest.create_tape(tape, title=title)
+        manifest.create_tape(tape, title=title, replace_if_exists=replace_if_exists)
         self.save_manifest(manifest)
         logger.info("tape.store.created tape={}", tape)
         return tape
@@ -412,6 +427,18 @@ class FileTapeStore:
 
         return manifest
 
+    def _make_tape_file(self, tape: str) -> TapeFile:
+        """Create a new TapeFile for the given tape."""
+        encoded_name = quote(tape, safe="")
+        file_name = f"{self._paths.workspace_hash}__{encoded_name}{TAPE_FILE_SUFFIX}"
+        return TapeFile(self._paths.tape_root / file_name)
+
+    @staticmethod
+    def _resolve_paths(home: Path, workspace_path: Path) -> TapePaths:
+        tape_root = (home / "tapes").resolve()
+        tape_root.mkdir(parents=True, exist_ok=True)
+        workspace_hash = md5(str(workspace_path.resolve()).encode("utf-8")).hexdigest()  # noqa: S324
+        return TapePaths(home=home, tape_root=tape_root, workspace_hash=workspace_hash)
     def _make_tape_file(self, tape: str) -> TapeFile:
         """Create a new TapeFile for the given tape."""
         encoded_name = quote(tape, safe="")
