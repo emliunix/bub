@@ -297,6 +297,8 @@ class SystemAgent:
         # Pass other agent settings if they differ from defaults
         if settings.model:
             env_vars["BUB_AGENT_MODEL"] = settings.model
+        if settings.api_base:
+            env_vars["BUB_AGENT_API_BASE"] = settings.api_base
         if settings.max_tokens != 1024:  # Only pass if not default
             env_vars["BUB_AGENT_MAX_TOKENS"] = str(settings.max_tokens)
         if settings.max_steps != 20:  # Only pass if not default
