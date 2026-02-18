@@ -217,8 +217,6 @@ Response:
       {
         "success": true,
         "message": "ok",
-        "shouldRetry": false,
-        "retrySeconds": 0,
         "payload": {}
       }
     ]
@@ -235,7 +233,9 @@ Response:
 **Response Fields:**
 - `accepted` (boolean): Whether the bus accepted the message for delivery.
 - `messageId` (string): The message ID from the request.
-- `acks` (array): Individual ProcessMessageResult from each recipient. Use `len(acks)` to get delivery count.
+- `acks` (array): Stripped delivery results from each recipient. Use `len(acks)` to get delivery count.
+  - Each ack contains: `success`, `message`, `payload`
+  - Note: Retry fields (`shouldRetry`, `retrySeconds`) are excluded since retry is handled by the bus server internally.
 
 Notes:
 - `to` field specifies the destination address (like IP destination).
@@ -386,7 +386,7 @@ sequenceDiagram
     Note over Handler,Bus: {<br/>  "success": true,<br/>  "message": "ok",<br/>  "shouldRetry": false,<br/>  "retrySeconds": 0,<br/>  "payload": {}<br/>}
 
     Bus-->>Sender: sendMessage result
-    Note over Bus,Sender: {<br/>  "accepted": true,<br/>  "messageId": "msg_01J...",<br/>  "acks": [{<br/>    "success": true,<br/>    "message": "ok",<br/>    "shouldRetry": false,<br/>    "retrySeconds": 0<br/>  }]<br/>}
+    Note over Bus,Sender: {<br/>  "accepted": true,<br/>  "messageId": "msg_01J...",<br/>  "acks": [{<br/>    "success": true,<br/>    "message": "ok",<br/>    "payload": {}<br/>  }]<br/>}
 ```
 
 **Key Points:**

@@ -196,6 +196,49 @@ task("Fix tape server bug", context=...)
 
 ---
 
+## Multi-File Change Protocol
+
+When changes span multiple files (protocol types, core classes, callers):
+
+### Phase 1: Collect
+
+**Goal**: Gather all affected locations and identify unresolved inconsistencies before making any edits.
+
+1. **Find all affected files** - Use grep/glob to locate all usages of changed types/functions
+2. **Identify inconsistencies** - Look for:
+   - Conflicting type definitions across files
+   - Methods that would break after the change
+   - Dependencies that don't align with the new design
+   - Architecture violations or design flaws
+3. **STOP if unresolved issues found** - If you discover:
+   - The change is architecturally unsound
+   - Core assumptions conflict with existing code
+   - Multiple valid approaches exist
+   - The scope is larger than anticipated
+   
+   **Then**: Go back to architecture review. Ask the user for decisions on architectural questions before proceeding.
+
+4. **Map dependencies** - Document: Core types → Affected components → Callers
+
+### Phase 2: Plan
+
+**Goal**: Create a detailed, actionable edit plan that can be executed without surprises.
+
+1. **Draft edit plan** - List specific changes per file
+2. **Start with core types** (protocol.py, types.py) - These affect everything else
+3. **One functional feature at a time** - Don't mix multiple features in one pass
+4. **Verify plan validity** - Check that the plan is complete and consistent
+
+### Phase 3: Execute
+
+**Goal**: Implement the plan exactly as designed.
+
+- Follow the plan exactly
+- Don't deviate for "quick fixes"
+- If plan proves wrong during execution: STOP, go back to Phase 1 or 2
+
+---
+
 ## Project Structure & Module Organization
 Core code lives under `src/bub/`:
 - `app/`: runtime bootstrap and session wiring
@@ -239,6 +282,22 @@ just check
 **Note**: The agent should NOT run tests, linting, or type-checking automatically unless explicitly asked by the user.
 
 Pre-commit hooks (installed via `just install`) will automatically run these checks on staged files before each commit.
+
+### Overwrite Style Editing
+
+For files requiring substantial changes (>20% of lines or complex refactoring):
+
+1. **Architecture design first** - Document the new structure
+2. **Read entire file** - Understand all components
+3. **Create outline** - List all classes, methods, and their purposes
+4. **Use LSP** - Let language server help identify references
+5. **Draft new outline** - According to new architecture
+6. **Generate complete new file** - Write from scratch using outline
+7. **Review with diff** - Compare old vs new (`diff -u old.py new.py`)
+8. **Fix type/lint errors** - Before replacing
+9. **Overwrite** - `mv newfile.py oldfile.py`
+
+**Anti-pattern**: Incremental small edits on complex files (creates inconsistent state)
 
 ## Dependency Management
 When adding new dependencies:
@@ -406,7 +465,7 @@ store.resolve_anchor("phase1")
 
 ### WebSocketMessageBus (`src/bub/channels/wsbus.py`)
 ```python
-from bub.channels.wsbus import WebSocketMessageBus, WebSocketMessageBusClient
+from bub.rpc.bus import WebSocketMessageBus, WebSocketMessageBusClient
 
 # Server mode
 bus = WebSocketMessageBus(host="localhost", port=7892)
