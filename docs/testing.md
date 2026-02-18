@@ -30,36 +30,289 @@ This page documents Bub’s testing facilities and the curated debug scripts und
 
 ## Script Catalog (Curated)
 
+> **Documentation Status**: Each script entry includes a "Last Modified" date. To check if documentation is current, run: `git log -1 --format="%ai" -- scripts/SCRIPT_NAME.py`
+
 ### MiniMax / LLM Tool Calling
 
-- `scripts/test_minimax_tools.py`: direct OpenAI-SDK style tool calling tests.
-- `scripts/test_minimax_format.py`: dumps raw response format details.
-- `scripts/test_republic_minimax.py`: validates tool calling through the Republic client.
-- `scripts/test_minimal_republic_minimax.py`: minimal Republic+MiniMax reproduction.
+#### test_minimax_tools.py
+**Purpose**: Direct OpenAI-SDK style tool calling tests.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_minimax_tools.py
+```
+
+---
+
+#### test_minimax_format.py
+**Purpose**: Dumps raw response format details.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_minimax_format.py [API_KEY]
+```
+
+---
+
+#### test_republic_minimax.py
+**Purpose**: Validates tool calling through the Republic client.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_republic_minimax.py
+```
+
+---
+
+#### test_minimal_republic_minimax.py
+**Purpose**: Minimal Republic+MiniMax reproduction.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_minimal_republic_minimax.py
+```
 
 ### Bub Stack / Tape / Message Reconstruction
 
-- `scripts/test_bub_minimax_flow.py`: Bub LLM configuration + end-to-end tool calling through Bub’s stack.
-- `scripts/test_tape_tool_calls.py`: verifies what gets recorded to tape for tool calls.
-- `scripts/test_debug_messages.py`: deep dive into message reconstruction and sequencing.
-- `scripts/test_multi_turn.py`: multi-turn behavior validation.
+#### test_bub_minimax_flow.py
+**Purpose**: Bub LLM configuration + end-to-end tool calling through Bub's stack.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_bub_minimax_flow.py
+```
+
+---
+
+#### test_tape_tool_calls.py
+**Purpose**: Verifies what gets recorded to tape for tool calls.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_tape_tool_calls.py
+```
+
+---
+
+#### test_debug_messages.py
+**Purpose**: Deep dive into message reconstruction and sequencing.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_debug_messages.py
+```
+
+---
+
+#### test_multi_turn.py
+**Purpose**: Multi-turn behavior validation.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_multi_turn.py
+```
+
+---
+
+#### test_bub_integration.py
+**Purpose**: Bub integration test covering core functionality.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_bub_integration.py
+```
 
 ### Bus / RPC / Connectivity
 
-- `scripts/test_bus_client.py`: WebSocket bus client simulation.
-- `scripts/probe_bus.py`: quick probe utility for bus connectivity.
+#### test_bus_client.py
+**Purpose**: WebSocket bus client simulation.
+
+**Last Modified**: 2026-02-18
+
+**Usage**:
+```bash
+python scripts/test_bus_client.py [message]
+```
+
+---
+
+#### probe_bus.py
+**Purpose**: Quick probe utility for bus connectivity.
+
+**Last Modified**: 2026-02-18
+
+**Usage**:
+```bash
+python scripts/probe_bus.py
+```
+
+---
+
+#### test_bus_concurrent.py
+**Purpose**: Concurrent bus client testing with multiple simultaneous connections.
+
+**Last Modified**: 2026-02-18
+
+**Usage**:
+```bash
+python scripts/test_bus_concurrent.py
+```
+
+---
+
+#### test_bus_integration_3clients.py
+**Purpose**: Integration test with 3 simultaneous clients validating message routing.
+
+**Last Modified**: 2026-02-18
+
+**Usage**:
+```bash
+python scripts/test_bus_integration_3clients.py
+```
 
 ### End-to-End Suites
 
-- `scripts/test_e2e_clean.py`: baseline E2E flow.
-- `scripts/test_e2e_automated.py`: more automated E2E checks.
-- `scripts/test_e2e_telegram.py`: Telegram-focused E2E checks.
+#### test_e2e_clean.py
+**Purpose**: Baseline E2E flow following agent-protocol.md.
+
+**Last Modified**: 2026-02-19
+
+**Usage**:
+```bash
+python scripts/test_e2e_clean.py
+```
+
+---
+
+#### test_e2e_automated.py
+**Purpose**: Automated E2E checks.
+
+**Last Modified**: 2026-02-19
+
+**Usage**:
+```bash
+python scripts/test_e2e_automated.py
+```
+
+---
+
+#### test_e2e_telegram.py
+**Purpose**: Telegram-focused E2E checks.
+
+**Last Modified**: 2026-02-18
+
+**Usage**:
+```bash
+python scripts/test_e2e_telegram.py
+```
 
 ### Operational / Validation Helpers
 
-- `scripts/validate_system.py`: validates the system-level wiring.
-- `scripts/validate_mermaid.py`: validates Mermaid diagrams used in docs.
-- `scripts/e2e_quick_check.sh`: quick shell entrypoint for common E2E checks (if present/used in your workflow).
+#### validate_system.py
+**Purpose**: Validates the system-level wiring.
+
+**Last Modified**: 2026-02-18
+
+**Usage**:
+```bash
+python scripts/validate_system.py
+```
+
+---
+
+#### validate_mermaid.py
+**Purpose**: Validates Mermaid diagrams used in docs.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/validate_mermaid.py
+```
+
+---
+
+#### e2e_quick_check.sh
+**Purpose**: Quick shell entrypoint for common E2E checks.
+
+**Last Modified**: 2026-02-18
+
+**Usage**:
+```bash
+./scripts/e2e_quick_check.sh
+```
+
+---
+
+#### deploy-production.sh
+**Purpose**: Production deployment script for starting/stopping services.
+
+**Last Modified**: 2026-02-19
+
+**Usage**:
+```bash
+./scripts/deploy-production.sh start bus
+./scripts/deploy-production.sh start system-agent
+./scripts/deploy-production.sh status
+./scripts/deploy-production.sh stop
+```
+
+---
+
+#### docs-server.sh
+**Purpose**: MkDocs documentation server with daemon management.
+
+**Last Modified**: 2026-02-16
+
+**Usage**:
+```bash
+./scripts/docs-server.sh start [port]  # Default: 8000
+./scripts/docs-server.sh stop
+./scripts/docs-server.sh status
+./scripts/docs-server.sh logs
+```
+
+---
+
+#### docs-serve.sh
+**Purpose**: Simple one-shot MkDocs server.
+
+**Last Modified**: 2026-02-15
+
+**Usage**:
+```bash
+./scripts/docs-serve.sh
+```
+
+### Issue Reproduction
+
+#### test_reproduce_issue.py
+**Purpose**: Generic script for reproducing specific reported issues.
+
+**Last Modified**: 2026-02-17
+
+**Usage**:
+```bash
+python scripts/test_reproduce_issue.py
+```
 
 ## Environment Setup Expectations
 
