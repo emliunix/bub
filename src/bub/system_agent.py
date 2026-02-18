@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from bub.bus.bus import AgentBusClient
+from bub.config.settings import AgentSettings
 
 # Load environment variables from .env file
 # Try to find .env file in project root (3 levels up from this file)
@@ -274,39 +275,32 @@ class SystemAgent:
         """Spawn agent process via systemd."""
         unit_name = f"bub-agent-{worker_id}"
 
+        # Load settings to get API key and other config
+        # Settings are loaded from env vars with BUB_ prefix
+        settings = AgentSettings()
+
         # Build environment variables to pass via --setenv
         # AgentSettings uses BUB_AGENT_ prefix
-        env_vars = {
+        env_vars: dict[str, str] = {
             "BUB_BUS_URL": self.bus_url,
             "BUB_AGENT_BUS_URL": self.bus_url,  # For AgentSettings
         }
 
-        # Add other critical env vars from .env
-        critical_vars = [
-            "BUB_BUS_TELEGRAM_TOKEN",
-            "BUB_BUS_TELEGRAM_ENABLED",
-            "BUB_BUS_TELEGRAM_ALLOW_FROM",
-            "BUB_BUS_TELEGRAM_ALLOW_CHATS",
-            "BUB_BUS_TELEGRAM_PROXY",
-            "BUB_TAPE_HOME",
-            "BUB_TAPE_NAME",
-            "BUB_AGENT_API_KEY",
-            "BUB_AGENT_MODEL",
-            "BUB_AGENT_MAX_TOKENS",
-            "BUB_AGENT_MAX_STEPS",
-            "OPENROUTER_API_KEY",
-            "MINIMAX_API_KEY",
-            "BUB_LOG_FILTER",
-            "BUB_HOOKS_MODULE",
-        ]
+        # Pass API key from settings if available
+        api_key = settings.api_key or settings.resolved_api_key
+        if api_key:
+            env_vars["BUB_AGENT_API_KEY"] = api_key
+            logger.debug("system.agent.passing_api_key")
+        else:
+            logger.warning("system.agent.no_api_key_configured")
 
-        for var in critical_vars:
-            value = os.getenv(var)
-            if value:
-                env_vars[var] = value
-                logger.debug("system.agent.passing_env_var var={}", var)
-            else:
-                logger.warning("system.agent.env_var_not_set var={}", var)
+        # Pass other agent settings if they differ from defaults
+        if settings.model:
+            env_vars["BUB_AGENT_MODEL"] = settings.model
+        if settings.max_tokens != 1024:  # Only pass if not default
+            env_vars["BUB_AGENT_MAX_TOKENS"] = str(settings.max_tokens)
+        if settings.max_steps != 20:  # Only pass if not default
+            env_vars["BUB_AGENT_MAX_STEPS"] = str(settings.max_steps)
 
         # Build systemd-run command with --setenv for each var
         cmd = [
