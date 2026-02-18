@@ -76,6 +76,25 @@ Added section documenting the refactoring principle:
 ✅ No re-exports remain
 ✅ Testing module imports updated
 
-## Next Task
+## Scripts Documentation
 
-Review and document all scripts in `scripts/` folder.
+Created comprehensive scripts documentation skill at `.agent/skills/scripts-docs/SKILL.md`:
+
+- **24 scripts documented** with last_modified_date tracking
+- **Git log commands** included to check if docs are outdated:
+  - Single script: `git log -1 --format="%ai %s" -- scripts/NAME`
+  - All scripts: `git log --name-only --pretty=format: scripts/ | grep -E '\.py$|\.sh$' | sort | uniq`
+- **Categories covered**:
+  - Bus/RPC testing (4 scripts)
+  - End-to-End testing (3 scripts)  
+  - MiniMax/LLM testing (4 scripts)
+  - Bub Stack testing (5 scripts)
+  - Issue reproduction (1 script)
+  - Validation (2 scripts)
+  - Shell scripts (4 scripts)
+- **Maintenance checklist** included for keeping documentation current
+
+## Commits
+
+1. `0524dab` - refactor: move Transport/Listener protocols to rpc.types
+2. `c60c4ea` - docs: add scripts-docs skill for maintaining script documentation
