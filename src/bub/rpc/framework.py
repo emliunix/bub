@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 from bub.rpc.types import (
     ErrorData,
@@ -22,6 +22,14 @@ from bub.rpc.types import (
     RequestId,
     jsonrpc_message_adapter,
 )
+
+# Global set to keep references to background tasks (prevents GC)
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _cleanup_background_task(task: asyncio.Task[Any]) -> None:
+    """Remove task from background_tasks when done."""
+    _background_tasks.discard(task)
 
 
 class JSONRPCErrorException(Exception):
@@ -153,7 +161,11 @@ class JSONRPCFramework:
             self._handle_error(message)
 
     async def _handle_request(self, request: JSONRPCRequest) -> None:
-        """Handle incoming JSON-RPC request."""
+        """Handle incoming JSON-RPC request in a background task.
+
+        Runs handler as a task so the message loop can continue processing
+        other messages (e.g., responses to requests sent by the handler).
+        """
         handler = self._method_handlers.get(request.method)
 
         if handler is None:
@@ -165,6 +177,15 @@ class JSONRPCFramework:
             await self._send_message(error_response)
             return
 
+        # Run handler as background task to avoid blocking message loop
+        task = asyncio.create_task(self._run_request_handler(request, handler))
+        _background_tasks.add(task)
+        task.add_done_callback(_cleanup_background_task)
+
+    async def _run_request_handler(
+        self, request: JSONRPCRequest, handler: Callable[[dict[str, object]], Awaitable[dict[str, object] | None]]
+    ) -> None:
+        """Execute request handler and send response."""
         try:
             params = request.params or {}
             result = await handler(params)

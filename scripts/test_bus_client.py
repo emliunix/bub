@@ -42,7 +42,7 @@ async def main():
             "jsonrpc": "2.0",
             "id": 2,
             "method": "subscribe",
-            "params": {"topic": "outbound:*"},
+            "params": {"address": "outbound:*"},
         }
         await ws.send(json.dumps(sub_msg))
         resp = json.loads(await ws.recv())
@@ -55,12 +55,13 @@ async def main():
             "id": 3,
             "method": "sendMessage",
             "params": {
-                "topic": "inbound:436026689",
+                "to": "inbound:436026689",
                 "payload": {
-                    "channel": "telegram",
-                    "chatId": "436026689",
-                    "senderId": "436026689",
-                    "content": content,
+                    "messageId": f"test_{asyncio.get_event_loop().time()}",
+                    "type": "tg_message",
+                    "from": "tg:436026689",
+                    "timestamp": "2026-02-18T00:00:00Z",
+                    "content": {"text": content, "channel": "telegram", "chatId": "436026689", "senderId": "436026689"},
                 },
             },
         }

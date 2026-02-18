@@ -85,9 +85,11 @@ class ActivityLogWriter:
             return engine
 
         # Enable WAL mode for better concurrency
-        def _enable_wal(conn):
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
+        def _enable_wal(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
 
         engine_result = await asyncio.to_thread(_init_engine)
         if engine_result is None:

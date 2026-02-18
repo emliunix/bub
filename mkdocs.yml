@@ -12,6 +12,7 @@ nav:
   - Key Features: features.md
   - Architecture:
       - architecture/index.md
+      - Components: components.md
       - Class Hierarchy: architecture/01-class-hierarchy.md
       - Message Flow: architecture/02-message-flow-sequence.md
       - NEW Architecture: architecture/03-new-architecture-direct-coupling.md
@@ -23,9 +24,11 @@ nav:
       - Legacy: architecture.md
   - Deployment: deployment.md
   - Interactive CLI: cli.md
+  - Testing & Scripts: testing.md
   - Telegram: telegram.md
   - Discord: discord.md
   - Agent Protocol: agent-protocol.md
+  - Agent Messages: agent-messages.md
   - Agent Federation: agent-federation.md
 
 plugins:

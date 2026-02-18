@@ -4,8 +4,9 @@ import asyncio
 
 import pytest
 
-from bub.channels.events import InboundMessage
-from bub.channels.wsbus import AgentBusClient, AgentBusServer
+from typing import Any
+
+from bub.bus.bus import AgentBusClient, AgentBusServer
 
 
 @pytest.fixture
@@ -51,9 +52,7 @@ class TestAgentBusClient:
         async def handler(topic: str, payload: dict):
             notification_received.append({"topic": topic, "payload": payload})
 
-        client.on_notification("test.*", handler)
-
-        await client.subscribe("test.*")
+        await client.subscribe("test.*", handler)
 
         await server.publish(
             "test.topic",
@@ -78,7 +77,7 @@ class TestAgentBusClient:
         await server.stop_server()
 
     @pytest.mark.asyncio
-    async def test_inbound_message_convenience(self):
+    async def test_send_message(self):
         server = AgentBusServer(host="localhost", port=7897)
         await server.start_server()
 
@@ -88,15 +87,24 @@ class TestAgentBusClient:
 
         received = []
 
-        async def handler(topic: str, payload: dict):
+        async def handler(topic: str, payload: dict[str, Any]):
             received.append(payload)
 
-        client.on_notification("tg:*", handler)
+        await client.subscribe("tg:*", handler)
 
-        await client.subscribe("tg:*")
+        # Send a message using the new API
+        from datetime import UTC, datetime
+        from bub.message.messages import create_tg_message_payload
 
-        msg = InboundMessage(channel="telegram", sender_id="123", chat_id="456", content="test message")
-        await server.publish_inbound(msg)
+        payload = create_tg_message_payload(
+            message_id="msg_test",
+            from_addr="tg:123",
+            timestamp=datetime.now(UTC).isoformat(),
+            text="test message",
+            sender_id="456",
+            channel="telegram",
+        )
+        await client.send_message(to="tg:123", payload=payload)
 
         await asyncio.sleep(0.2)
 

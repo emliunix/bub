@@ -11,7 +11,7 @@ import random
 import sys
 
 from bub.channels.events import InboundMessage
-from bub.channels.wsbus import AgentBusClient
+from bub.bus.bus import AgentBusClient
 
 
 class MockTelegramClient:

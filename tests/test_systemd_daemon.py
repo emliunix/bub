@@ -7,7 +7,7 @@ import sys
 import time
 
 from bub.channels.events import InboundMessage, OutboundMessage
-from bub.channels.wsbus import AgentBusClient
+from bub.bus.bus import AgentBusClient
 
 
 def disable_proxy_env():

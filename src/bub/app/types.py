@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from republic.tape import TapeEntry
 
-from bub.types import MessageBus
+from bub.bub_types import MessageBus
 
 
 class AgentSettings(Protocol):

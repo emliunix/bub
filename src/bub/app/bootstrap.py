@@ -8,10 +8,10 @@ from loguru import logger
 
 from bub.app.runtime import AgentRuntime
 from bub.app.types import TapeStore
-from bub.channels.wsbus import AgentBusClient
+from bub.bus.bus import AgentBusClient
 from bub.config import AgentSettings, TapeSettings
 from bub.integrations.republic_client import build_tape_store
-from bub.types import MessageBus
+from bub.bub_types import MessageBus
 
 
 def build_runtime(

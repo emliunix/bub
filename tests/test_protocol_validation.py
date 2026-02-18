@@ -7,7 +7,7 @@ import pytest
 import websockets
 
 from bub.channels.events import InboundMessage, OutboundMessage
-from bub.channels.wsbus import AgentBusClient, AgentBusServer
+from bub.bus.bus import AgentBusClient, AgentBusServer
 
 
 def _server_url(server: AgentBusServer) -> str:
@@ -49,7 +49,7 @@ async def test_protocol_full_flow() -> None:
         async def record_handler(topic: str, payload: dict) -> None:
             client1_messages.append((topic, payload))
 
-        client1.on_notification("tg:*", record_handler)
+        await client1.subscribe("tg:*", record_handler)
 
         # Client 2: Connects as tg peer and sends messages
         client2 = AgentBusClient(server_url, auto_reconnect=False)
@@ -180,7 +180,7 @@ async def test_wildcard_subscription_receives_all() -> None:
         async def handler(topic: str, payload: dict) -> None:
             received.append((topic, payload))
 
-        subscriber.on_notification("tg:*", handler)
+        await subscriber.subscribe("tg:*", handler)
 
         publisher = AgentBusClient(server_url, auto_reconnect=False)
         await publisher.connect()

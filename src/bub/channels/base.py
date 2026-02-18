@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from bub.channels.events import InboundMessage, OutboundMessage
+from bub.message.messages import create_tg_message_payload
 
 if TYPE_CHECKING:
-    from bub.types import MessageBus
+    from bub.bub_types import MessageBus
 
 
 class BaseChannel(ABC):
@@ -33,7 +35,18 @@ class BaseChannel(ABC):
         """Send one outbound message to external channel."""
 
     async def publish_inbound(self, message: InboundMessage) -> None:
-        await self.bus.publish_inbound(message)
+        """Publish inbound message to the bus."""
+        payload = create_tg_message_payload(
+            message_id=message.metadata.get("message_id", "0"),
+            from_addr=f"tg:{message.chat_id}",
+            timestamp=datetime.now(UTC).isoformat(),
+            text=message.content,
+            sender_id=message.sender_id,
+            channel=message.channel,
+            username=message.metadata.get("username"),
+            full_name=message.metadata.get("full_name"),
+        )
+        await self.bus.send_message(to=f"tg:{message.chat_id}", payload=payload)
 
     @property
     def is_running(self) -> bool:

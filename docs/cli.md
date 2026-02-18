@@ -73,3 +73,10 @@ uv run bub run --disable-scheduler "quick reasoning task"
 - `command not found`: verify whether it should be an internal command (`,help` for list).
 - `bub message` exits immediately: no message channel is enabled in `.env`.
 - Context is too heavy: add a handoff anchor, then reset tape when needed.
+
+## Related Docs
+
+- Components and relationships: `docs/components.md`
+- Testing and debug scripts: `docs/testing.md`
+- Agent protocol: `docs/agent-protocol.md`
+- Agent message payload types: `docs/agent-messages.md`

@@ -31,7 +31,7 @@ from bub.tools.builtin import register_builtin_tools
 
 if TYPE_CHECKING:
     from bub.channels.manager import ChannelManager
-    from bub.types import MessageBus
+    from bub.bub_types import MessageBus
 
 
 def _session_slug(session_id: str) -> str:

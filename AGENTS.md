@@ -2,78 +2,85 @@
 
 > **IMPORTANT**: This document is for human developers only. DO NOT execute any commands or workflows described in this file unless explicitly requested by the user. This is documentation, not instructions for automated execution.
 
----
+## Start Here (Docs)
+
+Use these dedicated docs for details:
+
+- Components & relationships: `docs/components.md`
+- Architecture & determinism: `docs/architecture.md`
+- Agent protocol (transport): `docs/agent-protocol.md`
+- Agent messages (payload types): `docs/agent-messages.md`
+- Interactive CLI: `docs/cli.md`
+- Scripts, testing, debugging: `docs/testing.md`
+- Deployment: `docs/deployment.md`
+
+For the most up-to-date “what changed”, prefer the newest entry in `journal/`.
 
 ## Workflow Warm Up
 
-At the start of each session, agents should warm up by:
+At the start of each session:
 
-1. **Read AGENTS.md** (this file) - Already loaded via system instructions
-2. **Check the latest journal entry** in `journal/` to understand recent context
-3. **Verify project structure** - Run `pwd` and check git status to see current state
+1. Read this document.
+2. Check the latest entry in `journal/` to understand recent changes and known issues.
+3. Verify project structure (working directory, git status, etc.).
 
-### Current Project State (as of latest journal: 2026-02-16)
+## Core Principles (Keep These)
 
-**Recent Major Changes:**
-- ✅ **MiniMax API Integration** - Fully working with standard OpenAI format
-- ✅ **Critical Bug Fixes** - Tape server tool call recording, bus handler notification, Telegram outbound
-- ✅ **Provider Adapters** - New framework for provider-specific message formatting (`src/bub/llm/adapters.py`)
-- ✅ **Production Deployment** - Systemd-based deployment script (`scripts/deploy-production.sh`)
-- ✅ **WebSocket Message Bus** - Cleaned up RPC protocol, local handler fixes
+### Skill-First
 
-**Key Files to Know:**
-- `src/bub/llm/format.py` - Standard message format definitions
-- `src/bub/llm/adapters.py` - Provider adapter framework
-- `src/bub/channels/wsbus.py` - WebSocket bus with handler fixes
-- `src/bub/tape/server.py` - REST API for tape operations
-- `scripts/` - Test and deployment scripts
+- Keep this file focused on principles, workflows, and conventions.
+- Put detailed “how to run X” procedures in dedicated docs (or skills) so they don’t go stale.
 
-**Architecture Principle:**
-> **"Save Standard, Call by Adapting"** - Tape stores standard OpenAI format; provider adapters convert at API boundaries.
+Project skills live under `.agent/skills/` (authoritative procedures).
 
-### Quick Health Check Commands
-```bash
-# Check what's running (production components)
-./scripts/deploy-production.sh list
+### Save Standard, Call by Adapting
 
-# View recent logs
-./scripts/deploy-production.sh logs agent  # or bus, tape
+- Store messages on tape in the standard OpenAI-compatible format.
+- Convert to provider-specific formats at the boundary.
 
-# Test bus connectivity
-uv run python scripts/test_bus_client.py "test message"
-```
+(See `docs/architecture.md` and `src/bub/llm/adapters.py`.)
 
----
+### Don’t Autonomously Run Commands
+
+Unless explicitly asked:
+
+- Don’t run tests, scripts, linters, deployments, or “health check” commands.
+- If verification is needed, propose minimal commands and wait.
 
 ## Subagent Workflow
 
-When working on complex multi-step tasks, use the following workflow to coordinate with subagents:
+When working on complex multi-step tasks, use subagents to split work into independent threads (e.g., protocol types + implementation + caller updates).
 
 ### Overview
-1. **Plan**: Break down the task into concrete todo items
-2. **Spawn**: Create subagents for each todo item with complete context
-3. **Wait**: Wait for subagent to complete and report results
-4. **Update**: Adjust plan based on results
-5. **Repeat**: Continue with next todo item
+
+1. **Plan**: Break down the task into concrete todo items.
+2. **Spawn**: Create subagents for each todo item with complete context.
+3. **Wait**: Wait for each subagent to complete and report results.
+4. **Update**: Adjust plan based on results.
+5. **Repeat**: Continue with next todo item.
 
 ### Step-by-Step Process
 
 #### 1. Plan the Task
+
 Create a todo list with specific, actionable items:
+
 ```python
 # Example todo list for debugging
 [
     {"content": "Create minimal reproducible script", "status": "in_progress", "priority": "high"},
     {"content": "Run script to identify root cause", "status": "pending", "priority": "high"},
     {"content": "Fix identified issue", "status": "pending", "priority": "high"},
-    {"content": "Verify fix with end-to-end test", "status": "pending", "priority": "medium"}
+    {"content": "Verify fix with end-to-end test", "status": "pending", "priority": "medium"},
 ]
 ```
 
 #### 2. Spawn a Subagent
+
 For each todo item, spawn a subagent with:
 
 **Required Context**:
+
 - Complete background information
 - What has been done so far
 - What the current issue is
@@ -81,256 +88,147 @@ For each todo item, spawn a subagent with:
 - Any error messages or logs
 
 **Clear Goal**:
+
 - Specific task to accomplish
 - Expected outcome
 
 **Expected Result Format**:
+
 - What should be reported back
 - File paths of created/modified files
-- Test results
+- Test results (only if explicitly asked to run tests)
 - Any issues encountered
 
-**Example Prompt**:
+**Prompt Template**:
+
 ```
-You are a subagent working on debugging MiniMax API integration.
+You are a subagent working on <topic>.
 
-**Context**:
-- We're debugging tool calling issues with MiniMax API
-- Republic client works fine in isolation
-- The issue may be in Bub's integration layer
-- Test scripts are in scripts/ directory
+Context:
+- <what’s happening>
 
-**Your Task**:
-Create a minimal test script at scripts/test_debug.py that:
-1. Sets up minimal Bub environment
-2. Tests tool call round trip
-3. Prints debug info at each step
+Task:
+1) <step>
+2) <step>
 
-**Expected Result**:
-- Confirm script was created
-- Show test output
-- Identify where breakdown occurs (if any)
-- Report specific file paths and line numbers
+Expected result:
+- <what to report back>
 
-**Important**: Do NOT spawn additional subagents. If the task is too complex, report it as an issue with suggestions for subdivision.
+Constraints:
+- Do NOT spawn more subagents.
+- Do not run commands unless asked.
 ```
 
 #### 3. Wait and Review
+
 Wait for the subagent to complete and review the results:
-- Check if task was completed successfully
-- Review any findings or issues reported
-- Verify files were created/modified correctly
+
+- Check if task was completed successfully.
+- Review findings and verify constraints were followed.
+- If results reveal new unknowns, update the plan rather than patching blindly.
 
 #### 4. Update the Plan
+
 Based on subagent results:
-- Mark completed todos as "completed"
-- Add new todos if issues were discovered
-- Update todo descriptions based on findings
-- Adjust priorities if needed
+
+- Mark completed todos as completed.
+- Add new todos if issues were discovered.
+- Update todo descriptions based on findings.
 
 #### 5. Repeat
+
 Continue with the next todo item until all tasks are complete.
 
 ### Subagent Constraints
 
-**Subagents MUST NOT**:
-- Spawn additional subagents
-- Create new todos
-- Modify the main todo list
-- Make architectural decisions without reporting back
+Subagents must not:
 
-**If Task is Too Complex**:
-If a single todo item proves too complex, the subagent should:
-1. Report the issue clearly
-2. Describe what was attempted
-3. Suggest how to subdivide the task
-4. Provide optional breakdown suggestions
-
-**Example Report**:
-```
-**Issue**: Task too complex - require deeper investigation
-
-**Attempted**: Created test script but discovered 3 separate issues:
-1. Bus handler notification bug
-2. Message format conversion issue  
-3. Tape recording bug
-
-**Suggestion**: Split into 3 separate todo items:
-- Fix bus handler notification in wsbus.py
-- Debug message format in republic_client.py
-- Investigate tape recording in server.py
-
-**Current Status**: Test script created at scripts/test_issue.py with baseline tests.
-```
+- Spawn additional subagents.
+- Create/modify the main plan/todo list.
+- Make architectural decisions without reporting back.
 
 ### Best Practices
 
-1. **Clear Scope**: Each todo should be completable in a single subagent session
-2. **Complete Context**: Always provide full context - subagents don't see previous conversations
-3. **Specific Goals**: Define exactly what success looks like
-4. **Verification**: Always include how to verify the work (tests, checks, etc.)
-5. **Iterate**: Don't try to plan everything upfront - adjust based on findings
-6. **Document**: Update the journal with findings from each subagent
+- Keep scope tight: one todo item should be completable in one subagent session.
+- Provide complete context: subagents don’t have prior conversation state.
+- Define success criteria: what to change, where, and how to verify.
+- Prefer reporting blockers over guessing when architecture decisions are unclear.
+- Write down findings: update today’s journal entry with decisions and outcomes.
 
-### Example Workflow
+## Repository Layout (Short)
 
-```python
-# Initial todo list
-todos = [
-    {"content": "Debug MiniMax role error", "status": "in_progress", "priority": "high"},
-    {"content": "Fix tape server bug", "status": "pending", "priority": "high"}
-]
+- Core code: `src/bub/`
+- Tests: `tests/`
+- Docs: `docs/`
+- Journals: `journal/`
+- Debug/integration scripts: `scripts/`
 
-# Spawn subagent for first task
-task("Debug MiniMax role error", context=...)
+For a component-wise view (bus/tape/agents/channels/CLI), see `docs/components.md`.
 
-# Review results, update todos
-todos[0]["status"] = "completed"
-todos[1]["status"] = "in_progress"
+## Development Practices
 
-# Spawn subagent for second task
-task("Fix tape server bug", context=...)
+### Build/Test Commands (Reference Only)
 
-# Continue until complete
-```
+The repo uses `uv` + Ruff + mypy + pytest.
 
----
+(See `docs/testing.md` for script/test facilities; see `docs/deployment.md` for runtime modes.)
 
 ## Multi-File Change Protocol
 
-When changes span multiple files (protocol types, core classes, callers):
+When a change spans multiple files (types → implementations → callers), follow this sequence.
 
 ### Phase 1: Collect
 
-**Goal**: Gather all affected locations and identify unresolved inconsistencies before making any edits.
+Goal: Gather all affected locations and identify unresolved inconsistencies before making any edits.
 
-1. **Find all affected files** - Use grep/glob to locate all usages of changed types/functions
-2. **Identify inconsistencies** - Look for:
-   - Conflicting type definitions across files
-   - Methods that would break after the change
-   - Dependencies that don't align with the new design
-   - Architecture violations or design flaws
-3. **STOP if unresolved issues found** - If you discover:
-   - The change is architecturally unsound
-   - Core assumptions conflict with existing code
-   - Multiple valid approaches exist
-   - The scope is larger than anticipated
-   
-   **Then**: Go back to architecture review. Ask the user for decisions on architectural questions before proceeding.
-
-4. **Map dependencies** - Document: Core types → Affected components → Callers
+- Find all affected files/usages.
+- Identify inconsistencies (payload shapes, conflicting types, mismatched expectations).
+- Map dependencies: core types → affected components → callers.
+- Stop and ask if a key architectural decision is unclear.
 
 ### Phase 2: Plan
 
-**Goal**: Create a detailed, actionable edit plan that can be executed without surprises.
+Goal: Create a detailed, actionable edit plan that can be executed without surprises.
 
-1. **Draft edit plan** - List specific changes per file
-2. **Start with core types** (protocol.py, types.py) - These affect everything else
-3. **One functional feature at a time** - Don't mix multiple features in one pass
-4. **Verify plan validity** - Check that the plan is complete and consistent
+- Start with core types (protocol/message schemas).
+- Update implementations.
+- Update callers last.
+- If multiple valid approaches exist, stop and ask before editing.
 
 ### Phase 3: Execute
 
-**Goal**: Implement the plan exactly as designed.
+Goal: Implement the plan exactly as designed.
 
-- Follow the plan exactly
-- Don't deviate for "quick fixes"
-- If plan proves wrong during execution: STOP, go back to Phase 1 or 2
-
----
-
-## Project Structure & Module Organization
-Core code lives under `src/bub/`:
-- `app/`: runtime bootstrap and session wiring
-- `core/`: input router, command detection, model runner, agent loop
-- `tape/`: append-only tape store, anchor/handoff services
-- `tools/`: unified tool registry and progressive tool-view rendering
-- `skills/`: skill discovery and loading (`SKILL.md`-based)
-- `cli/`: interactive CLI (`bub chat`)
-- `channels/`: channel bus/manager and Telegram adapter
-- `integrations/`: Republic client setup
-
-Tests are in `tests/`. Documentation is in `docs/`. See [docs/README.md](docs/README.md) for the full docs site structure. Legacy implementation is archived in `backup/src_bub_legacy/` (read-only reference). The `upstream/` directory contains external repositories cloned for reference and study purposes (e.g., comparing implementations or examining how other projects solve similar problems).
-
-## Build, Test, and Development Commands
-
-> **Note**: The following commands are documentation for developers. The agent should NOT execute these commands unless explicitly requested by the user.
-
-- `uv sync`: install/update dependencies
-- `uv pip list`: list installed packages
-- `uv pip index versions <package>`: search for package versions
-- `just install`: setup env + hooks
-
-## Development Workflow
-
-> **DEVELOPER ONLY**: These commands are for human developers to run before committing changes. DO NOT execute these commands automatically as part of normal agent operations.
-
-Run these checks before committing (or let pre-commit hooks handle it):
-
-```bash
-# Check only changed files (recommended)
-uv run ruff check .
-uv run mypy src
-
-# Run tests
-uv run pytest -q
-
-# Or all at once
-just check
-```
-
-**Note**: The agent should NOT run tests, linting, or type-checking automatically unless explicitly asked by the user.
-
-Pre-commit hooks (installed via `just install`) will automatically run these checks on staged files before each commit.
+- Follow the plan.
+- If the plan breaks during implementation, stop and go back to Phase 1 or Phase 2.
+- Avoid making unplanned edits, even if they seem small (creates inconsistent state).
 
 ### Overwrite Style Editing
 
 For files requiring substantial changes (>20% of lines or complex refactoring):
 
-1. **Architecture design first** - Document the new structure
-2. **Read entire file** - Understand all components
-3. **Create outline** - List all classes, methods, and their purposes
-4. **Use LSP** - Let language server help identify references
-5. **Draft new outline** - According to new architecture
-6. **Generate complete new file** - Write from scratch using outline
-7. **Review with diff** - Compare old vs new (`diff -u old.py new.py`)
-8. **Fix type/lint errors** - Before replacing
-9. **Overwrite** - `mv newfile.py oldfile.py`
+1. **Architecture design first** - Document the new structure.
+2. **Read entire file** - Understand all components.
+3. **Create outline** - List all classes, methods, and their purposes.
+4. **Use LSP** - Let the language server help identify references.
+5. **Draft new outline** - According to the new architecture.
+6. **Generate complete new file** - Write from scratch using the outline.
+7. **Review with diff** - Compare old vs new (`diff -u old.py new.py`).
+8. **Fix type/lint errors** - Before replacing.
+9. **Overwrite** - Replace the old file with the new file.
 
-**Anti-pattern**: Incremental small edits on complex files (creates inconsistent state)
-
-## Dependency Management
-When adding new dependencies:
-
-1. Search for the latest version:
-   ```bash
-   uv run --with pip pip index versions <package>
-   ```
-
-2. Add to project (auto-updates pyproject.toml):
-   ```bash
-   uv add <package>>=X.Y.Z
-   ```
-
-3. Sync dependencies:
-   ```bash
-   uv sync
-   ```
-
-4. Run tests to verify (developer only):
-   ```bash
-   uv run pytest -q
-   ```
-   **Note**: The agent should NOT run tests automatically.
+Anti-pattern: Incremental small edits on complex files (creates inconsistent state).
 
 ## Code Style Guidelines
 
 ### General
+
 - Python 3.12+, 4-space indentation, type hints required for new/modified logic
 - Line length: 120 characters (enforced by ruff)
 - Format/lint with Ruff; type-check with mypy
 
 ### Naming Conventions
+
 - `snake_case`: functions, variables, modules, methods
 - `PascalCase`: classes, exceptions, type aliases
 - `UPPER_CASE`: constants, enum values
@@ -338,302 +236,104 @@ When adding new dependencies:
 - Avoid single-letter names except: `i`/`j`/`k` for loops, `x`/`y`/`z` for coordinates, `e` for exceptions
 
 ### Imports
+
 - Use absolute imports: `from bub.core import router`
 - Sort imports with ruff (isort rules): stdlib → third-party → local
-- **All imports must be at the top of the file** (enforced by ruff E402)
+- All imports must be at the top of the file (ruff E402)
 - Avoid wildcard imports (`from x import *`)
 - Group related imports: `from pathlib import Path, PurePath`
 - No local imports inside functions (use TYPE_CHECKING for type-only imports)
 
 ### Types & Type Hints
+
 - Use `X | None` over `Optional[X]`
 - Use `dict[str, Any]` over `Dict[str, Any]`
 - Avoid `Any` where possible; prefer explicit types
 - Use `type` for simple type aliases: `type Foo = str | None`
 - Mark untyped external calls with `# type: ignore[attr-defined]`
 - Put shared type definitions in `types.py` within the module (e.g., `tape/types.py` for tape types)
+  - This has the benefit of making types centrally managed and easily importable without circular dependencies.
 
 ### Code Quality
-- **Strict type checking is enforced** - all code must pass mypy
-- Run `just check` (lint + typecheck) before committing
+
+- Strict type checking is enforced - all code must pass mypy
 - No deferred type annotations - fix type errors immediately
 
 ### Functions & Classes
+
 - Keep functions focused (< 50 lines); use composable helpers
 - Use dataclasses for simple data containers, Pydantic for validated models
 - Prefer early returns over deeply nested conditionals
 - Use `@staticmethod` for pure utilities, `@classmethod` for alternate constructors
 
 ### Error Handling
+
 - Use custom exceptions inheriting from `Exception` or `BubError` base class
 - Catch specific exceptions, not bare `except:` clauses
 - Raise with context: `raise ValueError("msg") from original_exc`
 - Log errors with `loguru`: `log.error("context: {detail}", detail=val)`
 
 ### Async
+
 - Use `async def` for I/O-bound operations; avoid blocking in async context
 - Use `await` only inside async functions; use `run_in_executor` for sync libs
 
 ### Testing
-
-> **DEVELOPER ONLY**: Testing is for development verification only. The agent should NOT run tests unless the user explicitly asks for it.
 
 - Framework: `pytest` with `pytest-asyncio`
 - Name files: `tests/test_<feature>.py`
 - Name tests by behavior: `test_user_shell_failure_falls_back_to_model`
 - Use fixtures from `conftest.py` for shared setup
 - Prefer `pytest.raises` for exception testing
-- Cover: router semantics, loop stop conditions, tape/anchor behavior, channel dispatch
+- Cover: router semantics, loop stop conditions, tape/anchor behavior, and channel dispatch
 
-## Commit & Pull Request Guidelines
-
-> **DEVELOPER ONLY**: These guidelines are for human developers creating pull requests.
-
-- Follow Conventional Commit style: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`
-- Keep commits focused; avoid mixing refactor and behavior change
-- PRs should include:
-  - what changed and why
-  - impacted paths/modules
-  - verification output from developer-run checks (`ruff`, `mypy`, `pytest`)
-  - docs updates when CLI behavior, commands, or architecture changes
+(Details and script catalog: `docs/testing.md`.)
 
 ## Security & Configuration
-- Use `.env` for secrets (`OPENROUTER_API_KEY`, `BUB_BUS_TELEGRAM_TOKEN`); never commit keys
-- Validate Telegram allowlist (`BUB_BUS_TELEGRAM_ALLOW_FROM`) before enabling production bots
-- Never log sensitive data (API keys, tokens, passwords)
 
-## Pre-commit Hooks
-The project uses prek for pre-commit hooks (installed via `just install`):
-- Runs ruff, isort, trailing-whitespace checks before commits
-- Skip hooks with `--no-verify` only when absolutely necessary
+- Use `.env` for secrets; never commit keys.
+- Validate Telegram allowlists before enabling production bots.
+- Never log sensitive data.
 
-## Settings
-
-Settings are split into focused components:
-
-```python
-from bub.config import TapeSettings, BusSettings, AgentSettings, Settings
-
-# Individual settings
-tape = TapeSettings()          # BUB_TAPE_* env vars
-bus = BusSettings()           # BUB_BUS_* env vars
-agent = AgentSettings()       # BUB_AGENT_* env vars
-bus = BusSettings()           # BUB_BUS_* env vars
-chat = ChatSettings()          # BUB_* env vars
-
-# Unified (backwards compatible)
-settings = Settings()
-```
-
-### Environment Variables
+## Settings (Env Prefixes)
 
 | Prefix | Settings | Examples |
 |--------|----------|----------|
-| `BUB_TAPE_` | TapeSettings | `BUB_TAPE_HOME`, `BUB_TAPE_NAME` |
-| `BUB_BUS_` | BusSettings | `BUB_BUS_PORT`, `BUB_BUS_TELEGRAM_TOKEN` |
-| `BUB_` | ChatSettings | `BUB_MODEL`, `BUB_MAX_STEPS` |
-
-## Key APIs
-
-### FileTapeStore (`src/bub/tape/store.py`)
-```python
-from bub.tape.store import FileTapeStore
-from pathlib import Path
-
-store = FileTapeStore(home=Path(".bub"), workspace_path=Path.cwd())
-
-# Tape operations
-store.create_tape("main", title="My Session")
-store.get_title("main")
-store.set_title("main", "New Title")
-store.list_tapes()
-store.read("main", from_entry_id=10, to_entry_id=50)
-store.append("main", entry)
-store.fork("main")                                    # fork from start
-store.fork("main", "fork1")                          # fork with name
-store.fork("main", from_entry=("main", 50))         # fork from entry 50
-store.fork("main", from_anchor="phase1")             # fork from anchor
-store.archive("main")
-store.reset("main")
-
-# Anchor operations
-store.create_anchor("phase1", "main", 50, {"summary": "done"})
-store.get_anchor("phase1")
-store.list_anchors()
-store.resolve_anchor("phase1")
-```
-
-### WebSocketMessageBus (`src/bub/channels/wsbus.py`)
-```python
-from bub.rpc.bus import WebSocketMessageBus, WebSocketMessageBusClient
-
-# Server mode
-bus = WebSocketMessageBus(host="localhost", port=7892)
-await bus.start_server()
-await bus.publish("topic", {"data": "value"})
-sub_id = await bus.subscribe("topic", handler)
-await bus.publish_inbound(message)
-await bus.publish_outbound(message)
-
-# Client mode
-client = WebSocketMessageBusClient("ws://localhost:7892")
-await client.connect()
-await client.publish("topic", {"data": "value"})
-```
-
-### TapeMeta (`src/bub/tape/types.py`)
-```python
-from bub.tape.types import Anchor, Manifest, TapeMeta
-
-# Manifest is in-memory data structure; file I/O is in FileTapeStore
-```
-
----
-
-## Utility Scripts (Skills)
-
-These utilities are also available as project skills in `.agent/skills/` for reference:
-- `bus-cli` - WebSocket bus commands
-- `deployment` - Production deployment management  
-- `testing` - Test and debug scripts
-- `docs` - Documentation system (MkDocs, writing guidelines)
-
-### Using Project Skills
-
-Project skills are the **authoritative source** for commands and procedures. They are meant to be used and should evolve when information is missing or out of date.
-
-**Anti-patterns to avoid:**
-
-| Instead of... | Use this skill |
-|---------------|----------------|
-| `uv run bub bus serve` or `python -m bub.channels.wsbus` | **`deployment`** skill |
-| Manually checking logs with `journalctl` | **`deployment`** skill |
-| `uv run python scripts/test_*.py` directly | **`testing`** skill |
-| Direct WebSocket debugging | **`bus-cli`** skill |
-| Starting docs server manually | **`docs`** skill |
-
-**When to use:**
-- **Starting/stopping components** → Check `deployment` skill first
-- **Debugging bus messages** → Check `bus-cli` skill first
-- **Running tests** → Check `testing` skill first
-- **Writing docs** → Check `docs` skill first (includes MkDocs setup, mermaid validation, writing guidelines)
-
-If the skill is missing information or the commands don't work, update the SKILL.md file with the corrected information.
-
-### Bus CLI Commands
-
-The `bub bus` subcommand provides utilities for interacting with the WebSocket message bus:
-
-```bash
-# Start the bus server (pure message router)
-uv run bub bus serve
-
-# Send a message to a topic and wait for responses
-uv run bub bus send "hello world" --channel telegram --chat-id 123456
-
-# Subscribe to a topic pattern and print messages (planned)
-uv run bub bus recv --topic "telegram:*"
-```
-
-See [docs/components.md](docs/components.md) for architecture details.
-
-### Production Deployment (`scripts/deploy-production.sh`)
-
-Systemd-based production deployment script for managing Bub components as user services.
-
-**Components:** `bus`, `agent`, `tape`, `telegram-bridge`
-
-See [docs/components.md](docs/components.md) for detailed component documentation.
-
-**Commands:**
-```bash
-./scripts/deploy-production.sh start bus      # Start message bus
-./scripts/deploy-production.sh start agent    # Start agent worker
-./scripts/deploy-production.sh start tape     # Start tape service
-./scripts/deploy-production.sh logs agent     # Follow agent logs
-./scripts/deploy-production.sh status tape    # Check tape service status
-./scripts/deploy-production.sh list           # List all running components
-./scripts/deploy-production.sh stop bus       # Stop message bus
-```
-
-**Features:** Auto-restart on failure (5s delay, max 3/min), `journalctl` integration.
-
-### Documentation (`scripts/docs-server.sh`)
-
-MkDocs documentation server with live reload. See **`docs`** skill for:
-- MkDocs configuration and setup
-- Mermaid diagram validation
-- Writing guidelines (tables, callouts, code blocks)
-- Adding new pages
-
-```bash
-./scripts/docs-server.sh start [port]   # Start on port (default: 8000)
-```
-
-### Test/Debug Scripts
-
-Located in `scripts/` directory for testing specific integrations:
-
-#### MiniMax API Testing
-- **`test_minimax_tools.py`** - Direct OpenAI SDK tests for MiniMax tool calling
-  - Tests: basic chat, tool calls, tool results with OpenAI format
-  - Usage: `uv run python scripts/test_minimax_tools.py`
-
-- **`test_minimax_format.py`** - Check MiniMax response format details
-  - Dumps complete API response structure
-  - Usage: `uv run python scripts/test_minimax_format.py [API_KEY]`
-
-- **`test_republic_minimax.py`** - Test MiniMax through Republic client
-  - Validates tool_calls() and raw response parsing
-  - Usage: `uv run python scripts/test_republic_minimax.py`
-
-#### Bub Integration Testing
-- **`test_bub_minimax_flow.py`** - Test Bub's LLM configuration flow
-  - Tests settings loading, tape store, LLM client setup
-  - Validates end-to-end tool calling with Bub's stack
-  - Usage: `uv run python scripts/test_bub_minimax_flow.py`
-
-- **`test_tape_tool_calls.py`** - Debug tape recording of tool calls
-  - Checks what's actually stored on tape after tool calls
-  - Tests both tool_calls() and run_tools() methods
-  - Usage: `uv run python scripts/test_tape_tool_calls.py`
-
-#### Bus Testing
-- **`test_bus_client.py`** - WebSocket bus test client
-  - Simulates Telegram messages via WebSocket
-  - Tests JSON-RPC initialization, subscription, message sending
-  - Usage: `uv run python scripts/test_bus_client.py [message]`
-
-**Environment Setup:**
-All test scripts automatically load `.env` file and configure paths. Ensure required API keys are set in `.env`:
-- `BUB_AGENT_API_KEY` or `MINIMAX_API_KEY` for MiniMax tests
-- `BUB_BUS_TELEGRAM_TOKEN` for Telegram-related tests
-
----
+| `BUB_TAPE_` | Tape settings | `BUB_TAPE_HOME`, `BUB_TAPE_NAME` |
+| `BUB_BUS_` | Bus settings | `BUB_BUS_PORT`, `BUB_BUS_TELEGRAM_TOKEN` |
+| `BUB_` | Chat settings | `BUB_MODEL`, `BUB_MAX_STEPS` |
 
 ## Journal Directory
 
-We maintain a `./journal` directory for daily development journals. Each journal entry is a markdown file named with the date (e.g., `2026-02-16.md`).
+We maintain a `./journal` directory for daily development journals. Each journal entry is a markdown file named with the date (e.g., `2026-02-18.md`).
 
-**Purpose**: Focus on what was accomplished each day, issues encountered, decisions made, and lessons learned.
+### Purpose
 
-**Structure**:
+- Keep a fast, accurate record of what changed, what broke, what we did, and what we learned.
+- Make it easy to pick up the work later (or hand off to someone else).
+
+### Structure
+
 ```
 journal/
-├── 2026-02-16.md          # Today's work
-├── 2026-02-15.md          # Previous day's work
+├── 2026-02-18.md          # Today's work
+├── 2026-02-16.md          # Previous work
 └── README.md              # Index of journal entries (optional)
 ```
 
-**Content Guidelines**:
-- Date-based filename: `YYYY-MM-DD.md`
-- Overview of the day's work
-- Issues discovered and how they were fixed
-- Architecture decisions made
-- Testing approach and results
-- Files modified
-- Lessons learned
-- Follow-up actions (completed and TODO)
+### How to Read (Warm Up)
 
-**Example**: See `journal/2026-02-16.md` for the most recent comprehensive journal covering MiniMax API integration, critical bug fixes, and production deployment.
+- Start with the newest entry.
+- Skim for: current focus, unresolved issues, key decisions, and follow-ups.
+
+### How to Update (During/After Work)
+
+- Append notes to today’s file (`journal/YYYY-MM-DD.md`).
+- If today’s file does not exist, create it.
+- Keep entries brief and structured; include:
+  - What changed and why
+  - Issues found + fix status
+  - Decisions made (especially protocol/schema choices)
+  - Tests or verification performed (only if explicitly run)
+  - Follow-ups / TODOs
 

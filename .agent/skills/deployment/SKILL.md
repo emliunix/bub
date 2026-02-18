@@ -38,15 +38,30 @@ See `docs/components.md` for detailed component documentation.
 Pattern: `./scripts/deploy-production.sh <action> <component>`
 
 **Actions:** `start`, `stop`, `logs`, `status`
-**Components:** `bus`, `agent`, `tape`, `telegram-bridge`
+**Components:** `bus`, `agent`, `tape`, `telegram-bridge`, `all` (virtual - logs/stop only)
 
 ```bash
 # Examples
 ./scripts/deploy-production.sh start bus              # Start message bus
 ./scripts/deploy-production.sh logs agent             # Follow agent logs
+./scripts/deploy-production.sh logs all               # Follow logs from ALL components
 ./scripts/deploy-production.sh stop tape              # Stop tape service
+./scripts/deploy-production.sh stop all               # Stop ALL running components
 ./scripts/deploy-production.sh status telegram-bridge # Check bridge status
 ./scripts/deploy-production.sh list                   # List all running components
+```
+
+### Virtual Component: `all`
+
+Use `all` as a virtual component to operate on all running components at once:
+
+```bash
+# View logs from all components (merged chronologically)
+./scripts/deploy-production.sh logs all
+./scripts/deploy-production.sh logs all --since "10 minutes ago"
+
+# Stop all running components
+./scripts/deploy-production.sh stop all
 ```
 
 ## Features

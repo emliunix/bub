@@ -149,37 +149,6 @@ class DiscordChannel(BaseChannel):
             except Exception:
                 logger.exception("discord.publish_inbound.error")
 
-            content = message.content or ""
-            # Strip command prefix if present
-            if content.startswith(self._config.command_prefix):
-                content = content[len(self._config.command_prefix) :].strip()
-
-            logger.info(
-                "discord.inbound channel_id={} author_id={} author_name={} content={}",
-                message.channel.id,
-                message.author.id,
-                message.author.name,
-                content[:100],
-            )
-
-            try:
-                await self.publish_inbound(
-                    InboundMessage(
-                        channel=self.name,
-                        sender_id=str(message.author.id),
-                        chat_id=str(message.channel.id),
-                        content=content,
-                        metadata=exclude_none({
-                            "username": message.author.name,
-                            "global_name": message.author.global_name,
-                            "message_id": str(message.id),
-                            "guild_id": str(message.guild.id) if message.guild else None,
-                        }),
-                    )
-                )
-            except Exception:
-                logger.exception("discord.publish_inbound.error")
-
         logger.info(
             "discord.start allow_from_count={} allow_channels_count={}",
             len(self._config.allow_from),

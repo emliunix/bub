@@ -1,183 +1,110 @@
-# Bub Components
+# Components
 
-Bub is composed of several independent services that communicate via the WebSocket Message Bus. Each component has a specific responsibility and can be started/stopped independently.
+This page describes Bub’s **core components** and how they relate.
+
+The goal is to be *component-wise and conceptual*: what each part does, and how they connect.
+Detailed protocol specs, message schemas, and APIs are documented in dedicated pages.
 
 ## Overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     WebSocket Bus                       │
-│                    (Port 7892)                          │
-└────────────┬────────────────────────────┬───────────────┘
-             │                            │
-    ┌────────▼────────┐         ┌────────▼────────┐
-    │   Telegram      │         │     Agent       │
-    │   Bridge        │         │   (Worker)      │
-    └────────┬────────┘         └────────┬────────┘
-             │                            │
-             └────────────┬───────────────┘
-                          │
-                    ┌─────▼─────┐
-                    │   Tape    │
-                    │ (Port 7890)
-                    └───────────┘
+```text
+External Channels (Telegram/Discord/WebSocket)
+             │
+             ▼
+         Channels / Bridges
+             │  (translate external events ↔ bus payloads)
+             ▼
+     WebSocket Message Bus (JSON-RPC)
+             │
+             ▼
+            Agents
+    (system agent + worker agents)
+             │
+             ▼
+         Tape (storage)
 ```
 
-## Components
+## Core Components
 
-### 1. Message Bus (`bus`)
+### Bus
 
-**Purpose**: Central message router that connects all other components
+**What it is**: WebSocket message bus that routes JSON-RPC messages.
 
-**Port**: 7892
+**Core responsibilities**:
+- Connection management
+- Message routing (topic / addressing)
+- Ack/response fan-out (transport-level)
 
-**Responsibilities**:
-- Routes messages between components using JSON-RPC 2.0 over WebSocket
-- Maintains topic-based pub/sub system
-- No business logic - pure message routing
-- All components (agent, telegram-bridge, CLI tools) connect as clients
+**Detailed docs**:
+- Protocol: `docs/agent-protocol.md`
 
-**When to Start**: First component to start - all others depend on it
+### Tape
 
-**Logs to Check**:
-- Connection/disconnection events
-- Message routing errors
-- Handler registration issues
+**What it is**: Persistent append-only conversation storage.
 
----
+**Core responsibilities**:
+- Store conversation entries
+- Provide read/append/fork/reset primitives
+- Support anchors/handoffs (phase boundaries)
 
-### 2. Agent Worker (`agent`)
+**Detailed docs**:
+- Tape REST API: `docs/tape-service-rest-api.md`
+- Tape test plan: `docs/tape-service-test-plan.md`
 
-**Purpose**: Core AI agent that processes messages and executes tools
+### Agents
 
-**Port**: None (connects to bus as client)
+Agents are the compute layer that interpret messages and produce replies.
 
-**Responsibilities**:
-- Processes incoming messages from Telegram and other channels
-- Interacts with LLM APIs (OpenAI, MiniMax, etc.)
-- Executes tools (file operations, shell commands, etc.)
-- Manages conversation context and tape operations
-- Handles multi-turn conversations and tool calling
+**Subcomponents**:
 
-**When to Start**: After bus is running
+- **System agent**: orchestration / routing layer (assigns routes, spawns or coordinates worker agents).
+- **Worker (plain) agent**: the LLM-driven worker that runs tools, manages context, and writes to tape.
 
-**Configuration**:
-- `BUB_AGENT_API_KEY` - API key for LLM provider
-- `BUB_AGENT_MODEL` - Model to use (e.g., `claude-3-opus`, `gpt-4`)
-- `BUB_AGENT_MAX_TOKENS` - Max tokens per response
+**Core responsibilities**:
+- Decode inbound payloads and maintain per-conversation state
+- Call LLM providers and execute tool calls
+- Publish outbound payloads
+- Persist key events to tape
 
-**Logs to Check**:
-- LLM API errors
-- Tool execution failures
-- Conversation context issues
-- Tape read/write errors
+**Detailed docs**:
+- Application payload types: `docs/agent-messages.md`
+- Architecture (design rationale): `docs/architecture.md`
 
----
+### Channels / Bridges
 
-### 3. Tape Service (`tape`)
+Channels connect external systems to Bub.
 
-**Purpose**: Persistent append-only storage for conversations
+**Core responsibilities**:
+- Translate external events into application payloads
+- Translate application payloads into external replies
 
-**Port**: 7890
+**Examples**:
+- Telegram
+- Discord
+- WebSocket
 
-**Responsibilities**:
-- Stores conversation history as append-only tape entries
-- Provides REST API for tape operations (read, append, fork, reset)
-- Manages anchors (named points in conversation history)
-- Supports forking conversations for branching workflows
+**Detailed docs**:
+- Telegram: `docs/telegram.md`
+- Discord: `docs/discord.md`
 
-**When to Start**: After bus is running (or standalone for debugging)
+### CLI
 
-**Configuration**:
-- `BUB_TAPE_HOME` - Directory for tape storage (default: `.bub/`)
-- `BUB_TAPE_NAME` - Default tape name
+The interactive CLI is the primary developer/operator interface.
 
-**Logs to Check**:
-- File I/O errors
-- API request failures
-- Anchor resolution issues
+**Core responsibilities**:
+- Provide interactive chat loop
+- Expose commands and session/tape utilities
 
-**API Endpoints**:
-- `GET /tape/{name}` - Read tape entries
-- `POST /tape/{name}` - Append entry
-- `POST /tape/{name}/fork` - Fork tape
-- `DELETE /tape/{name}` - Reset tape
-- `GET /tape/{name}/anchors` - List anchors
-- `POST /tape/{name}/anchors/{anchor}` - Create anchor
+**Detailed docs**:
+- Interactive CLI: `docs/cli.md`
 
----
+## Relationship Notes
 
-### 4. Telegram Bridge (`telegram-bridge`)
+- The **bus** transports messages; it should avoid channel- or application-specific logic.
+- The **agent protocol** defines transport-level envelopes; the **agent messages** define application payload shapes.
+- The **tape** is the durable memory/audit trail. Agent behavior should remain replayable against tape.
 
-**Purpose**: Connects Telegram Bot API to the WebSocket bus
+## Related Docs
 
-**Port**: None (connects to bus as client)
-
-**Responsibilities**:
-- Polls Telegram Bot API for incoming messages
-- Converts Telegram messages to bus format (JSON-RPC)
-- Publishes messages to `inbound:{chat_id}` topic
-- Subscribes to `outbound:{chat_id}` for agent responses
-- Sends responses back to Telegram
-
-**When to Start**: After bus is running, requires `BUB_BUS_TELEGRAM_TOKEN`
-
-**Configuration**:
-- `BUB_BUS_TELEGRAM_TOKEN` - Telegram bot token (required)
-- `BUB_BUS_TELEGRAM_ALLOW_FROM` - Allowed user IDs (comma-separated)
-
-**Logs to Check**:
-- Telegram API errors
-- Message format conversion issues
-- Bus connection problems
-- Authorization failures
-
----
-
-## Component Dependencies
-
-```
-Bus (7892)
-├── Agent Worker
-│   └── Tape Service (7890)
-└── Telegram Bridge
-    └── Agent Worker
-```
-
-**Startup Order**:
-1. Bus (required by all)
-2. Tape (can run standalone or with agent)
-3. Agent (requires bus, optionally uses tape)
-4. Telegram Bridge (requires bus and agent)
-
-## Quick Reference
-
-| Component | Command | Port | Required Env |
-|-----------|---------|------|--------------|
-| Bus | `./scripts/deploy-production.sh start bus` | 7892 | None |
-| Agent | `./scripts/deploy-production.sh start agent` | - | `BUB_AGENT_API_KEY` |
-| Tape | `./scripts/deploy-production.sh start tape` | 7890 | `BUB_TAPE_HOME` (optional) |
-| Telegram | `./scripts/deploy-production.sh start telegram-bridge` | - | `BUB_BUS_TELEGRAM_TOKEN` |
-
-## Troubleshooting
-
-### Component Won't Start
-
-1. Check if bus is running: `./scripts/deploy-production.sh status bus`
-2. Check logs: `./scripts/deploy-production.sh logs <component>`
-3. Verify environment variables are set in `.env`
-4. Check for port conflicts (bus: 7892, tape: 7890)
-
-### Messages Not Flowing
-
-1. Verify bus is running and accepting connections
-2. Check component logs for connection errors
-3. Ensure components are subscribing to correct topics
-4. Check Telegram bridge for token/auth issues
-
-### Tape Not Recording
-
-1. Verify tape service is running: `./scripts/deploy-production.sh status tape`
-2. Check tape service logs for file permission errors
-3. Verify `BUB_TAPE_HOME` directory exists and is writable
-4. Check agent logs for tape API errors
+- Testing and scripts: `docs/testing.md`
+- Deployment: `docs/deployment.md`

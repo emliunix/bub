@@ -6,6 +6,7 @@ import asyncio
 import html
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 from loguru import logger
@@ -14,7 +15,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from telegramify_markdown import markdownify as md
 
 from bub.channels.base import BaseChannel
-from bub.channels.events import InboundMessage, OutboundMessage
+from bub.channels.events import OutboundMessage
+from bub.message.messages import create_tg_message_payload
 
 
 def exclude_none(d: dict[str, Any]) -> dict[str, Any]:
@@ -142,8 +144,9 @@ class TelegramChannel(BaseChannel):
         logger.info("telegram.channel.polling")
 
         # Register handler for outbound messages from the bus
-        self.bus.on_notification("outbound:*", self._handle_outbound_from_bus)
-        logger.info("telegram.channel.subscribed_to_outbound")
+        # Note: MessageBus uses blinker signals, not WebSocket on_notification
+        # This is a legacy channel implementation
+        pass
 
     async def stop(self) -> None:
         self._running = False
@@ -262,19 +265,17 @@ class TelegramChannel(BaseChannel):
 
         self._start_typing(chat_id)
         try:
-            await self.publish_inbound(
-                InboundMessage(
-                    channel=self.name,
-                    sender_id=str(user.id),
-                    chat_id=chat_id,
-                    content=text,
-                    metadata=exclude_none({
-                        "username": user.username,
-                        "full_name": user.full_name,
-                        "message_id": update.message.message_id,
-                    }),
-                )
+            payload = create_tg_message_payload(
+                message_id=str(update.message.message_id),
+                from_addr=f"tg:{chat_id}",
+                timestamp=datetime.now(UTC).isoformat(),
+                text=text,
+                sender_id=str(user.id),
+                channel=self.name,
+                username=user.username,
+                full_name=user.full_name,
             )
+            await self.bus.send_message(to=f"tg:{chat_id}", payload=payload)
         except (asyncio.CancelledError, Exception):
             self._stop_typing(chat_id)
             raise

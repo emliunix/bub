@@ -12,7 +12,7 @@ from bub.channels.events import InboundMessage
 from bub.core.model_runner import ModelRunner, ModelTurnResult
 from bub.core.router import InputRouter
 from bub.tape.service import TapeService
-from bub.types import MessageBus
+from bub.bub_types import MessageBus
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,9 @@ class AgentLoop:
 
     async def start(self) -> None:
         """Start listening to inbound messages from the bus."""
-        self._unsub_inbound = await self._bus.on_inbound(self._handle_inbound)
+        # TODO: Update for new bus API - on_inbound removed, need subscribe pattern
+        # For now, disabled - requires architectural changes
+        self._unsub_inbound = None
 
         self._running = True
         logger.info("agent.loop.start session_id={}", self._session_id)
@@ -73,8 +75,6 @@ class AgentLoop:
 
     async def _handle_inbound(self, message: InboundMessage) -> None:
         """Handle inbound message from the bus."""
-        from bub.channels.events import OutboundMessage
-
         if not self._running:
             return
 
@@ -98,18 +98,10 @@ class AgentLoop:
             output = "\n\n".join(parts).strip()
 
             if output and self._bus:
-                reply_to_message_id = message.metadata.get("message_id")
-                await self._bus.publish_outbound(
-                    OutboundMessage(
-                        channel=message.channel,
-                        chat_id=message.chat_id,
-                        content=output,
-                        metadata={"session_id": session_id},
-                        reply_to_message_id=reply_to_message_id,
-                    )
-                )
+                # TODO: Update for new bus API - publish_outbound removed
+                # For now, just log that we would send a message
                 logger.debug(
-                    "agent.loop.send session_id={} channel={} chat_id={} content={}",
+                    "agent.loop.send.disabled session_id={} channel={} chat_id={} content={}",
                     session_id,
                     message.channel,
                     message.chat_id,
