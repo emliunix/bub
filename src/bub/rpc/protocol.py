@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from bub.rpc.framework import JSONRPCFramework
@@ -23,76 +23,120 @@ class ProtocolModel(BaseModel):
 
 
 class ClientInfo(ProtocolModel):
+    """Client information provided during initialization."""
+
     name: str
     version: str
 
 
 class ServerInfo(ProtocolModel):
+    """Server information returned during initialization."""
+
     name: str
     version: str
 
 
 class ServerCapabilities(ProtocolModel):
+    """Server capabilities advertised during initialization."""
+
     subscribe: bool
-    publish: bool
     process_message: bool
-    topics: list[str]
+    addresses: list[str]
 
 
 class InitializeParams(ProtocolModel):
+    """Parameters for the initialize method."""
+
     client_id: str
     client_info: ClientInfo | None = None
 
 
 class InitializeResult(ProtocolModel):
+    """Result returned from the initialize method."""
+
     server_id: str
     server_info: ServerInfo
     capabilities: ServerCapabilities
 
 
 class SubscribeParams(ProtocolModel):
-    topic: str
+    """Parameters for the subscribe method."""
+
+    address: str
 
 
 class SubscribeResult(ProtocolModel):
+    """Result returned from the subscribe method."""
+
     success: bool
 
 
 class UnsubscribeParams(ProtocolModel):
-    topic: str
+    """Parameters for the unsubscribe method."""
+
+    address: str
 
 
 class UnsubscribeResult(ProtocolModel):
+    """Result returned from the unsubscribe method."""
+
     success: bool
 
 
 class SendMessageParams(ProtocolModel):
-    topic: str
+    """Parameters for the sendMessage method."""
+
+    from_: str = Field(alias="from")  # JSON field: 'from', Python attribute: 'from_'
+    to: str
+    message_id: str
     payload: dict[str, JsonValue]
 
 
 class SendMessageResult(ProtocolModel):
+    """Result from sendMessage - aggregates all individual processMessage results.
+
+    Since sendMessage fans out to multiple subscribers, this contains the array
+    of individual ProcessMessageResult responses from each recipient.
+    Use len(acks) to get the delivery count.
+    """
+
     accepted: bool
     message_id: str
-    delivered_to: int
+    acks: list[ProcessMessageResult]  # Individual results from each recipient
 
 
 class ProcessMessageParams(ProtocolModel):
-    topic: str
+    """Parameters for the processMessage method.
+
+    Note: The JSON field is 'from' (reserved word in Python), so the Python
+    attribute is 'from_' with an alias to map it correctly.
+    """
+
+    from_: str = Field(alias="from")  # JSON field: 'from', Python attribute: 'from_'
+    to: str
+    message_id: str
     payload: dict[str, JsonValue]
 
 
 class ProcessMessageResult(ProtocolModel):
-    processed: bool
-    status: str
+    """Result from a single processMessage call to one peer."""
+
+    success: bool
     message: str
+    should_retry: bool
+    retry_seconds: int
+    payload: dict[str, JsonValue]  # Response payload from the peer
 
 
 class PingParams(ProtocolModel):
+    """Parameters for the ping method."""
+
     pass
 
 
 class PingResult(ProtocolModel):
+    """Result returned from the ping method."""
+
     timestamp: str
 
 
