@@ -99,6 +99,10 @@ Created comprehensive scripts documentation skill at `.agent/skills/scripts-docs
 1. `0524dab` - refactor: move Transport/Listener protocols to rpc.types
 2. `c60c4ea` - docs: add scripts-docs skill for maintaining script documentation
 3. `0655b5e` - docs: update testing.md with accurate last_modified dates for all scripts
+4. `2127b09` - test: update tests to use new AgentBusServer signature
+5. `d013f8b` - test: merge test_protocol_validation.py into test_bus.py
+6. `034450a` - test: fix hanging tests by using PairedTransport with proper mock responses
+7. `00fd9a3` - refactor: remove unused InMemoryTransport and dead test code
 
 ## Scripts Documentation Maintenance Complete
 
@@ -106,3 +110,28 @@ Created comprehensive scripts documentation skill at `.agent/skills/scripts-docs
 ✅ Fixed 8 scripts with incorrect dates (2026-02-18 → 2026-02-17)
 ✅ Added 7 previously undocumented scripts
 ✅ Created skill at `.agent/skills/scripts-docs/SKILL.md` with maintenance procedure
+
+## Test Updates Complete
+
+✅ Updated `AgentBusServer` constructor calls in tests (10 occurrences)
+✅ Merged `test_protocol_validation.py` into `test_bus.py`
+✅ Fixed all 9 tests to use `PairedTransport` with proper mock responses
+✅ Removed unused `InMemoryTransport` class (58 lines)
+✅ Removed empty placeholder test
+✅ Fixed bug in `bus.py` `_handle_transport` method
+
+## Documentation Updated
+
+✅ Updated `docs/jsonrpc-framework.md` to reflect:
+  - Correct file locations (`bub/rpc/framework.py`, `bub/bus/protocol.py`)
+  - New `Transport` and `Listener` protocols
+  - Updated `AgentBusServer` constructor signature
+  - Removed references to non-existent `AgentProtocol` class
+  - Added testing example with `MockListener`
+
+## Current Status
+
+- **9/9 bus tests passing**
+- **No dead code remaining**
+- **All imports updated to canonical locations**
+- **Documentation synchronized with code**
