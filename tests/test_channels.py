@@ -13,6 +13,11 @@ class _Settings:
     discord_enabled = False
 
 
+class _MockBus:
+    async def send_message(self, *, to: str, payload: dict) -> None:
+        pass
+
+
 class _Runtime:
     settings = _Settings()
 
@@ -20,38 +25,30 @@ class _Runtime:
 class _FakeChannel(BaseChannel):
     name = "fake"
 
-    def __init__(self, runtime) -> None:
-        super().__init__(runtime)
+    def __init__(self, bus) -> None:
+        super().__init__(bus)
         self.started = asyncio.Event()
         self.stopped = False
 
-    async def start(self, on_receive):  # type: ignore[override]
-        _ = on_receive
+    async def start(self) -> None:
         self.started.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            self.stopped = True
 
-    async def get_session_prompt(self, message: object) -> tuple[str, str]:
+    async def stop(self) -> None:
+        self.stopped = True
+
+    async def send(self, message) -> None:
         _ = message
-        return "session", "prompt"
-
-    async def process_output(self, session_id: str, output) -> None:
-        _ = (session_id, output)
 
 
 @pytest.mark.asyncio
 async def test_channel_manager_starts_and_stops_registered_channels() -> None:
-    manager = ChannelManager(_Runtime())  # type: ignore[arg-type]
-    manager.register(_FakeChannel)
+    manager = ChannelManager(_MockBus(), _Runtime())  # type: ignore[arg-type]
+    fake_channel = _FakeChannel(_MockBus())
+    manager.register(fake_channel)
 
-    task = asyncio.create_task(manager.run())
-    channel = manager.channels["fake"]
-    await asyncio.wait_for(channel.started.wait(), timeout=1.0)
-    assert manager.enabled_channels() == ["fake"]
+    await manager.start()
+    await asyncio.wait_for(fake_channel.started.wait(), timeout=1.0)
+    assert list(manager.enabled_channels()) == ["fake"]
 
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(task, timeout=1.0)
-    assert channel.stopped is True
+    await manager.stop()
+    assert fake_channel.stopped is True
