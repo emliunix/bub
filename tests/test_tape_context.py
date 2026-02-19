@@ -46,4 +46,4 @@ def test_default_tape_context_handles_result_without_calls() -> None:
     entries = [TapeEntry.tool_result([{"status": "ok"}])]
     messages = context.select(entries, context)
 
-    assert messages == [{"role": "tool", "content": '{"status": "ok"}'}]
+    assert messages == [{"role": "tool", "content": '{"status": "ok"}', "tool_call_id": "orphan_result_0"}]
