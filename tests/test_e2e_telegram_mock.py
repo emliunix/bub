@@ -56,6 +56,10 @@ class PairedTransport:
             self._closed = True
 
 
+import pytest
+
+
+@pytest.mark.asyncio
 async def test_telegram_flow():
     """Test Telegram message flow with mocks."""
     print("=" * 70)
