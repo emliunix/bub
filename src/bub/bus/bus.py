@@ -8,21 +8,19 @@ Follows typed API pattern from MCP Python SDK.
 
 from __future__ import annotations
 
-import uuid
 import asyncio
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Awaitable, Protocol, Union, cast
+from typing import Any, Awaitable, Protocol, cast
 
 import websockets
 import websockets.asyncio.client
 import websockets.asyncio.server
 from loguru import logger
-from websockets.asyncio.server import ServerConnection
 
-from bub.rpc.framework import JSONRPCErrorException, JSONRPCFramework
 from bub.bus.log import ActivityLogWriter
 from bub.bus.protocol import (
     AgentBusClientApi,
@@ -46,8 +44,9 @@ from bub.bus.protocol import (
     register_client_callbacks,
     register_server_callbacks,
 )
-from bub.rpc.types import Transport
 from bub.bus.types import Closable, Listener
+from bub.rpc.framework import JSONRPCErrorException, JSONRPCFramework
+from bub.rpc.types import Transport
 from bub.utils import lift_async
 
 

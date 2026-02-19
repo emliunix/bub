@@ -3,19 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
 import sys
 import uuid
-from datetime import UTC, datetime
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Annotated
 
 import typer
 from loguru import logger
 
-
 from bub.bus.bus import AgentBusClient
-from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult, SendMessageParams
+from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult
 from bub.config import BusSettings
 from bub.logging_utils import configure_logging
 
@@ -257,7 +255,6 @@ async def _run_telegram_bridge(  # noqa: C901
     from telegram import Bot, Update
     from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-    from bub.channels.events import InboundMessage
 
     bot_instance: Bot | None = None
     client: AgentBusClient | None = None

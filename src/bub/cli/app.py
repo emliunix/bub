@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from pathlib import Path
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -13,9 +13,8 @@ from loguru import logger
 
 from bub.app import build_runtime
 from bub.app.runtime import AgentRuntime
-from bub.channels import ChannelManager
-from bub.channels.telegram import TelegramChannel, TelegramConfig
 from bub.bus.bus import AgentBusClient
+from bub.channels import ChannelManager
 from bub.cli.bus import bus_app
 from bub.cli.interactive import InteractiveCli
 from bub.cli.tape import tape_app
@@ -226,8 +225,8 @@ async def _run_agent_client(
     bus_url: str, runtime: AgentRuntime, client_id: str, talkto: str | None, reply_type: str = "telegram"
 ) -> None:
     """Run WebSocket client that processes messages with AgentRuntime."""
-    from bub.channels.events import InboundMessage
     from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult
+    from bub.channels.events import InboundMessage
 
     client: AgentBusClient | None = None
 
@@ -273,6 +272,7 @@ async def _run_agent_client(
 
         # Send response using new API
         from datetime import UTC, datetime
+
         from bub.message.messages import create_tg_reply_payload
 
         original_message_id = payload.get("messageId", "")

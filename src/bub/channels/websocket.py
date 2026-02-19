@@ -7,13 +7,13 @@ parsers. It does not have its own message format.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
-from datetime import UTC, datetime
 from loguru import logger
 
+from bub.bus.bus import AgentBusClient
 from bub.bus.protocol import (
     AgentBusClientCallbacks,
     ProcessMessageParams,
@@ -22,7 +22,6 @@ from bub.bus.protocol import (
 from bub.channels.base import BaseChannel
 from bub.channels.events import OutboundMessage
 from bub.channels.parsers import parse_channel_message
-from bub.bus.bus import AgentBusClient
 
 
 @dataclass(frozen=True)

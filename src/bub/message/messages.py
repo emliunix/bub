@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, NotRequired, TypedDict
 
-
 # ============================================================================
 # Spawn Messages
 # ============================================================================
@@ -276,8 +275,8 @@ def make_telegram_reply(request: dict[str, Any], data: dict[str, Any]) -> dict[s
     Returns:
         tg_reply payload with proper metadata binding
     """
-    from datetime import UTC, datetime
     import uuid
+    from datetime import UTC, datetime
 
     content = request.get("content", {})
     chat_id = str(content.get("senderId", ""))  # senderId is chat_id in private chats

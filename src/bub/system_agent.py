@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import subprocess
 import uuid
 from pathlib import Path

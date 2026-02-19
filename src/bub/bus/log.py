@@ -10,11 +10,10 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
-from sqlalchemy import create_engine, Engine, event, Index, Text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
+from sqlalchemy import Engine, Index, Text, create_engine, event
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
 class Base(DeclarativeBase):
@@ -79,7 +78,6 @@ class ActivityLogWriter:
 
         # Initialize SQLAlchemy engine in thread
         def _init_engine():
-            from sqlalchemy.engine import Engine
 
             engine: Engine = create_engine(f"sqlite:///{self._db_path}", echo=False)
             return engine
