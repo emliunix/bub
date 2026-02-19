@@ -8,14 +8,13 @@ Follows typed API pattern from MCP Python SDK.
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import uuid
-from collections.abc import Callable, Coroutine
+import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Awaitable, Protocol, Union, cast
 
 import websockets
 import websockets.asyncio.client
@@ -27,6 +26,7 @@ from bub.rpc.framework import JSONRPCErrorException, JSONRPCFramework
 from bub.bus.log import ActivityLogWriter
 from bub.bus.protocol import (
     AgentBusClientApi,
+    AgentBusClientCallbacks,
     AgentBusServerApi,
     InitializeParams,
     InitializeResult,
@@ -46,12 +46,16 @@ from bub.bus.protocol import (
     register_client_callbacks,
     register_server_callbacks,
 )
-from bub.rpc.types import Listener, Transport
+from bub.rpc.types import Transport
+from bub.bus.types import Closable, Listener
+from bub.utils import lift_async
 
-background_tasks: set[asyncio.Task[Any]] = set()
+
+class ClosableTransport(Transport, Closable, Protocol):
+    pass
 
 
-class WebSocketListener:
+class WebSocketListener(Listener):
     """WebSocket-based implementation of the Listener protocol."""
 
     def __init__(self, host: str, port: int) -> None:
@@ -84,20 +88,34 @@ class WebSocketTransport:
 
     def __init__(
         self,
-        ws: websockets.asyncio.server.ServerConnection | websockets.asyncio.client.ClientConnection,
+        conn: websockets.asyncio.server.ServerConnection | websockets.asyncio.client.ClientConnection,
     ) -> None:
-        self._ws = ws
+        self._conn = conn
 
     async def send_message(self, message: str) -> None:
-        await self._ws.send(message)
+        await self._conn.send(message)
 
     async def receive_message(self) -> str:
-        data = await self._ws.recv()
-        if isinstance(data, (bytes, bytearray)):
-            data = data.decode("utf-8")
-        if isinstance(data, memoryview):
-            data = data.tobytes().decode("utf-8")
-        return data
+        return await self._conn.recv(True)
+
+
+class ClientWebSocketTransport:
+    def __init__(
+        self,
+        ctx: websockets.asyncio.client.connect,
+        conn: websockets.asyncio.client.ClientConnection,
+    ) -> None:
+        self._ctx = ctx
+        self._conn = conn
+
+    async def send_message(self, message: str) -> None:
+        await self._conn.send(message)
+
+    async def receive_message(self) -> str:
+        return await self._conn.recv(True)
+
+    async def close(self) -> None:
+        await self._ctx.__aexit__(None, None, None)
 
 
 class AgentConnection:
@@ -252,35 +270,37 @@ class AgentBusServer:
 
     def __init__(
         self,
-        server: tuple[str, int] | Listener,
-        activity_log_path: Path | None = None,
+        listener: Listener,
+        log_writer: ActivityLogWriter,
+        stop_event: asyncio.Event | None = None,
     ) -> None:
         self._server_id = f"bus-{uuid.uuid4().hex}"
         self._connections: dict[str, AgentConnection] = {}
         self._connections_lock = asyncio.Lock()
-        self._activity_log = ActivityLogWriter(activity_log_path or Path("run/wsbus_activity.sqlite3"))
+        self._listener = listener
+        self._stop_event = stop_event or asyncio.Event()
+        self._activity_log = log_writer
 
+    @staticmethod
+    def create(server: tuple[str, int] | Listener, activity_log_path: Path | None = None) -> AgentBusServer:
+        """Factory method to create AgentBusServer instance."""
         # Create WebSocketListener from tuple if needed
         if isinstance(server, tuple):
-            host, port = server
-            self._listener: Listener = WebSocketListener(host, port)
+            listener: Listener = WebSocketListener(*server)
         else:
-            self._listener = server
+            listener = server
+        return AgentBusServer(listener, ActivityLogWriter(activity_log_path or Path("run/wsbus_activity.sqlite3")))
 
     @property
     def server_id(self) -> str:
         """Unique server identifier."""
         return self._server_id
 
-    @property
-    def url(self) -> str:
-        return self._listener.url
-
     async def start_server(self) -> None:
         """Start WebSocket server."""
         await self._activity_log.start()
         await self._listener.start(self._handle_transport)
-        logger.info("wsbus.server.started url={}", self.url)
+        logger.info("wsbus.server.started: {}", self._listener)
 
     async def stop_server(self) -> None:
         """Stop WebSocket server."""
@@ -292,7 +312,7 @@ class AgentBusServer:
         """Handle incoming client connection."""
         conn_id = uuid.uuid4().hex
 
-        framework = JSONRPCFramework(transport)
+        framework = JSONRPCFramework(transport, self._stop_event)
         api = AgentBusServerApi(framework)
 
         async with self._connections_lock:
@@ -513,296 +533,194 @@ class AgentBusServer:
             )
 
 
+class ReconnectableTransport:
+    def __init__(
+        self,
+        transport_factory: Callable[[], Awaitable[ClosableTransport]],
+        max_reconnect_delay: float,
+        stop_event: asyncio.Event,
+        on_reconnect: Callable[[], Awaitable[None]],
+    ) -> None:
+        self.transport_factory = transport_factory
+        self.max_reconnect_delay = max_reconnect_delay
+        self._transport: ClosableTransport | None = None
+        self._reconnect_delay = 1.0
+        self._stop_event = stop_event
+        self._on_reconnect = on_reconnect
+        self._is_first_connection = True
+
+    async def send_message(self, message: str) -> None:
+        """Send a message string through the transport."""
+        for i in range(2):
+            try:
+                return await (await self._get_transport()).send_message(message)
+            except ConnectionError as e:
+                logger.error("Failed to send message, retrying: {}", e)
+                self._transport = None
+
+    async def receive_message(self) -> str:
+        """Receive a message string from the transport."""
+        while not self._stop_event.is_set():
+            try:
+                return await (await self._get_transport()).receive_message()
+            except ConnectionError as e:
+                logger.error("Failed to receive message, retrying: {}", e)
+                self._transport = None
+        raise ConnectionError("Transport is stopped")
+
+    async def _get_transport(self) -> ClosableTransport:
+        """Get the current transport, reconnecting if necessary."""
+        while not self._stop_event.is_set():
+            if self._transport is None:
+                try:
+                    self._transport = await self.transport_factory()
+                    self._reconnect_delay = 1.0
+                    logger.info("Transport connected")
+                    if self._is_first_connection:
+                        self._is_first_connection = False
+                    else:
+                        await self._on_reconnect()
+                except Exception as e:
+                    logger.error("Failed to connect transport: {}", e)
+                    await asyncio.sleep(self._reconnect_delay)
+                    self._reconnect_delay = min(self._reconnect_delay * 2, self.max_reconnect_delay)
+            else:
+                return self._transport
+        raise ConnectionError("Transport is stopped")
+
+    async def close(self) -> None:
+        """Close the transport."""
+        if self._transport:
+            await self._transport.close()
+            self._transport = None
+
+
 class AgentBusClient:
     """WebSocket client for peers to connect to the bus with auto-reconnect support."""
 
     def __init__(
         self,
-        url: str,
-        *,
-        auto_reconnect: bool = True,
-        max_reconnect_delay: float = 30.0,
+        transport: ClosableTransport,
+        callbacks: AgentBusClientCallbacks,
     ) -> None:
         self._client_id = f"client-{uuid.uuid4().hex}"
-        self._url = url
-        self._ws: websockets.asyncio.client.ClientConnection | None = None
-        self._framework: JSONRPCFramework | None = None
-        self._api: AgentBusClientApi | None = None
+        self._transport = transport
+        stop_event = asyncio.Event()
+        framework = JSONRPCFramework(transport, stop_event=stop_event)
+        register_client_callbacks(framework, callbacks)
+        self._api = AgentBusClientApi(framework)
         self._run_task: asyncio.Task | None = None
-        self._handlers: dict[str, list[Callable[[str, dict[str, Any]], Any]]] = {}
-        self._handlers_lock = asyncio.Lock()
         self._initialized = False
-        self._auto_reconnect = auto_reconnect
-        self._max_reconnect_delay = max_reconnect_delay
-        self._reconnect_delay = 1.0
-        self._reconnect_attempts = 0
-        self._subscribed_addresses: set[str] = set()
-        self._subscription_refcounts: dict[str, int] = {}
-        self._stop_event = asyncio.Event()
         self._initialized_client_id: str | None = None
-        self._message_counter = 0
-        self._message_counter_lock = asyncio.Lock()
+        self._subscription: set[str] = set()
+        self._message_id_seed = 0
+        self._message_id_seed_lock = asyncio.Lock()
+        self._stop_event = stop_event
 
-    @property
-    def url(self) -> str:
-        return self._url
-
-    async def connect(self) -> None:
+    @staticmethod
+    async def connect(url: str | ClosableTransport, callbacks: AgentBusClientCallbacks) -> AgentBusClient:
         """Connect to server with auto-reconnect support."""
-        while not self._stop_event.is_set():
-            try:
-                await self._connect_once()
-                self._reconnect_delay = 1.0
-                self._reconnect_attempts = 0
-                return
-            except (
-                websockets.exceptions.WebSocketException,
-                ConnectionRefusedError,
-                OSError,
-            ) as e:
-                if not self._auto_reconnect:
-                    raise
-                self._reconnect_attempts += 1
-                logger.warning(
-                    "wsbus.client.connect_failed attempt={} delay={:.1f}s error={}",
-                    self._reconnect_attempts,
-                    self._reconnect_delay,
-                    e,
-                )
-                try:
-                    await asyncio.wait_for(self._stop_event.wait(), timeout=self._reconnect_delay)
-                    return
-                except TimeoutError:
-                    pass
-                self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
 
-    async def _connect_once(self) -> None:
-        """Single connection attempt."""
-        self._ws = await websockets.connect(self._url)
+        async def _factory(url: str) -> ClosableTransport:
+            ctx = websockets.connect(url)
+            return ClientWebSocketTransport(ctx, await ctx.__aenter__())
 
-        transport = WebSocketTransport(self._ws)
-        self._framework = JSONRPCFramework(transport)
-        self._api = AgentBusClientApi(self._framework, client_id=self._client_id)
+        if isinstance(url, str):
+            transport_factory = lambda: _factory(url)
+        else:
+            transport_factory = lambda: lift_async(url)
 
-        register_client_callbacks(self._framework, self)
+        async def _on_reconnect() -> None:
+            if cell and cell[0]:
+                await cell[0]._on_reconnect()
 
-        self._run_task = asyncio.create_task(self._run_with_reconnect())
-        await asyncio.sleep(0.01)
-
-        logger.info("wsbus.client.connected url={}", self._url)
-
-    async def _run_with_reconnect(self) -> None:
-        """Run framework and handle disconnections."""
-        try:
-            if self._framework:
-                await self._framework.run()
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("wsbus.client.connection_closed")
-        except Exception as e:
-            logger.error("wsbus.client.run_error error={}", e)
-        finally:
-            if self._auto_reconnect and not self._stop_event.is_set():
-                logger.info("wsbus.client.triggering_reconnect")
-                self._initialized = False
-                self._api = None
-                self._framework = None
-                self._ws = None
-                asyncio.create_task(self._reconnect())
-
-    async def _reconnect(self) -> None:
-        """Reconnect and restore subscriptions."""
-        if self._stop_event.is_set():
-            return
-
-        logger.info(
-            "wsbus.client.reconnecting subscriptions={}",
-            len(self._subscribed_addresses),
+        transport = ReconnectableTransport(
+            transport_factory=transport_factory,
+            max_reconnect_delay=30.0,
+            stop_event=asyncio.Event(),
+            on_reconnect=_on_reconnect,
         )
+        cell = [AgentBusClient(transport, callbacks)]
+        client = cell[0]
+        # Start the framework run loop automatically
+        await client._start()
+        return client
 
-        if self._framework:
-            await self._framework.stop()
-        if self._ws:
-            await self._ws.close()
-        if self._run_task:
-            self._run_task.cancel()
-            try:
-                await self._run_task
-            except asyncio.CancelledError:
-                pass
-        logger.info("wsbus.client.disconnected_for_reconnect")
+    async def _start(self) -> None:
+        """Start the framework run loop in background."""
+        if self._run_task is None:
+            self._run_task = asyncio.create_task(self._api._framework.run())
+            # Give the task a moment to start processing messages
+            await asyncio.sleep(0.1)
 
-        self._initialized = False
-        self._api = None
-        self._framework = None
-        self._ws = None
-
-        await self.connect()
-
-        if self._stop_event.is_set():
-            return
-
-        if self._initialized_client_id:
-            try:
-                await self.initialize(self._initialized_client_id)
-                logger.debug(
-                    "wsbus.client.reinitialized client_id={}",
-                    self._initialized_client_id,
-                )
-            except Exception as e:
-                logger.error("wsbus.client.reinitialize_failed error={}", e)
-                return
-
-        if self._api is None:
-            logger.error("wsbus.client.reconnect_failed _api is None")
-            return
-
-        for address in self._subscribed_addresses:
-            try:
-                await self._api.subscribe(SubscribeParams(address=address))
-                logger.debug("wsbus.client.resubscribed address={}", address)
-            except Exception as e:
-                logger.error(
-                    "wsbus.client.resubscribe_failed address={} error={}",
-                    address,
-                    e,
-                )
-
-        logger.info("wsbus.client.reconnect_complete")
-
-    async def disconnect(self) -> None:
-        """Disconnect from server."""
-        self._stop_event.set()
-        if self._framework:
-            await self._framework.stop()
-        if self._ws:
-            await self._ws.close()
-        if self._run_task:
-            self._run_task.cancel()
-            try:
-                await self._run_task
-            except asyncio.CancelledError:
-                pass
-        logger.info("wsbus.client.disconnected")
+    async def _on_reconnect(self) -> None:
+        for address in self._subscription:
+            await self.subscribe(address)
 
     async def initialize(self, client_id: str) -> InitializeResult:
         """Initialize connection with server."""
-        if not self._api:
-            raise RuntimeError("Not connected")
         if self._initialized:
             raise RuntimeError("Already initialized")
         result = await self._api.initialize(InitializeParams(client_id=client_id))
         self._initialized = True
-        self._initialized_client_id = client_id
         return result
 
     async def subscribe(
         self,
         address: str,
-        handler: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> SubscribeResult:
         """Subscribe to an address pattern."""
-        if not self._api:
-            raise RuntimeError("Not connected")
-        count = self._subscription_refcounts.get(address, 0)
-        if count == 0:
+        self._check_initialized()
+        if address not in self._subscription:
             result = await self._api.subscribe(SubscribeParams(address=address))
-            self._subscribed_addresses.add(address)
+            self._subscription.add(address)
         else:
             result = SubscribeResult(success=True)
-        if handler is not None:
-            async with self._handlers_lock:
-                if address not in self._handlers:
-                    self._handlers[address] = []
-                self._handlers[address].append(handler)
-        self._subscription_refcounts[address] = count + 1
         return result
 
     async def unsubscribe(self, address: str) -> UnsubscribeResult:
         """Unsubscribe from an address pattern."""
-        if not self._api:
-            raise RuntimeError("Not connected")
-        count = self._subscription_refcounts.get(address, 0)
-        if count <= 1:
-            async with self._handlers_lock:
-                self._handlers.pop(address, None)
-            self._subscribed_addresses.discard(address)
-            self._subscription_refcounts.pop(address, None)
-            return await self._api.unsubscribe(UnsubscribeParams(address=address))
-
-        self._subscription_refcounts[address] = count - 1
-        return UnsubscribeResult(success=True)
-
-    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
-        """Handle processMessage request from bus."""
-        payload = cast(dict[str, Any], params.payload)
-        matched = await self._dispatch_message(params.to, payload)
-        if matched == 0:
-            return ProcessMessageResult(
-                success=False,
-                message="No matching handlers",
-                should_retry=False,
-                retry_seconds=0,
-                payload={"message": "No matching handlers"},
-            )
-        return ProcessMessageResult(
-            success=True,
-            message="Processed",
-            should_retry=False,
-            retry_seconds=0,
-            payload={"message": "Processed"},
-        )
-
-    def _address_matches(self, address: str, pattern: str) -> bool:
-        """Check if address matches wildcard pattern."""
-        return fnmatch(address, pattern)
-
-    async def _dispatch_message(self, to: str, payload: dict[str, Any]) -> int:
-        """Dispatch one routed message to matching handlers."""
-        logger.debug(
-            "wsbus.client.dispatch_message to={} handlers_count={} payload_keys={}",
-            to,
-            len(self._handlers),
-            list(payload.keys()) if isinstance(payload, dict) else [],
-        )
-
-        matched_patterns = []
-        matched_count = 0
-        async with self._handlers_lock:
-            handlers_snapshot = [(pattern, list(handlers)) for pattern, handlers in self._handlers.items()]
-        for pattern, handlers in handlers_snapshot:
-            if self._address_matches(to, pattern):
-                matched_patterns.append(pattern)
-                for handler in handlers:
-                    matched_count += 1
-                    try:
-                        if inspect.iscoroutinefunction(handler):
-                            await handler(to, payload)
-                        else:
-                            handler(to, payload)
-                    except Exception:
-                        logger.exception("wsbus.client.handler_error to={}", to)
-
-        logger.debug(
-            "wsbus.client.notification_matched to={} patterns={}",
-            to,
-            matched_patterns,
-        )
-        return matched_count
-
-    async def _next_message_id(self) -> str:
-        """Generate next sequential message ID."""
-        async with self._message_counter_lock:
-            self._message_counter += 1
-            return f"msg_{self._client_id}_{self._message_counter:010d}"
+        self._check_initialized()
+        if address in self._subscription:
+            self._subscription.remove(address)
+        return await self._api.unsubscribe(UnsubscribeParams(address=address))
 
     async def send_message(self, to: str, payload: dict[str, Any]) -> SendMessageResult:
         """Send a message to the bus with auto-generated message ID."""
-        if not self._api:
-            raise RuntimeError("Not connected")
+        self._check_initialized()
         message_id = await self._next_message_id()
         return await self._api.send_message(
             SendMessageParams(from_=self._client_id, to=to, message_id=message_id, payload=payload)  # type: ignore[call-arg]
         )
+
+    async def _next_message_id(self) -> str:
+        """Generate next sequential message ID."""
+        async with self._message_id_seed_lock:
+            self._message_id_seed += 1
+            return f"msg_{self._client_id}_{self._message_id_seed:010d}"
+
+    def _check_initialized(self) -> None:
+        """Check if client is initialized before performing actions."""
+        if not self._initialized:
+            raise RuntimeError("Client is not initialized yet")
+
+    async def run(self) -> None:
+        self._run_task = asyncio.create_task(self._api._framework.run())
+        try:
+            await self._run_task
+        except asyncio.CancelledError:
+            pass
+
+    async def disconnect(self) -> None:
+        """Disconnect from server."""
+        self._stop_event.set()
+        if self._run_task:
+            try:
+                await self._run_task
+            except asyncio.CancelledError:
+                pass
+            await self._transport.close()
+        logger.info("wsbus.client.disconnected")
 
 
 __all__ = [

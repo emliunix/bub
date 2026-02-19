@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 import typer
@@ -225,84 +226,108 @@ async def _run_agent_client(
     bus_url: str, runtime: AgentRuntime, client_id: str, talkto: str | None, reply_type: str = "telegram"
 ) -> None:
     """Run WebSocket client that processes messages with AgentRuntime."""
-    from bub.channels.events import InboundMessage, OutboundMessage
+    from bub.channels.events import InboundMessage
+    from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult
 
-    client = AgentBusClient(bus_url)
+    client: AgentBusClient | None = None
+
+    # Message processors - handle actual message logic
+    async def _process_tg_message(payload: dict[str, Any]) -> None:
+        """Process incoming tg_message and send response."""
+        content_obj = payload.get("content", {})
+        if not isinstance(content_obj, dict):
+            return
+
+        text = content_obj.get("text", "")
+        sender_id = content_obj.get("senderId", "")
+        channel = content_obj.get("channel", "telegram")
+
+        message = InboundMessage(
+            channel=str(channel),
+            sender_id=str(sender_id),
+            chat_id=str(sender_id),  # For Telegram, chat_id is sender_id in private chats
+            content=str(text),
+        )
+
+        logger.info(
+            "agent.processing chat_id={} content={}",
+            message.chat_id,
+            message.content[:50],
+        )
+
+        # Process with AgentRuntime
+        result: LoopResult = await runtime.handle_input(f"{message.channel}:{message.chat_id}", message.content)
+
+        # Build response
+        parts = []
+        if result.immediate_output:
+            parts.append(result.immediate_output)
+        if result.assistant_output:
+            parts.append(result.assistant_output)
+        if result.error:
+            parts.append(f"Error: {result.error}")
+
+        content = "\n\n".join(parts).strip()
+        if not content:
+            content = "(no response)"
+
+        # Send response using new API
+        from datetime import UTC, datetime
+        from bub.message.messages import create_tg_reply_payload
+
+        original_message_id = payload.get("messageId", "")
+        reply_payload = create_tg_reply_payload(
+            message_id=f"msg_{client_id}_{datetime.now(UTC).timestamp()}",
+            from_addr=client_id,
+            reply_to_message_id=str(original_message_id) if original_message_id else "",
+            timestamp=datetime.now(UTC).isoformat(),
+            text=content,
+            channel=reply_type,
+            chat_id=message.chat_id,
+        )
+
+        # Map channel names to address prefixes
+        channel_prefix = "tg" if message.channel == "telegram" else message.channel
+        assert client is not None, "client should be initialized"
+        await client.send_message(to=f"{channel_prefix}:{message.chat_id}", payload=reply_payload)
+
+        logger.info("agent.responded chat_id={} content_len={}", message.chat_id, len(content))
+
+    # Dispatch table - maps message types to handlers
+    _processors: dict[str, Callable[[dict[str, Any]], Awaitable[None]]] = {
+        "tg_message": _process_tg_message,
+    }
+
+    async def _dispatch_message(msg_type: str, payload: dict[str, Any]) -> None:
+        """Dispatch message to appropriate processor."""
+        processor = _processors.get(msg_type)
+        if processor:
+            await processor(payload)
+        else:
+            logger.debug("agent.unknown_message_type type={}", msg_type)
+
+    # Callbacks implementation
+    class Callbacks(AgentBusClientCallbacks):
+        async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+            """Entry point from bus - dispatch then return result."""
+            logger.info("agent.message_received to={} type={}", params.to, params.payload.get("type", ""))
+            await _dispatch_message(params.payload.get("type", ""), params.payload)
+            return ProcessMessageResult(
+                success=True, message="Processed", should_retry=False, retry_seconds=0, payload={}
+            )
 
     try:
-        # Connect to server
-        await client.connect()
+        client = await AgentBusClient.connect(bus_url, Callbacks())
+        logger.info("agent.message_loop_started")
+
+        # Framework.run() already started by connect()
         await client.initialize(client_id)
         logger.info("agent.connected url={} client_id={}", bus_url, client_id)
 
-        # Subscribe to inbound messages (tg:* pattern) and direct messages (our client_id)
-        async def handle_message(topic: str, payload: dict[str, Any]) -> None:
-            """Process message from bus."""
-            msg_type = payload.get("type", "")
-
-            if msg_type == "tg_message":
-                content_obj = payload.get("content", {})
-                if not isinstance(content_obj, dict):
-                    return
-
-                text = content_obj.get("text", "")
-                sender_id = content_obj.get("senderId", "")
-                channel = content_obj.get("channel", "telegram")
-
-                message = InboundMessage(
-                    channel=str(channel),
-                    sender_id=str(sender_id),
-                    chat_id=str(sender_id),  # For Telegram, chat_id is sender_id in private chats
-                    content=str(text),
-                )
-
-                logger.info(
-                    "agent.processing chat_id={} content={}",
-                    message.chat_id,
-                    message.content[:50],
-                )
-
-                # Process with AgentRuntime
-                result: LoopResult = await runtime.handle_input(f"{message.channel}:{message.chat_id}", message.content)
-
-                # Build response
-                parts = []
-                if result.immediate_output:
-                    parts.append(result.immediate_output)
-                if result.assistant_output:
-                    parts.append(result.assistant_output)
-                if result.error:
-                    parts.append(f"Error: {result.error}")
-
-                content = "\n\n".join(parts).strip()
-                if not content:
-                    content = "(no response)"
-
-                # Send response using new API
-                from datetime import UTC, datetime
-                from bub.message.messages import create_tg_reply_payload
-
-                original_message_id = payload.get("messageId", "")
-                reply_payload = create_tg_reply_payload(
-                    message_id=f"msg_{client_id}_{datetime.now(UTC).timestamp()}",
-                    from_addr=client_id,
-                    reply_to_message_id=original_message_id,
-                    timestamp=datetime.now(UTC).isoformat(),
-                    text=content,
-                    channel=reply_type,
-                    chat_id=message.chat_id,
-                )
-
-                # Map channel names to address prefixes
-                channel_prefix = "tg" if message.channel == "telegram" else message.channel
-                await client.send_message(to=f"{channel_prefix}:{message.chat_id}", payload=reply_payload)
-
-                logger.info("agent.responded chat_id={} content_len={}", message.chat_id, len(content))
-
         # Subscribe to our client_id for direct messages
-        await client.subscribe(client_id, handle_message)
+        await client.subscribe(client_id)
         # Also subscribe to tg:* pattern for broadcast messages
-        await client.subscribe("tg:*", handle_message)
+        await client.subscribe("tg:*")
         logger.info("agent.listening client_id={}", client_id)
 
         # Keep running
@@ -315,7 +340,8 @@ async def _run_agent_client(
         logger.exception("agent.error")
         raise
     finally:
-        await client.disconnect()
+        if client is not None:
+            await client.disconnect()
         logger.info("agent.disconnected")
 
 
@@ -389,4 +415,3 @@ async def _serve_channels(manager: ChannelManager) -> None:
 
 if __name__ == "__main__":
     app()
-

@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Any
 
 from bub.rpc.types import (
     ErrorData,
@@ -20,6 +20,7 @@ from bub.rpc.types import (
     JSONRPCRequest,
     JSONRPCResponse,
     RequestId,
+    Transport,
     jsonrpc_message_adapter,
 )
 
@@ -40,18 +41,6 @@ class JSONRPCErrorException(Exception):
         self.code = code
 
 
-class JSONRPCTransport(Protocol):
-    """Bidirectional JSON message transport."""
-
-    async def send_message(self, message: str) -> None:
-        """Send a JSON message."""
-        ...
-
-    async def receive_message(self) -> str:
-        """Receive a JSON message. Blocks until message available."""
-        ...
-
-
 class JSONRPCFramework:
     """Direction-agnostic JSON-RPC 2.0 framework.
 
@@ -66,13 +55,13 @@ class JSONRPCFramework:
     - Method registration and dispatch
     """
 
-    def __init__(self, transport: JSONRPCTransport) -> None:
+    def __init__(self, transport: Transport, stop_event: asyncio.Event | None = None) -> None:
         self._transport = transport
         self._pending_requests: dict[RequestId, asyncio.Future[dict[str, object]]] = {}
         self._method_handlers: dict[str, Callable[[dict[str, object]], Awaitable[dict[str, object] | None]]] = {}
         self._notification_handlers: dict[str, list[Callable[[dict[str, object]], Awaitable[None]]]] = {}
         self._running = False
-        self._stop_event = asyncio.Event()
+        self._stop_event = stop_event or asyncio.Event()
 
     async def send_request(self, method: str, params: dict[str, object]) -> dict[str, object]:
         """Send JSON-RPC request and await response.

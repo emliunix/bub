@@ -92,6 +92,73 @@ class TestDeadlockScenarios:
     """Test potential deadlock scenarios in message flows."""
 
     @pytest.mark.asyncio
+    async def test_concurrent_request_handling(self):
+        """Test that request handlers run concurrently (no deadlock when responding from handler)."""
+        from .test_transport import PairedTransport
+
+        paired = PairedTransport()
+        server_transport = paired.a
+        client_transport = paired.b
+
+        server_framework = JSONRPCFramework(server_transport)
+        client_framework = JSONRPCFramework(client_transport)
+
+        response_received = asyncio.Event()
+
+        # Server handler that sends a request back (would deadlock without concurrent handling)
+        async def server_handler(params: dict[str, object]) -> dict[str, object]:
+            # Send a message back to the client from within the handler
+            client_api = AgentBusClientApi(client_framework, client_id="test-client")
+            await client_api.send_message2(
+                from_="server:handler",
+                to="client:test",
+                payload={"type": "response", "content": {"text": "response from handler"}},
+            )
+            return {"success": True, "message": "processed"}
+
+        async def client_handler(params: dict[str, object]) -> dict[str, object]:
+            response_received.set()
+            return {"success": True, "message": "received"}
+
+        server_framework.register_method("processMessage", server_handler)
+        client_framework.register_method("processMessage", client_handler)
+
+        server_task = asyncio.create_task(server_framework.run())
+        client_task = asyncio.create_task(client_framework.run())
+
+        try:
+            await asyncio.sleep(0.01)
+
+            server_api = AgentBusServerApi(server_framework)
+
+            # Send message - server handler will try to send back
+            await server_api.process_message(
+                ProcessMessageParams(
+                    from_="client:test",
+                    to="server:handler",
+                    message_id="msg-001",
+                    payload={"type": "test"},
+                )
+            )
+
+            # Wait for the response (would timeout if deadlocked)
+            await asyncio.wait_for(response_received.wait(), timeout=2.0)
+
+            assert response_received.is_set()
+
+        finally:
+            await server_framework.stop()
+            await client_framework.stop()
+            try:
+                await client_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
     async def test_potential_deadlock_a_to_b_b_to_a(self):
         """Test: a calls b, b responds by calling a."""
         peer_a = MockPeer("client:a")

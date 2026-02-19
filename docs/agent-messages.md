@@ -113,13 +113,47 @@ These message types are currently implemented and used in production code.
 {
   "type": "tg_reply",
   "from": "agent:worker-abc123",
+  "reply_to_message_id": "msg_abc123",
   "timestamp": "2026-02-17T12:00:04Z",
+  "chat_id": "123456789",
   "content": {
     "text": "I'm doing well, thank you!",
     "channel": "telegram"
   }
 }
 ```
+
+**Fields:**
+- `reply_to_message_id` (string): ID of the message being replied to (enables thread support in group chats)
+- `chat_id` (string): Target chat ID
+- `content.text` (string): Response text
+- `content.channel` (string): Channel identifier for routing
+
+### `general_response`
+
+**Direction**: any → any  
+**Purpose**: Generic response for protocol-level acknowledgments. Used when the actual response is sent separately or not needed.
+
+```json
+{
+  "type": "general_response",
+  "from": "agent:worker-abc123",
+  "timestamp": "2026-02-17T12:00:04Z",
+  "content": {
+    "status": "ok",
+    "message": "Processed successfully",
+    "request_id": "msg_abc123"
+  }
+}
+```
+
+**Fields:**
+- `status` (string): "ok" or "error"
+- `message` (string, optional): Human-readable description
+- `request_id` (string, optional): ID of the request being responded to
+- `error_code` (string, optional): Machine-readable error code (only for error status)
+
+**Note**: This is a lightweight acknowledgment type. For business logic responses (e.g., agent replies), use channel-specific types like `tg_reply`.
 
 ## Planned Message Types
 

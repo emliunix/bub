@@ -174,7 +174,57 @@ When moving types between modules during refactoring:
 
 The repo uses `uv` + Ruff + mypy + pytest.
 
+**Always use `uv run` to execute Python commands.** This ensures dependencies are properly managed:
+
+```bash
+# Run CLI commands
+uv run python -m bub.cli.bus recv "*"
+
+# Run scripts
+uv run scripts/validate_system.py
+
+# Run tests
+uv run pytest tests/test_bus.py
+```
+
+Do not use `python -m` directly or set `PYTHONPATH` manually.
+
 (See `docs/testing.md` for script/test facilities; see `docs/deployment.md` for runtime modes.)
+
+### Operations Guide
+
+**Use the deployment script for managing components:**
+
+```bash
+# Start all components
+./scripts/deploy-production.sh start all
+
+# Start individual components
+./scripts/deploy-production.sh start bus
+./scripts/deploy-production.sh start system-agent
+./scripts/deploy-production.sh start telegram-bridge
+
+# View logs
+./scripts/deploy-production.sh logs bus              # Follow logs
+./scripts/deploy-production.sh logs all              # All components
+./scripts/deploy-production.sh logs system-agent -n 50  # Last 50 lines
+
+# Check status
+./scripts/deploy-production.sh status bus
+
+# Stop components
+./scripts/deploy-production.sh stop bus
+./scripts/deploy-production.sh stop all              # Stop everything including dynamic agents
+
+# List running components
+./scripts/deploy-production.sh list
+```
+
+**Key Points:**
+- The deployment script uses `systemd-run` to manage services with automatic restart
+- Unit names are tracked in `run/*.unit_name` files
+- Logs are available via `journalctl --user -u <unit-name>`
+- Dynamic agents (conversation agents) are also tracked and can be stopped by name
 
 ### Multi-File Change Protocol
 

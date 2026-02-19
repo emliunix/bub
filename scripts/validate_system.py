@@ -2,21 +2,36 @@
 """End-to-end validation test for Bub system."""
 
 import asyncio
-import json
 import sys
-import time
 from datetime import UTC, datetime
+from typing import Any
 
-from bub.channels.events import InboundMessage
 from bub.bus.bus import AgentBusClient
+from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult
 
 
-async def test_bus_connection():
+class ValidationCallbacks(AgentBusClientCallbacks):
+    """Callbacks for validation tests."""
+
+    def __init__(self, name: str, message_collector: list | None = None) -> None:
+        self.name = name
+        self.message_collector = message_collector
+
+    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+        """Process incoming messages."""
+        print(f"  ✓ [{self.name}] Received message to {params.to}")
+        if self.message_collector is not None:
+            self.message_collector.append((params.to, params.payload))
+        return ProcessMessageResult(success=True, message="Received", should_retry=False, retry_seconds=0, payload={})
+
+
+async def test_bus_connection() -> bool:
     """Test basic bus connectivity."""
     print("✓ Testing bus connection...")
-    client = AgentBusClient("ws://localhost:7892", auto_reconnect=False)
+    callbacks = ValidationCallbacks("validator")
+    client: AgentBusClient | None = None
     try:
-        await client.connect()
+        client = await AgentBusClient.connect("ws://localhost:7892", callbacks)
         await client.initialize("test-validator")
         print("  ✓ Connected and initialized")
         return True
@@ -24,45 +39,47 @@ async def test_bus_connection():
         print(f"  ✗ Connection failed: {e}")
         return False
     finally:
-        await client.disconnect()
+        if client is not None:
+            await client.disconnect()
 
 
-async def test_message_flow():
+async def test_message_flow() -> bool:
     """Test message flow through the system."""
     print("\n✓ Testing message flow...")
 
-    sender = AgentBusClient("ws://localhost:7892", auto_reconnect=False)
-    receiver = AgentBusClient("ws://localhost:7892", auto_reconnect=False)
-
-    received_messages = []
+    received_messages: list[tuple[str, dict]] = []
+    sender_callbacks = ValidationCallbacks("sender")
+    receiver_callbacks = ValidationCallbacks("receiver", received_messages)
+    sender: AgentBusClient | None = None
+    receiver: AgentBusClient | None = None
 
     try:
         # Setup receiver
-        await receiver.connect()
+        receiver = await AgentBusClient.connect("ws://localhost:7892", receiver_callbacks)
         await receiver.initialize("test-receiver")
-        # Note: publish_inbound always uses tg: prefix
-        await receiver.subscribe("tg:*")
-
-        async def handle_message(topic, payload):
-            received_messages.append((topic, payload))
-            print(f"  ✓ Received message on {topic}")
-
-        await receiver.subscribe("tg:*", handle_message)
-        print("  ✓ Receiver subscribed to tg:*")
+        await receiver.subscribe("test:*")
+        print("  ✓ Receiver subscribed to test:*")
 
         # Setup sender
-        await sender.connect()
+        sender = await AgentBusClient.connect("ws://localhost:7892", sender_callbacks)
         await sender.initialize("test-sender")
         print("  ✓ Sender connected")
 
         # Send test message
-        await sender.publish_inbound(
-            InboundMessage(
-                channel="test",
-                sender_id="validator",
-                chat_id="validation-123",
-                content="Hello from validation test",
-            )
+        await sender.send_message(
+            to="test:validation-123",
+            payload={
+                "messageId": f"test_{datetime.now(UTC).timestamp()}",
+                "type": "test_message",
+                "from": "test-sender",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "content": {
+                    "text": "Hello from validation test",
+                    "channel": "test",
+                    "senderId": "validator",
+                    "chat_id": "validation-123",
+                },
+            },
         )
         print("  ✓ Message sent")
 
@@ -78,30 +95,32 @@ async def test_message_flow():
 
     except Exception as e:
         print(f"  ✗ Message flow failed: {e}")
+        import traceback
+
+        traceback.print_exc()
         return False
     finally:
-        await sender.disconnect()
-        await receiver.disconnect()
+        if sender is not None:
+            await sender.disconnect()
+        if receiver is not None:
+            await receiver.disconnect()
 
 
-async def test_telegram_bridge():
+async def test_telegram_bridge() -> bool:
     """Test Telegram bridge connectivity."""
     print("\n✓ Testing Telegram bridge...")
 
-    client = AgentBusClient("ws://localhost:7892", auto_reconnect=False)
-    received_replies = []
+    received_replies: list[Any] = []
+    callbacks = ValidationCallbacks("telegram-validator", received_replies)
+    client: AgentBusClient | None = None
 
     try:
-        await client.connect()
+        client = await AgentBusClient.connect("ws://localhost:7892", callbacks)
         await client.initialize("telegram-validator")
 
         # Subscribe to tg:* to catch any replies
-        async def handle_outbound(msg):
-            received_replies.append(msg)
-            print(f"  ✓ Received outbound message for chat {msg.chat_id}")
-
-        await client.on_outbound(handle_outbound)
-        print("  ✓ Subscribed to outbound messages")
+        await client.subscribe("tg:*")
+        print("  ✓ Subscribed to tg:*")
 
         # Wait a bit for any messages
         await asyncio.sleep(2)
@@ -115,12 +134,16 @@ async def test_telegram_bridge():
 
     except Exception as e:
         print(f"  ✗ Telegram bridge test failed: {e}")
+        import traceback
+
+        traceback.print_exc()
         return False
     finally:
-        await client.disconnect()
+        if client is not None:
+            await client.disconnect()
 
 
-async def main():
+async def main() -> int:
     """Run all validation tests."""
     print("=" * 60)
     print("BUB END-TO-END VALIDATION")

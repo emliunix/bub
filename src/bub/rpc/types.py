@@ -31,31 +31,6 @@ class Transport(Protocol):
         ...
 
 
-@runtime_checkable
-class Listener(Protocol):
-    """Protocol for server listener to accept incoming connections.
-
-    Abstracts the server creation to enable testing with mock implementations.
-    """
-
-    async def start(self, handler: Callable[[Transport], Awaitable[None]]) -> None:
-        """Start listening for connections.
-
-        Args:
-            handler: Callback to handle new connections with a Transport.
-        """
-        ...
-
-    async def stop(self) -> None:
-        """Stop listening and close all connections."""
-        ...
-
-    @property
-    def url(self) -> str:
-        """Server URL for clients to connect to."""
-        ...
-
-
 class JSONRPCRequest(BaseModel):
     """A JSON-RPC request that expects a response."""
 
@@ -120,7 +95,6 @@ __all__ = [
     "JSONRPCNotification",
     "JSONRPCRequest",
     "JSONRPCResponse",
-    "Listener",
     "RequestId",
     "Transport",
     "jsonrpc_message_adapter",

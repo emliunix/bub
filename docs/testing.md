@@ -32,114 +32,6 @@ This page documents Bub’s testing facilities and the curated debug scripts und
 
 > **Documentation Status**: Each script entry includes a "Last Modified" date. To check if documentation is current, run: `git log -1 --format="%ai" -- scripts/SCRIPT_NAME.py`
 
-### MiniMax / LLM Tool Calling
-
-#### test_minimax_tools.py
-**Purpose**: Direct OpenAI-SDK style tool calling tests.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_minimax_tools.py
-```
-
----
-
-#### test_minimax_format.py
-**Purpose**: Dumps raw response format details.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_minimax_format.py [API_KEY]
-```
-
----
-
-#### test_republic_minimax.py
-**Purpose**: Validates tool calling through the Republic client.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_republic_minimax.py
-```
-
----
-
-#### test_minimal_republic_minimax.py
-**Purpose**: Minimal Republic+MiniMax reproduction.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_minimal_republic_minimax.py
-```
-
-### Bub Stack / Tape / Message Reconstruction
-
-#### test_bub_minimax_flow.py
-**Purpose**: Bub LLM configuration + end-to-end tool calling through Bub's stack.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_bub_minimax_flow.py
-```
-
----
-
-#### test_tape_tool_calls.py
-**Purpose**: Verifies what gets recorded to tape for tool calls.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_tape_tool_calls.py
-```
-
----
-
-#### test_debug_messages.py
-**Purpose**: Deep dive into message reconstruction and sequencing.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_debug_messages.py
-```
-
----
-
-#### test_multi_turn.py
-**Purpose**: Multi-turn behavior validation.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_multi_turn.py
-```
-
----
-
-#### test_bub_integration.py
-**Purpose**: Bub integration test covering core functionality.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_bub_integration.py
-```
-
 ### Bus / RPC / Connectivity
 
 #### test_bus_client.py
@@ -164,30 +56,6 @@ python scripts/test_bus_client.py [message]
 python scripts/probe_bus.py
 ```
 
----
-
-#### test_bus_concurrent.py
-**Purpose**: Concurrent bus client testing with multiple simultaneous connections.
-
-**Last Modified**: 2026-02-18
-
-**Usage**:
-```bash
-python scripts/test_bus_concurrent.py
-```
-
----
-
-#### test_bus_integration_3clients.py
-**Purpose**: Integration test with 3 simultaneous clients validating message routing.
-
-**Last Modified**: 2026-02-18
-
-**Usage**:
-```bash
-python scripts/test_bus_integration_3clients.py
-```
-
 ### End-to-End Suites
 
 #### test_e2e_clean.py
@@ -210,18 +78,6 @@ python scripts/test_e2e_clean.py
 **Usage**:
 ```bash
 python scripts/test_e2e_automated.py
-```
-
----
-
-#### test_e2e_telegram.py
-**Purpose**: Telegram-focused E2E checks.
-
-**Last Modified**: 2026-02-18
-
-**Usage**:
-```bash
-python scripts/test_e2e_telegram.py
 ```
 
 ### Operational / Validation Helpers
@@ -291,28 +147,6 @@ python scripts/validate_mermaid.py
 ```
 
 ---
-
-#### docs-serve.sh
-**Purpose**: Simple one-shot MkDocs server.
-
-**Last Modified**: 2026-02-15
-
-**Usage**:
-```bash
-./scripts/docs-serve.sh
-```
-
-### Issue Reproduction
-
-#### test_reproduce_issue.py
-**Purpose**: Generic script for reproducing specific reported issues.
-
-**Last Modified**: 2026-02-17
-
-**Usage**:
-```bash
-python scripts/test_reproduce_issue.py
-```
 
 ## Environment Setup Expectations
 

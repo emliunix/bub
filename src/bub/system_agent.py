@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from bub.bus.bus import AgentBusClient
+from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult
 from bub.config.settings import AgentSettings
 
 # Load environment variables from .env file
@@ -34,7 +35,7 @@ else:
     logger.debug("system.agent.loaded_env default")
 
 
-class SystemAgent:
+class SystemAgent(AgentBusClientCallbacks):
     """System agent that spawns conversation agents."""
 
     def __init__(self, bus_url: str = "ws://localhost:7892") -> None:
@@ -50,6 +51,26 @@ class SystemAgent:
         # Lock to protect sessions data from race conditions between concurrent spawn tasks
         self._sessions_lock = asyncio.Lock()
 
+    async def _dispatch_message(self, msg_type: str, to: str, payload: dict[str, Any]) -> None:
+        """Dispatch message to appropriate processor."""
+        if msg_type == "spawn_request":
+            await self._process_spawn_request(to, payload)
+        else:
+            logger.debug("system.agent.unknown_message_type type={}", msg_type)
+
+    async def _process_spawn_request(self, to: str, payload: dict[str, Any]) -> None:
+        """Process spawn_request message."""
+        # Spawn the request processing as a background task so we don't block
+        # other requests while waiting for systemd to start the agent
+        task = asyncio.create_task(self._handle_spawn_agent(to, payload))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+        """Entry point from bus - dispatch then return result."""
+        await self._dispatch_message(str(params.payload.get("type", "")), params.to, params.payload)
+        return ProcessMessageResult(success=True, message="Processed", should_retry=False, retry_seconds=0, payload={})
+
     async def start(self) -> None:
         """Start the system agent."""
         logger.info("system.agent.starting bus_url={}", self.bus_url)
@@ -60,20 +81,26 @@ class SystemAgent:
         # Initialize sessions file
         await self._load_sessions()
 
-        # Connect to bus
-        self.client = AgentBusClient(self.bus_url, auto_reconnect=True)
-        await self.client.connect()
-        await self.client.initialize("agent:system")
+        # Connect to bus (pass self as callbacks)
+        self.client = await AgentBusClient.connect(self.bus_url, self)
+        logger.info("system.agent.message_loop_started")
 
-        # Subscribe to spawn requests with handler
-        await self.client.subscribe("system:*", self._handle_message)
+        # Framework.run() already started by connect()
+        await self.client.initialize("agent:system")
+        logger.info("system.agent.initialized")
+
+        # Subscribe to spawn requests
+        await self.client.subscribe("system:*")
+        logger.info("system.agent.subscribed")
 
         self._running = True
         logger.info("system.agent.started")
 
         # Keep running
-        while self._running:
-            await asyncio.sleep(1)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
 
     async def stop(self) -> None:
         """Stop the system agent."""
@@ -131,19 +158,6 @@ class SystemAgent:
         from datetime import UTC, datetime
 
         return datetime.now(UTC).isoformat()
-
-    async def _handle_message(self, topic: str, payload: dict[str, Any]) -> None:
-        """Handle incoming messages."""
-        msg_type = payload.get("type", "")
-
-        if msg_type == "spawn_request":
-            # Spawn the request processing as a background task so we don't block
-            # other requests while waiting for systemd to start the agent
-            task = asyncio.create_task(self._handle_spawn_agent(topic, payload))
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
-        else:
-            logger.debug("system.agent.unknown_message_type type={}", msg_type)
 
     def _generate_agent_id(self, workspace: Path) -> str:
         """Generate deterministic agent ID from workspace path.

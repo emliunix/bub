@@ -1,19 +1,28 @@
-"""WebSocket JSON-RPC channel adapter."""
+"""WebSocket JSON-RPC channel adapter.
+
+WebSocket acts as a transport proxy - it receives messages from various
+channels (Telegram, Discord, etc.) and parses them using channel-specific
+parsers. It does not have its own message format.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from datetime import UTC, datetime
 from loguru import logger
 
+from bub.bus.protocol import (
+    AgentBusClientCallbacks,
+    ProcessMessageParams,
+    ProcessMessageResult,
+)
 from bub.channels.base import BaseChannel
-from bub.channels.events import InboundMessage, OutboundMessage
+from bub.channels.events import OutboundMessage
+from bub.channels.parsers import parse_channel_message
 from bub.bus.bus import AgentBusClient
-from bub.message.messages import create_tg_reply_payload
 
 
 @dataclass(frozen=True)
@@ -23,8 +32,12 @@ class WebSocketConfig:
     url: str
 
 
-class WebSocketChannel(BaseChannel):
-    """WebSocket channel adapter using AgentBusClient."""
+class WebSocketChannel(BaseChannel, AgentBusClientCallbacks):
+    """WebSocket channel adapter using AgentBusClient.
+
+    Acts as a transport proxy - receives messages from various channels
+    (telegram, discord, etc.) and parses them using channel-specific parsers.
+    """
 
     name = "websocket"
 
@@ -33,7 +46,6 @@ class WebSocketChannel(BaseChannel):
         self._config = config
         self._client: AgentBusClient | None = None
         self._running = False
-        self._unsubscribe_funcs: list[Callable[[], Any]] = []
 
     async def start(self) -> None:
         """Start WebSocket channel: connect to server and subscribe to messages."""
@@ -43,34 +55,62 @@ class WebSocketChannel(BaseChannel):
         logger.info("websocket.channel.start url={}", self._config.url)
         self._running = True
 
-        # Create and connect client
-        self._client = AgentBusClient(url=self._config.url)
-        await self._client.connect()
+        # Create and connect client (pass self as callbacks)
+        self._client = await AgentBusClient.connect(self._config.url, self)
 
         # Initialize connection
         client_id = f"ws-channel-{id(self):x}"
         await self._client.initialize(client_id=client_id)
 
-        # Subscribe to all messages and filter in handler
-        async def handle_message(address: str, payload: dict[str, Any]) -> None:
-            await self._handle_inbound_from_server(address, payload)
-
-        await self._client.subscribe("*:*", handle_message)
-
-        # Store subscription info for cleanup
-        self._subscribed_address = "*:*"
-
         logger.info("websocket.channel.connected url={}", self._config.url)
 
         # Keep running until stop() is called
-        try:
-            while self._running:
-                await asyncio.sleep(1)
-        finally:
-            # Clean up subscriptions
-            for unsub in self._unsubscribe_funcs:
-                unsub()
-            self._unsubscribe_funcs.clear()
+        while self._running:
+            await self._client.run()
+
+    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+        """Process message from bus (implements AgentBusClientCallbacks).
+
+        WebSocket is a transport proxy - we parse the message using the
+        appropriate channel parser based on payload.content.channel.
+        Returns generic OK response (protocol-level ack).
+        """
+        payload = params.payload
+
+        # Parse using channel-specific parser
+        # Returns InboundMessage or None if not recognizable
+        inbound_msg = parse_channel_message(payload)
+
+        if inbound_msg is None:
+            logger.debug("websocket.unrecognizable_message payload_type={}", payload.get("type"))
+            return ProcessMessageResult(
+                success=True,  # Acknowledge receipt even if unrecognizable
+                message="Unrecognizable message format",
+                should_retry=False,
+                retry_seconds=0,
+                payload={},
+            )
+
+        logger.debug(
+            "websocket.inbound channel={} chat_id={} sender_id={} content_len={}",
+            inbound_msg.channel,
+            inbound_msg.chat_id,
+            inbound_msg.sender_id,
+            len(inbound_msg.content),
+        )
+
+        # Publish to local message bus via parent
+        await self.publish_inbound(inbound_msg)
+
+        # Return generic OK response - the actual response is sent separately
+        # via the reply channel
+        return ProcessMessageResult(
+            success=True,
+            message="Processed",
+            should_retry=False,
+            retry_seconds=0,
+            payload={},  # Empty payload - response sent via separate message
+        )
 
     async def stop(self) -> None:
         """Stop WebSocket channel: disconnect from server."""
@@ -81,7 +121,11 @@ class WebSocketChannel(BaseChannel):
         logger.info("websocket.channel.stopped")
 
     async def send(self, message: OutboundMessage) -> None:
-        """Send outbound message via WebSocket."""
+        """Send outbound message via WebSocket.
+
+        Creates a generic bus message format (not channel-specific).
+        The recipient is responsible for formatting it for their channel.
+        """
         if not self._client:
             logger.warning("websocket.send.not_connected")
             return
@@ -93,50 +137,23 @@ class WebSocketChannel(BaseChannel):
             len(message.content),
         )
 
-        # Send message via WebSocket bus
-        original_message_id = message.metadata.get("original_message_id", "") if message.metadata else ""
-        payload = create_tg_reply_payload(
-            message_id=f"msg_ws_{datetime.now(UTC).timestamp()}",
-            from_addr="websocket:client",
-            reply_to_message_id=original_message_id,
-            timestamp=datetime.now(UTC).isoformat(),
-            text=message.content,
-            channel=message.channel,
-            chat_id=message.chat_id,
+        # Create generic bus message (not Telegram-specific)
+        # The recipient will format it appropriately for their channel
+        payload = {
+            "messageId": f"msg_ws_{datetime.now(UTC).timestamp()}",
+            "type": "outbound_message",
+            "from": "websocket:client",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "to": f"{message.channel}:{message.chat_id}",
+            "content": {
+                "text": message.content,
+                "channel": message.channel,
+                "chat_id": message.chat_id,
+                "reply_to_message_id": message.reply_to_message_id,
+            },
+        }
+
+        await self._client.send_message(
+            to=f"{message.channel}:{message.chat_id}",
+            payload=payload,
         )
-        await self._client.send_message(to=f"{message.channel}:{message.chat_id}", payload=payload)
-
-    async def _handle_inbound_from_server(self, address: str, payload: dict[str, Any]) -> None:
-        """Handle message received from WebSocket server."""
-        if not self._running:
-            return
-
-        # Extract message info from payload
-        content = payload.get("content", {})
-        if not isinstance(content, dict):
-            return
-
-        channel = content.get("channel", "websocket")
-        chat_id = address.split(":", 1)[1] if ":" in address else ""
-        sender_id = content.get("senderId", "")
-        text = content.get("text", "")
-
-        logger.debug(
-            "websocket.inbound channel={} chat_id={} sender_id={} content_len={}",
-            channel,
-            chat_id,
-            sender_id,
-            len(text),
-        )
-
-        # Create InboundMessage for the bus
-        inbound_msg = InboundMessage(
-            channel=str(channel),
-            sender_id=str(sender_id),
-            chat_id=chat_id,
-            content=str(text),
-            metadata={k: v for k, v in content.items() if k not in ("text", "senderId", "channel")},
-        )
-
-        # Publish to local message bus via parent
-        await self.publish_inbound(inbound_msg)

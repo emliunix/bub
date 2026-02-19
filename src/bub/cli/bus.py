@@ -7,6 +7,7 @@ import subprocess
 import sys
 import uuid
 from datetime import UTC, datetime
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import typer
@@ -14,9 +15,9 @@ from loguru import logger
 
 
 from bub.bus.bus import AgentBusClient
+from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult, SendMessageParams
 from bub.config import BusSettings
 from bub.logging_utils import configure_logging
-from bub.bus.protocol import SendMessageParams
 
 bus_app = typer.Typer(help="Bus operations")
 
@@ -44,7 +45,7 @@ def bus_serve() -> None:
 
     logger.info("bus.serve starting host={} port={}", bus_settings.host, bus_settings.port)
 
-    server = AgentBusServer(server=(bus_settings.host, bus_settings.port))
+    server = AgentBusServer.create(server=(bus_settings.host, bus_settings.port))
 
     async def _run() -> None:
         await server.start_server()
@@ -86,25 +87,33 @@ def bus_send(
 async def _send_and_listen(
     url: str, content: str, chat_id: str, channel: str, response_address: str, timeout: int
 ) -> None:
-    client = AgentBusClient(url, auto_reconnect=False)
     received: list[str] = []
+    client: AgentBusClient | None = None
 
-    try:
-        await client.connect()
-        await client.initialize(f"bus-send-{chat_id}")
-
-        async def on_outbound(topic: str, payload: dict) -> None:
-            msg_content = payload.get("content", "")
-            received.append(msg_content)
+    class Callbacks(AgentBusClientCallbacks):
+        async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+            msg_content = params.payload.get("content", "")
+            received.append(str(msg_content))
             typer.echo(f"\n--- response ---")
             typer.echo(msg_content)
             typer.echo("---")
+            return ProcessMessageResult(
+                success=True, message="Received", should_retry=False, retry_seconds=0, payload={}
+            )
 
-        await client.subscribe(response_address, on_outbound)
+    try:
+        client = await AgentBusClient.connect(url, Callbacks())
+        # Framework.run() already started by connect()
+
+        await client.initialize(f"bus-send-{chat_id}")
+        await client.subscribe(response_address)
+
+        # Send the message
+        from datetime import UTC
 
         message_payload = {
             "messageId": f"msg_{chat_id}_{uuid.uuid4().hex[:8]}",
-            "type": "user_message",
+            "type": "tg_message",
             "from": f"{channel}:{chat_id}",
             "timestamp": datetime.now(UTC).isoformat(),
             "content": {
@@ -113,7 +122,9 @@ async def _send_and_listen(
                 "chat_id": chat_id,
             },
         }
-        await client.send_message(to="agent", payload=message_payload)
+
+        # Send to a broadcast address that capture will receive
+        await client.send_message(to="tg:436026689", payload=message_payload)
         typer.echo(f"Sent: {content}")
         typer.echo(f"Listening on address={response_address} (timeout={timeout}s)...")
 
@@ -126,37 +137,75 @@ async def _send_and_listen(
         typer.echo(f"Cannot connect to bus at {url}: {e}", err=True)
         raise typer.Exit(1) from None
     finally:
-        await client.disconnect()
+        if client is not None:
+            await client.disconnect()
 
 
 @bus_app.command("recv")
 def bus_recv(
-    address: Annotated[str, typer.Argument(help="Address pattern to subscribe (e.g., 'tg:*')")] = "tg:*",
+    address: Annotated[str | None, typer.Argument(help="Address pattern to subscribe (e.g., 'tg:*')")] = None,
     bus_url: Annotated[str | None, typer.Option("--bus-url", "-u", envvar="BUB_BUS_URL", help="Bus URL")] = None,
+    to: Annotated[
+        list[str] | None,
+        typer.Option("--to", "-t", help="Address pattern(s) to subscribe to (can be used multiple times)"),
+    ] = None,
 ) -> None:
-    """Subscribe to a topic and print messages until Ctrl-C."""
+    """Subscribe to topic(s) and print messages until Ctrl-C.
+
+    Examples:
+        bub bus recv "tg:*"                    # Single address
+        bub bus recv --to "tg:*" --to "*"     # Multiple addresses
+        bub bus recv "*"                       # Wildcard (all messages)
+    """
     configure_logging(profile="chat")
     url = bus_url or _resolve_bus_url()
-    asyncio.run(_recv(url, address))
+
+    # Build address list from positional arg and --to options
+    addresses: list[str] = []
+    if address:
+        addresses.append(address)
+    if to:
+        addresses.extend(to)
+
+    # Default if no addresses specified
+    if not addresses:
+        addresses = ["tg:*"]
+
+    asyncio.run(_recv_multi(url, addresses))
 
 
-async def _recv(url: str, address: str) -> None:
-    client = AgentBusClient(url, auto_reconnect=False)
+async def _recv_multi(url: str, addresses: list[str]) -> None:
+    client: AgentBusClient | None = None
+    received_count = 0
 
-    try:
-        await client.connect()
-        await client.initialize("bus-recv")
-
-        async def on_message(address_pattern: str, payload: dict) -> None:
+    class Callbacks(AgentBusClientCallbacks):
+        async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+            nonlocal received_count
+            received_count += 1
             import json
 
-            typer.echo(f"\n--- {address_pattern} ---")
-            typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-            typer.echo("---")
+            typer.echo(f"\n{'=' * 70}")
+            typer.echo(f"[{received_count}] To: {params.to}")
+            typer.echo(f"From: {params.from_}")
+            typer.echo(f"Payload:")
+            typer.echo(json.dumps(params.payload, indent=2, ensure_ascii=False))
+            typer.echo(f"{'=' * 70}")
+            return ProcessMessageResult(
+                success=True, message="Received", should_retry=False, retry_seconds=0, payload={}
+            )
 
-        await client.subscribe(address, on_message)
+    try:
+        client = await AgentBusClient.connect(url, Callbacks())
+        # Framework.run() already started by connect()
+
+        await client.initialize("bus-recv")
+
+        for addr in addresses:
+            await client.subscribe(addr)
+
         typer.echo(f"Connected to {url}")
-        typer.echo(f"Subscribed to: {address}")
+        typer.echo(f"Subscribed to: {', '.join(addresses)}")
+        typer.echo("Waiting for messages... (Ctrl+C to stop)")
 
         try:
             await _wait_forever()
@@ -166,7 +215,8 @@ async def _recv(url: str, address: str) -> None:
         typer.echo(f"Cannot connect to bus at {url}: {e}", err=True)
         raise typer.Exit(1) from None
     finally:
-        await client.disconnect()
+        if client is not None:
+            await client.disconnect()
 
 
 @bus_app.command("telegram")
@@ -209,8 +259,8 @@ async def _run_telegram_bridge(  # noqa: C901
 
     from bub.channels.events import InboundMessage
 
-    client = AgentBusClient(url, auto_reconnect=True)
     bot_instance: Bot | None = None
+    client: AgentBusClient | None = None
 
     # Track assigned agents per chat_id
     chat_agents: dict[str, str] = {}  # chat_id -> agent_client_id
@@ -222,16 +272,51 @@ async def _run_telegram_bridge(  # noqa: C901
             logger.error("telegram.bridge.send_no_bot chat_id={}", chat_id)
             return
         try:
-            await bot_instance.send_message(chat_id=int(chat_id), text=content)
+            # Convert markdown to Telegram MarkdownV2 format
+            from telegramify_markdown import markdownify as md
+
+            text = md(content)
+            await bot_instance.send_message(chat_id=int(chat_id), text=text, parse_mode="MarkdownV2")
             logger.info("telegram.bridge.sent chat_id={}", chat_id)
         except Exception:
             logger.exception("telegram.bridge.send_error chat_id={}", chat_id)
 
-    async def handle_outbound(topic: str, payload: dict) -> None:
-        content = payload.get("content", "")
+    async def handle_outbound(to: str, payload: dict) -> None:
+        """Handle outbound message to Telegram (to="tg:*")."""
+        content_obj = payload.get("content", {})
+        # Extract text from content dict (content is {"text": "...", "channel": "..."})
+        if isinstance(content_obj, dict):
+            content = content_obj.get("text", "")
+        else:
+            content = str(content_obj)
         chat_id = payload.get("chat_id", "")
-        logger.info("telegram.bridge.outbound topic={} chat_id={} len={}", topic, chat_id, len(content))
+        logger.info("telegram.bridge.outbound to={} chat_id={} len={}", to, chat_id, len(content))
         await send_to_telegram(chat_id, content)
+
+    async def handle_spawn_response(to: str, payload: dict) -> None:
+        """Handle spawn response from system agent (to="telegram-bridge")."""
+        msg_type = payload.get("type", "")
+        if msg_type != "spawn_result":
+            return
+
+        content = payload.get("content", {})
+        success = content.get("success", False)
+        agent_id = content.get("client_id", "")
+
+        # Find pending spawn and set the result
+        for chat_id, event in list(spawn_pending.items()):
+            if success and agent_id:
+                chat_agents[chat_id] = agent_id
+                logger.info("telegram.bridge.spawn_response chat_id={} agent={}", chat_id, agent_id)
+            else:
+                logger.error(
+                    "telegram.bridge.spawn_failed_response chat_id={} error={}",
+                    chat_id,
+                    content.get("error", "unknown"),
+                )
+
+            event.set()
+            break
 
     async def spawn_agent_for_chat(chat_id: str) -> str | None:
         """Spawn an agent for this chat via system agent.
@@ -239,9 +324,6 @@ async def _run_telegram_bridge(  # noqa: C901
         Note: System agent handles idempotency - if agent already exists and is
         running, it will return success with the existing agent ID.
         """
-        # Note: We removed the local systemd check. System agent is the authority
-        # and handles the "already running" case by returning the existing agent.
-
         if chat_id in spawn_pending:
             # Wait for existing spawn to complete
             logger.info("telegram.bridge.spawn_waiting chat_id={}", chat_id)
@@ -268,6 +350,7 @@ async def _run_telegram_bridge(  # noqa: C901
             }
 
             # Send to system:spawn
+            assert client is not None, "client should be initialized"
             await client.send_message(to="system:spawn", payload=spawn_msg)
             logger.info("telegram.bridge.spawn_request_sent chat_id={}", chat_id)
 
@@ -292,8 +375,20 @@ async def _run_telegram_bridge(  # noqa: C901
         finally:
             del spawn_pending[chat_id]
 
-    async def handle_spawn_response(topic: str, payload: dict) -> None:
-        """Handle spawn response from system agent."""
+    # Message handlers - pure processing, no dispatch logic
+    async def _process_outbound(to: str, payload: dict) -> None:
+        """Process outbound message to Telegram."""
+        content_obj = payload.get("content", {})
+        if isinstance(content_obj, dict):
+            content = content_obj.get("text", "")
+        else:
+            content = str(content_obj)
+        chat_id = payload.get("chat_id", "")
+        logger.info("telegram.bridge.outbound to={} chat_id={} len={}", to, chat_id, len(content))
+        await send_to_telegram(chat_id, content)
+
+    async def _process_spawn_response(to: str, payload: dict) -> None:
+        """Process spawn response from system agent."""
         msg_type = payload.get("type", "")
         if msg_type != "spawn_result":
             return
@@ -302,7 +397,6 @@ async def _run_telegram_bridge(  # noqa: C901
         success = content.get("success", False)
         agent_id = content.get("client_id", "")
 
-        # Find pending spawn and set the result
         for chat_id, event in list(spawn_pending.items()):
             if success and agent_id:
                 chat_agents[chat_id] = agent_id
@@ -313,24 +407,57 @@ async def _run_telegram_bridge(  # noqa: C901
                     chat_id,
                     content.get("error", "unknown"),
                 )
-
             event.set()
             break
 
+    # Dispatch table - maps address patterns to handlers
+    _dispatch_table: dict[str, Callable[[str, dict], Awaitable[None]]] = {
+        "tg:": _process_outbound,
+        "telegram-bridge": _process_spawn_response,
+    }
+
+    async def _dispatch_message(to: str, payload: dict) -> None:
+        """Dispatch message to appropriate handler based on address."""
+        for pattern, handler in _dispatch_table.items():
+            if to.startswith(pattern) or to == pattern:
+                await handler(to, payload)
+                return
+        logger.debug("telegram.bridge.unknown_destination to={}", to)
+
+    # Callbacks implementation
+    class Callbacks(AgentBusClientCallbacks):
+        async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+            """Entry point from bus - dispatch then return result."""
+            await _dispatch_message(params.to, params.payload)
+            return ProcessMessageResult(
+                success=True, message="Processed", should_retry=False, retry_seconds=0, payload={}
+            )
+
     try:
-        await client.connect()
+        client = await AgentBusClient.connect(url, Callbacks())
+        logger.info("telegram.bridge.message_loop_started")
+
+        # Now initialize (framework.run() already started by connect())
         await client.initialize("telegram-bridge")
+        logger.info("telegram.bridge.initialized")
 
-        await client.subscribe("tg:*", handle_outbound)
+        # Subscribe to tg:* pattern for outbound messages
+        await client.subscribe("tg:*")
+        logger.info("telegram.bridge.subscribed_tg")
 
-        # Subscribe to spawn responses from system agent
-        await client.subscribe("telegram-bridge", handle_spawn_response)
+        # Subscribe to telegram-bridge for spawn responses
+        await client.subscribe("telegram-bridge")
+        logger.info("telegram.bridge.subscribed_bridge")
+
         logger.info("telegram.bridge.spawn_handler_registered")
 
         builder = Application.builder().token(token)
 
         if proxy:
+            logger.info("telegram.bridge.using_proxy url={}", proxy)
             builder = builder.proxy(proxy).get_updates_proxy(proxy)
+        else:
+            logger.info("telegram.bridge.no_proxy")
 
         app = builder.build()
         bot_instance = app.bot
@@ -384,6 +511,7 @@ async def _run_telegram_bridge(  # noqa: C901
                 )
 
                 # Send directly to the assigned agent
+                assert client is not None, "client should be initialized"
                 await client.send_message(
                     to=agent_id,
                     payload={
@@ -419,14 +547,11 @@ async def _run_telegram_bridge(  # noqa: C901
         await app.updater.start_polling(drop_pending_updates=True)
         logger.info("telegram.bridge.started url={}", url)
 
-        # Subscribe to tg:* to receive outbound messages (responses from agents)
-        # Note: telegram-bridge acts as a router, so it subscribes to entity topics
-        sub_result = await client.subscribe("tg:*")
-        logger.info("telegram.bridge.subscribed topic=tg:* result={}", sub_result)
-
+        # Keep running until interrupted
         try:
             await _wait_forever()
         except KeyboardInterrupt:
             logger.info("telegram.bridge.stopped")
     finally:
-        await client.disconnect()
+        if client is not None:
+            await client.disconnect()

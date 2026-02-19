@@ -214,8 +214,13 @@ class TelegramChannel(BaseChannel):
         if not self._running:
             return
 
-        chat_id = payload.get("chatId", "")
-        content = payload.get("content", "")
+        chat_id = payload.get("chat_id", "")
+        content_obj = payload.get("content", {})
+        # Extract text from content dict (content is {"text": "...", "channel": "..."})
+        if isinstance(content_obj, dict):
+            content = content_obj.get("text", "")
+        else:
+            content = str(content_obj)
 
         if not chat_id or not content:
             return

@@ -4,14 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from loguru import logger
-
 from bub.app.runtime import AgentRuntime
 from bub.app.types import TapeStore
-from bub.bus.bus import AgentBusClient
 from bub.config import AgentSettings, TapeSettings
 from bub.integrations.republic_client import build_tape_store
-from bub.bub_types import MessageBus
 
 
 def build_runtime(
@@ -35,17 +31,10 @@ def build_runtime(
 
     store: TapeStore = build_tape_store(agent_settings, tape_settings, workspace)
 
-    if agent_settings.bus_url:
-        logger.info("bus.client.create url={}", agent_settings.bus_url)
-        bus: MessageBus = AgentBusClient(agent_settings.bus_url)
-    else:
-        raise ValueError("bus_url is required")
-
     return AgentRuntime(
         workspace,
         agent_settings,
         store,
-        bus,
         allowed_tools=allowed_tools,
         allowed_skills=allowed_skills,
     )

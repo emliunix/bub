@@ -15,10 +15,31 @@ import random
 import sys
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from loguru import logger
 
 from bub.bus.bus import AgentBusClient
+from bub.bus.protocol import AgentBusClientCallbacks, ProcessMessageParams, ProcessMessageResult
+
+
+class MockBridgeCallbacks(AgentBusClientCallbacks):
+    """Callbacks for mock telegram bridge."""
+
+    def __init__(self, bridge: MockTelegramBridge) -> None:
+        self.bridge = bridge
+
+    async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
+        """Handle incoming messages from bus."""
+        payload = params.payload
+        msg_type = payload.get("type", "")
+
+        if msg_type == "spawn_result":
+            await self.bridge._handle_spawn_response(payload)
+        elif msg_type == "tg_reply":
+            await self.bridge._handle_tg_reply(payload)
+
+        return ProcessMessageResult(success=True, message="Received", should_retry=False, retry_seconds=0, payload={})
 
 
 class MockTelegramBridge:
@@ -36,15 +57,15 @@ class MockTelegramBridge:
         """Start the mock bridge and connect to bus."""
         logger.info("mock.bridge.starting chat_id={}", self.chat_id)
 
-        self.client = AgentBusClient(self.bus_url, auto_reconnect=True)
-        await self.client.connect()
+        callbacks = MockBridgeCallbacks(self)
+        self.client = await AgentBusClient.connect(self.bus_url, callbacks)
         await self.client.initialize("mock-telegram-bridge")
 
         # Subscribe to receive spawn responses (sent to our client_id)
-        await self.client.subscribe("mock-telegram-bridge", self._handle_response)
+        await self.client.subscribe("mock-telegram-bridge")
 
         # Also subscribe to tg:{self.chat_id} to receive agent replies
-        await self.client.subscribe(f"tg:{self.chat_id}", self._handle_response)
+        await self.client.subscribe(f"tg:{self.chat_id}")
 
         logger.info("mock.bridge.connected chat_id={}", self.chat_id)
         return True
@@ -76,9 +97,15 @@ class MockTelegramBridge:
                     },
                 }
 
+                assert self.client is not None
                 await self.client.send_message(to="system:spawn", payload=spawn_msg)
 
-                logger.info("mock.bridge.spawn_sent attempt={}/{} chat_id={}", attempt + 1, max_retries, self.chat_id)
+                logger.info(
+                    "mock.bridge.spawn_sent attempt={}/{} chat_id={}",
+                    attempt + 1,
+                    max_retries,
+                    self.chat_id,
+                )
 
                 # Wait for response
                 await asyncio.wait_for(self.spawn_event.wait(), timeout=timeout)
@@ -93,11 +120,14 @@ class MockTelegramBridge:
 
             except asyncio.TimeoutError:
                 logger.error(
-                    "mock.bridge.spawn_timeout attempt={}/{} chat_id={}", attempt + 1, max_retries, self.chat_id
+                    "mock.bridge.spawn_timeout attempt={}/{} chat_id={}",
+                    attempt + 1,
+                    max_retries,
+                    self.chat_id,
                 )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2**attempt)
-            except Exception as e:
+            except Exception:
                 logger.exception("mock.bridge.spawn_error")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2**attempt)
@@ -110,7 +140,12 @@ class MockTelegramBridge:
             logger.error("mock.bridge.no_agent chat_id={}", self.chat_id)
             return False
 
-        logger.info("mock.bridge.sending chat_id={} agent={} content={}", self.chat_id, self.agent_id, content[:50])
+        logger.info(
+            "mock.bridge.sending chat_id={} agent={} content={}",
+            self.chat_id,
+            self.agent_id,
+            content[:50],
+        )
 
         for attempt in range(max_retries):
             try:
@@ -122,17 +157,24 @@ class MockTelegramBridge:
                     "content": {
                         "text": content,
                         "senderId": self.chat_id,
+                        "chat_id": self.chat_id,
                         "channel": "telegram",
                     },
                 }
 
-                # Send to tg:{chat_id} so agent's tg:* subscription matches
-                await self.client.send_message(to=f"tg:{self.chat_id}", payload=msg)
+                # Send directly to the assigned agent (not to tg:* broadcast)
+                assert self.client is not None
+                await self.client.send_message(to=self.agent_id, payload=msg)
 
-                logger.info("mock.bridge.sent attempt={}/{} chat_id={}", attempt + 1, max_retries, self.chat_id)
+                logger.info(
+                    "mock.bridge.sent attempt={}/{} chat_id={}",
+                    attempt + 1,
+                    max_retries,
+                    self.chat_id,
+                )
                 return True
 
-            except Exception as e:
+            except Exception:
                 logger.exception("mock.bridge.send_error attempt={}/{}", attempt + 1, max_retries)
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2**attempt)
@@ -156,26 +198,24 @@ class MockTelegramBridge:
         logger.error("mock.bridge.response_timeout chat_id={}", self.chat_id)
         return None
 
-    async def _handle_response(self, topic: str, payload: dict) -> None:
-        """Handle incoming response from agent."""
-        msg_type = payload.get("type", "")
+    async def _handle_spawn_response(self, payload: dict[str, Any]) -> None:
+        """Handle spawn result response."""
+        content = payload.get("content", {})
+        if content.get("success"):
+            self.agent_id = content.get("client_id")
+            logger.info("mock.bridge.spawn_response_received agent={}", self.agent_id)
+        else:
+            logger.error("mock.bridge.spawn_failed_response error={}", content.get("error", "unknown"))
+        self.spawn_event.set()
 
-        if msg_type == "spawn_result":
-            content = payload.get("content", {})
-            if content.get("success"):
-                self.agent_id = content.get("client_id")
-                logger.info("mock.bridge.spawn_response_received agent={}", self.agent_id)
-            else:
-                logger.error("mock.bridge.spawn_failed_response error={}", content.get("error", "unknown"))
-            self.spawn_event.set()
-
-        elif msg_type == "tg_reply":
-            self.responses.append(payload)
-            logger.info(
-                "mock.bridge.response_received chat_id={} content_len={}",
-                self.chat_id,
-                len(payload.get("content", {}).get("text", "")),
-            )
+    async def _handle_tg_reply(self, payload: dict[str, Any]) -> None:
+        """Handle tg_reply from agent."""
+        self.responses.append(payload)
+        logger.info(
+            "mock.bridge.response_received chat_id={} content_len={}",
+            self.chat_id,
+            len(payload.get("content", {}).get("text", "")),
+        )
 
 
 async def run_e2e_test() -> bool:

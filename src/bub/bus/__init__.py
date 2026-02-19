@@ -12,6 +12,7 @@ from bub.bus.bus import (
 from bub.bus.log import ActivityLogWriter
 from bub.bus.protocol import (
     AgentBusClientApi,
+    AgentBusClientCallbacks,
     AgentBusServerApi,
     InitializeParams,
     InitializeResult,
@@ -33,7 +34,9 @@ from bub.bus.protocol import (
 from bub.bus.types import (
     Address,
     ClientId,
+    Closable,
     ConnectionId,
+    Listener,
     MessageHandler,
     MessagePayload,
     TestMessage,
@@ -48,6 +51,7 @@ __all__ = [
     "WebSocketTransport",
     # Protocol API
     "AgentBusClientApi",
+    "AgentBusClientCallbacks",
     "AgentBusServerApi",
     "InitializeParams",
     "InitializeResult",
@@ -68,7 +72,9 @@ __all__ = [
     # Types and protocols
     "Address",
     "ClientId",
+    "Closable",
     "ConnectionId",
+    "Listener",
     "MessageHandler",
     "MessagePayload",
     "TestMessage",

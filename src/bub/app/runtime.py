@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib
-import os
 import signal
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import suppress
 from hashlib import md5
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -21,7 +18,7 @@ from republic import LLM
 
 from bub.app.jobstore import JSONJobStore
 from bub.app.types import Session, TapeStore
-from bub.config.settings import AgentSettings, BusSettings, TapeSettings
+from bub.config.settings import AgentSettings, TapeSettings
 from bub.core import AgentLoop, InputRouter, LoopResult, ModelRunner
 from bub.integrations.republic_client import build_llm, read_workspace_agents_prompt
 from bub.skills import SkillMetadata, discover_skills, load_skill_body
@@ -31,7 +28,6 @@ from bub.tools.builtin import register_builtin_tools
 
 if TYPE_CHECKING:
     from bub.channels.manager import ChannelManager
-    from bub.bub_types import MessageBus
 
 
 def _session_slug(session_id: str) -> str:
@@ -48,60 +44,23 @@ class SessionRuntime:
         tape: TapeService,
         model_runner: ModelRunner,
         tool_view: ProgressiveToolView,
-        bus: MessageBus,
     ) -> None:
         self.session_id = session_id
         self.loop = loop
         self.tape = tape
         self.model_runner = model_runner
         self.tool_view = tool_view
-        self._bus = bus
 
     async def handle_input(self, text: str) -> LoopResult:
-        return await self.loop.handle_input(text)
+        logger.info("session.handle_input.start session_id={}", self.session_id)
+        result = await self.loop.handle_input(text)
+        logger.info("session.handle_input.complete session_id={}", self.session_id)
+        return result
 
     def reset_context(self) -> None:
         """Clear volatile in-memory context while keeping the same session identity."""
         self.model_runner.reset_context()
         self.tool_view.reset()
-
-    async def run_loop(self) -> None:
-        """Run the session loop indefinitely with proper lifecycle management."""
-        await self._start()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            await self._stop()
-
-    async def _start(self) -> None:
-        """Start the session: connect to bus and start listening."""
-        await self.loop.start()
-        logger.info("session.start session_id={}", self.session_id)
-
-    async def _stop(self) -> None:
-        """Stop the session: stop listening and disconnect from bus."""
-        await self.loop.stop()
-        logger.info("session.stop session_id={}", self.session_id)
-
-
-def reset_session_context(sessions: Mapping[str, Session], session_id: str) -> None:
-    """Reset volatile context for an already-created session."""
-    session = sessions.get(session_id)
-    if session is None:
-        return
-    session.reset_context()
-
-
-async def cancel_active_inputs(active_inputs: set[asyncio.Task[None]]) -> int:
-    """Cancel all in-flight input tasks and return canceled count."""
-    count = 0
-    while active_inputs:
-        task = active_inputs.pop()
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-        count += 1
-    return count
 
 
 class AgentRuntime:
@@ -112,7 +71,6 @@ class AgentRuntime:
         workspace: Path,
         agent_settings: AgentSettings,
         tape_store: TapeStore,
-        bus: MessageBus | None = None,
         *,
         allowed_tools: set[str] | None = None,
         allowed_skills: set[str] | None = None,
@@ -121,15 +79,12 @@ class AgentRuntime:
         scheduler: BaseScheduler | None = None,
         llm: LLM | None = None,
     ) -> None:
-        if bus is None:
-            raise ValueError("bus is required for AgentRuntime")
         self.workspace = workspace.resolve()
         self._agent_settings = agent_settings
         self._allowed_skills = _normalize_name_set(allowed_skills)
         self._allowed_tools = _normalize_name_set(allowed_tools)
         self._store = tape_store
         self.workspace_prompt = workspace_prompt or read_workspace_agents_prompt(self.workspace)
-        self.bus = bus
         self._tape_settings = tape_settings or TapeSettings()
         self.scheduler = scheduler or self._default_scheduler()
         self._llm = llm or build_llm(agent_settings, self._store)
@@ -155,10 +110,6 @@ class AgentRuntime:
         return self._agent_settings
 
     @property
-    def bus_settings(self) -> BusSettings | None:
-        return None
-
-    @property
     def tape_settings(self) -> TapeSettings:
         return self._tape_settings
 
@@ -178,10 +129,14 @@ class AgentRuntime:
         if existing is not None:
             return existing
 
+        logger.info("runtime.get_session.creating_tape session_id={}", session_id)
         tape_name = f"{self._tape_settings.tape_name}:{_session_slug(session_id)}"
         tape = TapeService(self._llm, tape_name, store=self._store)
+        logger.info("runtime.get_session.tape_created session_id={}", session_id)
         tape.ensure_bootstrap_anchor()
+        logger.info("runtime.get_session.handoff_done session_id={}", session_id)
 
+        logger.info("runtime.get_session.registering_tools session_id={}", session_id)
         registry = ToolRegistry(self._allowed_tools)
         register_builtin_tools(
             registry,
@@ -190,8 +145,17 @@ class AgentRuntime:
             runtime=self,
             session_id=session_id,
         )
+        logger.info("runtime.get_session.tools_registered session_id={}", session_id)
+
+        logger.info("runtime.get_session.creating_tool_view session_id={}", session_id)
         tool_view = ProgressiveToolView(registry)
+        logger.info("runtime.get_session.tool_view_created session_id={}", session_id)
+
+        logger.info("runtime.get_session.creating_router session_id={}", session_id)
         router = InputRouter(registry, tool_view, tape, self.workspace)
+        logger.info("runtime.get_session.router_created session_id={}", session_id)
+
+        logger.info("runtime.get_session.creating_model_runner session_id={}", session_id)
         runner = ModelRunner(
             tape=tape,
             router=router,
@@ -206,24 +170,37 @@ class AgentRuntime:
             base_system_prompt=self._agent_settings.system_prompt,
             get_workspace_system_prompt=lambda: self.workspace_prompt,
         )
-        loop = AgentLoop(router=router, model_runner=runner, tape=tape, session_id=session_id, bus=self.bus)
+        logger.info("runtime.get_session.model_runner_created session_id={}", session_id)
+
+        logger.info("runtime.get_session.creating_loop session_id={}", session_id)
+        loop = AgentLoop(router=router, model_runner=runner, tape=tape, session_id=session_id)
+        logger.info("runtime.get_session.loop_created session_id={}", session_id)
+
+        logger.info("runtime.get_session.creating_session_runtime session_id={}", session_id)
         runtime = SessionRuntime(
             session_id=session_id,
             loop=loop,
             tape=tape,
             model_runner=runner,
             tool_view=tool_view,
-            bus=self.bus,
         )
+        logger.info("runtime.get_session.session_runtime_created session_id={}", session_id)
+
         self._sessions[session_id] = runtime
+        logger.info("runtime.get_session.complete session_id={}", session_id)
         return runtime
 
     async def handle_input(self, session_id: str, text: str) -> LoopResult:
+        logger.info("runtime.handle_input.start session_id={}", session_id)
         session = self.get_session(session_id)
+        logger.info("runtime.handle_input.got_session session_id={}", session_id)
         task = asyncio.create_task(session.handle_input(text))
         self._active_inputs.add(task)
+        logger.info("runtime.handle_input.task_created session_id={}", session_id)
         try:
-            return await task
+            result = await task
+            logger.info("runtime.handle_input.complete session_id={}", session_id)
+            return result
         finally:
             self._active_inputs.discard(task)
 
@@ -247,50 +224,46 @@ class AgentRuntime:
 
     @contextlib.asynccontextmanager
     async def graceful_shutdown(self) -> AsyncGenerator[asyncio.Event, None]:
-        """Run the runtime indefinitely with graceful shutdown."""
-        stop_event = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        handled_signals: list[signal.Signals] = []
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, stop_event.set)
-                handled_signals.append(sig)
-            except (NotImplementedError, RuntimeError):
-                continue
-        current_task = asyncio.current_task()
-        future = asyncio.ensure_future(stop_event.wait())
-        future.add_done_callback(lambda _, task=current_task: task and task.cancel())  # type: ignore[misc]
-        try:
-            yield stop_event
-        finally:
-            future.cancel()
-            cancelled = await self._cancel_active_inputs()
-            if cancelled:
-                logger.info("runtime.cancel_inflight count={}", cancelled)
-            for sig in handled_signals:
-                with suppress(NotImplementedError, RuntimeError):
-                    loop.remove_signal_handler(sig)
+        """Async context manager for graceful shutdown.
 
-    def install_hooks(self, channel_manager: ChannelManager) -> None:
-        """Install hooks for cross-cutting concerns like channel integration."""
-        hooks_module_str = os.getenv("BUB_HOOKS_MODULE")
-        if not hooks_module_str:
-            return
+        Cancels active input tasks and yields an event for shutdown coordination.
+        Usage:
+            async with runtime.graceful_shutdown() as shutdown_event:
+                # ... do work ...
+                shutdown_event.set()  # Signal shutdown complete
+        """
+        canceled = await self._cancel_active_inputs()
+        logger.info("runtime.graceful_shutdown canceled={} tasks", canceled)
+
+        shutdown_event = asyncio.Event()
         try:
-            module = importlib.import_module(hooks_module_str)
-        except ImportError as e:
-            raise ImportError(f"Failed to import hooks module '{hooks_module_str}'") from e
-        if not hasattr(module, "install"):
-            raise AttributeError(f"Hooks module '{hooks_module_str}' does not have an 'install' function")
-        hooks_context = SimpleNamespace(
-            runtime=self,
-            register_channel=channel_manager.register,
-            default_channels=channel_manager.default_channels,
-        )
-        module.install(hooks_context)
+            yield shutdown_event
+        finally:
+            if not shutdown_event.is_set():
+                shutdown_event.set()
+
+    async def sigterm_handler(self, signal_num: int) -> None:
+        """Handle SIGTERM by initiating graceful shutdown."""
+        logger.info("runtime.sigterm received signal={}", signal_num)
+        asyncio.get_event_loop().stop()
+
+    def setup_signal_handlers(self) -> None:
+        """Register signal handlers for graceful shutdown."""
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.sigterm_handler(s)))
 
 
 def _normalize_name_set(values: set[str] | None) -> set[str] | None:
+    """Normalize a set of names to lowercase for case-insensitive comparison."""
     if values is None:
         return None
-    return {v.casefold().strip() for v in values}
+    return {v.casefold() for v in values}
+
+
+def reset_session_context(sessions: Mapping[str, Session], session_id: str) -> None:
+    """Reset volatile context for an already-created session."""
+    session = sessions.get(session_id)
+    if session is None:
+        return
+    session.reset_context()
