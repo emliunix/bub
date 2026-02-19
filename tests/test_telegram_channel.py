@@ -15,9 +15,15 @@ class _Settings:
         self.telegram_proxy: str | None = None
 
 
+class _MockBus:
+    async def send_message(self, *, to: str, payload: dict) -> None:
+        pass
+
+
 class _Runtime:
     def __init__(self) -> None:
         self.settings = _Settings()
+        self.bus = _MockBus()
 
 
 class DummyMessage:
@@ -43,7 +49,7 @@ async def test_on_text_denies_chat_not_in_allowlist() -> None:
         allow_chats=set(runtime.settings.telegram_allow_chats),
         proxy=runtime.settings.telegram_proxy,
     )
-    channel = TelegramChannel(runtime, config)  # type: ignore[arg-type]
+    channel = TelegramChannel(runtime.bus, config)  # type: ignore[arg-type]
 
     message = DummyMessage(chat_id=999, text="hello")
     update = SimpleNamespace(
@@ -67,7 +73,7 @@ async def test_on_text_invokes_receive_handler_for_allowed_message() -> None:
         allow_chats=set(runtime.settings.telegram_allow_chats),
         proxy=runtime.settings.telegram_proxy,
     )
-    channel = TelegramChannel(runtime, config)  # type: ignore[arg-type]
+    channel = TelegramChannel(runtime.bus, config)  # type: ignore[arg-type]
 
     message = DummyMessage(chat_id=999, text="hello")
     update = SimpleNamespace(
@@ -109,7 +115,7 @@ async def test_on_text_always_stops_typing() -> None:
         allow_chats=set(runtime.settings.telegram_allow_chats),
         proxy=runtime.settings.telegram_proxy,
     )
-    channel = TelegramChannel(runtime, config)  # type: ignore[arg-type]
+    channel = TelegramChannel(runtime.bus, config)  # type: ignore[arg-type]
 
     message = DummyMessage(chat_id=999, text="hello")
     update = SimpleNamespace(

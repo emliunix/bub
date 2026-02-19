@@ -114,11 +114,23 @@ class TestDeadlockScenarios:
                 to="client:test",
                 payload={"type": "response", "content": {"text": "response from handler"}},
             )
-            return {"success": True, "message": "processed"}
+            return {
+                "success": True,
+                "message": "processed",
+                "shouldRetry": False,
+                "retrySeconds": 0,
+                "payload": {},
+            }
 
         async def client_handler(params: dict[str, object]) -> dict[str, object]:
             response_received.set()
-            return {"success": True, "message": "received"}
+            return {
+                "success": True,
+                "message": "received",
+                "shouldRetry": False,
+                "retrySeconds": 0,
+                "payload": {},
+            }
 
         server_framework.register_method("processMessage", server_handler)
         client_framework.register_method("processMessage", client_handler)
@@ -231,7 +243,7 @@ class TestServerProtocol:
     @pytest.mark.asyncio
     async def test_address_matching(self):
         """Test address pattern matching logic."""
-        server = AgentBusServer(server=("localhost", 0))
+        server = AgentBusServer.create(server=("localhost", 0))
 
         # Test exact match
         assert server.address_matches("agent:worker-1", "agent:worker-1") is True

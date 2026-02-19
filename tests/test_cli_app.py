@@ -121,7 +121,7 @@ def test_message_command_requires_valid_subcommand_name(monkeypatch, tmp_path: P
     runner = CliRunner()
     result = runner.invoke(cli_app_module.app, ["telegram", "--workspace", str(tmp_path)])
     assert result.exit_code != 0
-    assert "No such command 'telegram'" in result.output
+    assert "Telegram command temporarily disabled" in result.output
 
 
 def test_run_command_forwards_allowed_tools_and_skills(monkeypatch, tmp_path: Path) -> None:
