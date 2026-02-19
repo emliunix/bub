@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,38 +14,43 @@ class _Settings:
     discord_enabled = False
 
 
+class _MockBus:
+    async def send_message(self, *, to: str, payload: dict) -> None:
+        pass
+
+
 class _Runtime:
     settings = _Settings()
+
+    @contextlib.asynccontextmanager
+    async def graceful_shutdown(self):
+        stop_event = asyncio.Event()
+        yield stop_event
 
 
 class _ChannelRaisesOnStop(BaseChannel):
     name = "bad"
 
-    async def start(self, on_receive):  # type: ignore[override]
-        _ = on_receive
-        try:
-            await asyncio.Event().wait()
-        finally:
-            raise RuntimeError("stop failure")
+    async def start(self) -> None:
+        pass
 
-    async def get_session_prompt(self, message: object) -> tuple[str, str]:
+    async def stop(self) -> None:
+        raise RuntimeError("stop failure")
+
+    async def send(self, message) -> None:
         _ = message
-        return "s", "p"
-
-    async def process_output(self, session_id: str, output):
-        _ = (session_id, output)
 
 
 @pytest.mark.asyncio
 async def test_channel_manager_shutdown_propagates_channel_stop_error() -> None:
-    manager = ChannelManager(_Runtime())  # type: ignore[arg-type]
-    manager.register(_ChannelRaisesOnStop)
+    manager = ChannelManager(_MockBus(), _Runtime())  # type: ignore[arg-type]
+    bad_channel = _ChannelRaisesOnStop(_MockBus())
+    manager.register(bad_channel)
 
-    task = asyncio.create_task(manager.run())
-    await asyncio.sleep(0.05)
-    task.cancel()
+    await manager.start()
+    # Stop should raise RuntimeError
     with pytest.raises(RuntimeError, match="stop failure"):
-        await asyncio.wait_for(task, timeout=1.0)
+        await manager.stop()
 
 
 @pytest.mark.asyncio
@@ -67,15 +73,17 @@ async def test_serve_channels_handles_cancelled_error_from_graceful_shutdown() -
             self.runtime = _DummyRuntime()
             self.calls: list[str] = []
 
-        async def run(self) -> None:
+        async def start(self) -> None:
             self.calls.append("start")
-            try:
-                await asyncio.Event().wait()
-            finally:
-                self.calls.append("stop")
+
+        async def stop(self) -> None:
+            self.calls.append("stop")
+
+        def enabled_channels(self):
+            return []
 
     manager = _DummyManager()
-    task = asyncio.create_task(_serve_channels(manager))
+    task = asyncio.create_task(_serve_channels(manager))  # type: ignore[arg-type]
     await asyncio.sleep(0.05)
     assert manager.calls == ["start"]
     manager.runtime.stop_event.set()
