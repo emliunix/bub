@@ -27,7 +27,7 @@ from bub.tools import ProgressiveToolView, ToolRegistry
 from bub.tools.builtin import register_builtin_tools
 
 if TYPE_CHECKING:
-    from bub.channels.manager import ChannelManager
+    pass
 
 
 def _session_slug(session_id: str) -> str:
@@ -267,3 +267,15 @@ def reset_session_context(sessions: Mapping[str, Session], session_id: str) -> N
     if session is None:
         return
     session.reset_context()
+
+
+async def cancel_active_inputs(active_inputs: set[asyncio.Task[Any]]) -> int:
+    """Cancel all in-flight input tasks and return canceled count."""
+    count = 0
+    while active_inputs:
+        task = active_inputs.pop()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        count += 1
+    return count
