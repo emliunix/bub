@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Awaitable, Protocol, cast
+from typing import Any, Protocol, cast
 
 import websockets
 import websockets.asyncio.client
@@ -26,6 +26,10 @@ from bub.bus.protocol import (
     AgentBusClientApi,
     AgentBusClientCallbacks,
     AgentBusServerApi,
+    ClientInfo,
+    ConnectionInfo,
+    GetStatusParams,
+    GetStatusResult,
     InitializeParams,
     InitializeResult,
     MessageAck,
@@ -129,6 +133,7 @@ class AgentConnection:
         self._api = api
         self._initialized = False
         self._client_id: str | None = None
+        self._client_info: ClientInfo | None = None
         self._subscriptions: set[str] = set()
 
     @property
@@ -151,11 +156,17 @@ class AgentConnection:
         """Set of address patterns this peer is subscribed to."""
         return self._subscriptions
 
+    @property
+    def client_info(self) -> ClientInfo | None:
+        """Client info from initialization."""
+        return self._client_info
+
     async def handle_initialize(self, params: InitializeParams) -> InitializeResult:
         """Handle initialize request."""
         if self._initialized:
             raise JSONRPCErrorException(-32001, "Already initialized")
         self._client_id = params.client_id
+        self._client_info = params.client_info
         self._initialized = True
 
         server_info = ServerInfo(name="bub-bus", version="0.2.0")
@@ -244,6 +255,11 @@ class AgentConnection:
             message_id=params.message_id,
             acks=acks,
         )
+
+    async def handle_get_status(self, params: GetStatusParams) -> GetStatusResult:
+        """Handle get status request - delegate to server."""
+        self._check_initialized()
+        return await self._server.handle_get_status(params)
 
     async def process_message(self, from_addr: str, to: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Process an incoming message from the bus.
@@ -487,7 +503,7 @@ class AgentBusServer:
                 payload=payload,
             )
             return result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await self._activity_log.log(
                 event="process_finish",
                 message_id=message_id,
@@ -530,6 +546,25 @@ class AgentBusServer:
                 retry_seconds=0,
                 payload={"error": str(exc)},
             )
+
+    async def handle_get_status(self, params: GetStatusParams) -> GetStatusResult:
+        """Handle getStatus request - return server status and connections."""
+        connections = []
+        async with self._connections_lock:
+            for conn in self._connections.values():
+                if conn.is_initialized:
+                    connections.append(
+                        ConnectionInfo(
+                            client_id=conn.client_id or "unknown",
+                            connection_id=conn.connection_id,
+                            subscriptions=list(conn.subscriptions),
+                            client_info=conn.client_info,
+                        )
+                    )
+        return GetStatusResult(
+            server_id=self._server_id,
+            connections=connections,
+        )
 
 
 class ReconnectableTransport:

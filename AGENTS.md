@@ -43,6 +43,30 @@ Unless explicitly asked:
 - Don’t run tests, scripts, linters, deployments, or “health check” commands.
 - If verification is needed, propose minimal commands and wait.
 
+### System Components: Use Deployment Scripts
+
+**Always use deployment scripts** to manage bus and agents, even during development and testing.
+
+**Why:**
+- Ensures journalctl log aggregation (centralized debugging)
+- Proper systemd process management and auto-restart
+- Consistent configuration across dev/prod environments
+
+**Correct:**
+```bash
+./scripts/deploy-production.sh start bus          # Start bus
+./scripts/deploy-production.sh logs bus           # View logs via journalctl
+./scripts/deploy-production.sh status bus         # Check status
+./scripts/deploy-production.sh stop bus           # Stop cleanly
+```
+
+**Wrong:**
+```bash
+uv run bub bus serve          # Bypasses deployment, no journalctl logs
+```
+
+**Exception:** One-shot CLI commands (like `bub bus status`) that connect to an already-running bus are fine to run directly.
+
 ## Subagent Workflow
 
 When working on complex multi-step tasks, use subagents to split work into independent threads (e.g., protocol types + implementation + caller updates).

@@ -139,76 +139,58 @@ async def _send_and_listen(
             await client.disconnect()
 
 
-@bus_app.command("recv")
-def bus_recv(
-    address: Annotated[str | None, typer.Argument(help="Address pattern to subscribe (e.g., 'tg:*')")] = None,
+@bus_app.command("status")
+def bus_status(
     bus_url: Annotated[str | None, typer.Option("--bus-url", "-u", envvar="BUB_BUS_URL", help="Bus URL")] = None,
-    to: Annotated[
-        list[str] | None,
-        typer.Option("--to", "-t", help="Address pattern(s) to subscribe to (can be used multiple times)"),
-    ] = None,
 ) -> None:
-    """Subscribe to topic(s) and print messages until Ctrl-C.
-
-    Examples:
-        bub bus recv "tg:*"                    # Single address
-        bub bus recv --to "tg:*" --to "*"     # Multiple addresses
-        bub bus recv "*"                       # Wildcard (all messages)
-    """
+    """Query bus status - show connected clients and subscriptions."""
     configure_logging(profile="chat")
     url = bus_url or _resolve_bus_url()
-
-    # Build address list from positional arg and --to options
-    addresses: list[str] = []
-    if address:
-        addresses.append(address)
-    if to:
-        addresses.extend(to)
-
-    # Default if no addresses specified
-    if not addresses:
-        addresses = ["tg:*"]
-
-    asyncio.run(_recv_multi(url, addresses))
+    asyncio.run(_get_status(url))
 
 
-async def _recv_multi(url: str, addresses: list[str]) -> None:
+async def _get_status(url: str) -> None:
     client: AgentBusClient | None = None
-    received_count = 0
 
     class Callbacks(AgentBusClientCallbacks):
         async def process_message(self, params: ProcessMessageParams) -> ProcessMessageResult:
-            nonlocal received_count
-            received_count += 1
-            import json
-
-            typer.echo(f"\n{'=' * 70}")
-            typer.echo(f"[{received_count}] To: {params.to}")
-            typer.echo(f"From: {params.from_}")
-            typer.echo(f"Payload:")
-            typer.echo(json.dumps(params.payload, indent=2, ensure_ascii=False))
-            typer.echo(f"{'=' * 70}")
             return ProcessMessageResult(
                 success=True, message="Received", should_retry=False, retry_seconds=0, payload={}
             )
 
     try:
         client = await AgentBusClient.connect(url, Callbacks())
-        # Framework.run() already started by connect()
+        await client.initialize("bus-status-client")
 
-        await client.initialize("bus-recv")
+        # Call getStatus via the API
+        result = await client._api._framework.send_request("getStatus", {})
 
-        for addr in addresses:
-            await client.subscribe(addr)
+        # Pretty print results
+        typer.echo(f"\n{'=' * 70}")
+        typer.echo(f"Bus Server: {result.get('serverId', 'unknown')}")
+        typer.echo(f"{'=' * 70}")
 
-        typer.echo(f"Connected to {url}")
-        typer.echo(f"Subscribed to: {', '.join(addresses)}")
-        typer.echo("Waiting for messages... (Ctrl+C to stop)")
+        connections: list[dict[str, object]] = result.get("connections", [])  # type: ignore[assignment]
+        if not connections:
+            typer.echo("No active connections.")
+        else:
+            typer.echo(f"\nConnected Clients: {len(connections)}")
+            typer.echo("-" * 70)
 
-        try:
-            await _wait_forever()
-        except KeyboardInterrupt:
-            typer.echo("\nInterrupted.")
+            for conn in connections:
+                typer.echo(f"\nClient ID: {conn.get('clientId', 'unknown')}")
+                typer.echo(f"  Connection ID: {conn.get('connectionId', 'unknown')}")
+                subscriptions: list[str] = conn.get("subscriptions", [])  # type: ignore[assignment]
+                if subscriptions:
+                    typer.echo(f"  Subscriptions: {', '.join(subscriptions)}")
+                else:
+                    typer.echo(f"  Subscriptions: (none)")
+                client_info = conn.get("clientInfo")
+                if client_info:
+                    typer.echo(f"  Client Info: {client_info}")
+
+        typer.echo(f"{'=' * 70}")
+
     except (ConnectionRefusedError, OSError) as e:
         typer.echo(f"Cannot connect to bus at {url}: {e}", err=True)
         raise typer.Exit(1) from None
@@ -254,7 +236,6 @@ async def _run_telegram_bridge(  # noqa: C901
 
     from telegram import Bot, Update
     from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
-
 
     bot_instance: Bot | None = None
     client: AgentBusClient | None = None

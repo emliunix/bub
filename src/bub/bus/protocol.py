@@ -1,6 +1,6 @@
 """Agent Bus specific protocol types and API methods."""
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -157,6 +157,28 @@ class PingResult(ProtocolModel):
     timestamp: str
 
 
+class ConnectionInfo(ProtocolModel):
+    """Information about a connected client."""
+
+    client_id: str
+    connection_id: str
+    subscriptions: list[str]
+    client_info: ClientInfo | None = None
+
+
+class GetStatusParams(ProtocolModel):
+    """Parameters for the getStatus method."""
+
+    pass
+
+
+class GetStatusResult(ProtocolModel):
+    """Result returned from the getStatus method."""
+
+    server_id: str
+    connections: list[ConnectionInfo]
+
+
 class AgentBusServerCallbacks(Protocol):
     """Callbacks for server request handlers."""
 
@@ -164,6 +186,7 @@ class AgentBusServerCallbacks(Protocol):
     async def handle_subscribe(self, params: SubscribeParams) -> SubscribeResult: ...
     async def handle_unsubscribe(self, params: UnsubscribeParams) -> UnsubscribeResult: ...
     async def handle_ping(self, params: PingParams) -> PingResult: ...
+    async def handle_get_status(self, params: GetStatusParams) -> GetStatusResult: ...
     async def send_message(self, params: SendMessageParams) -> SendMessageResult: ...
 
 
@@ -195,10 +218,16 @@ def register_server_callbacks(framework: JSONRPCFramework, callbacks: AgentBusSe
         result_model = await callbacks.handle_ping(params_model)
         return result_model.model_dump(by_alias=True)
 
+    async def _handle_get_status(params: dict[str, object]) -> dict[str, object]:
+        params_model = GetStatusParams.model_validate(params)
+        result_model = await callbacks.handle_get_status(params_model)
+        return result_model.model_dump(by_alias=True)
+
     framework.register_method("initialize", _handle_initialize)
     framework.register_method("subscribe", _handle_subscribe)
     framework.register_method("unsubscribe", _handle_unsubscribe)
     framework.register_method("ping", _handle_ping)
+    framework.register_method("getStatus", _handle_get_status)
     framework.register_method("sendMessage", _send_message)
 
 
@@ -300,6 +329,9 @@ __all__ = [
     "AgentBusServerApi",
     "AgentBusServerCallbacks",
     "ClientInfo",
+    "ConnectionInfo",
+    "GetStatusParams",
+    "GetStatusResult",
     "InitializeParams",
     "InitializeResult",
     "JsonValue",

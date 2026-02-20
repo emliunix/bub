@@ -11,6 +11,7 @@ This is the only supported protocol. Backward compatibility with earlier protoco
 3. [Transport](#3-transport)
 4. [Connection Lifecycle](#4-connection-lifecycle)
 5. [Methods](#5-methods)
+    - [5.6. getStatus](#56-getstatus)
 6. [Address Conventions](#6-address-conventions)
 7. [Message Envelope](#7-message-envelope)
     - [7.1 Request Envelope (params)](#71-request-envelope-params)
@@ -307,6 +308,57 @@ Rules:
 ## 5.5 ping
 
 Liveness check.
+
+## 5.6 getStatus
+
+Query the bus for internal routing status - returns connected clients and their subscriptions.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "getStatus",
+  "params": {}
+}
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": {
+    "serverId": "bus-abc123",
+    "connections": [
+      {
+        "clientId": "agent:system",
+        "connectionId": "conn-uuid",
+        "subscriptions": ["agent:system", "system:*"],
+        "clientInfo": {
+          "name": "bub",
+          "version": "0.2.0"
+        }
+      }
+    ]
+  }
+}
+```
+
+**Response Fields:**
+- `serverId` (string): The unique bus server identifier
+- `connections` (array): List of active client connections
+  - `clientId` (string): The client's identifier
+  - `connectionId` (string): The connection's unique UUID
+  - `subscriptions` (array): Address patterns the client is subscribed to
+  - `clientInfo` (object | null): Optional client metadata from initialization
+
+Notes:
+- Only initialized connections are included in the response
+- The bus automatically subscribes each client to its own `clientId` upon initialization
+- Useful for debugging routing issues and monitoring bus health
 
 ## 6. Address Conventions
 
