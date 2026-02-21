@@ -18,16 +18,42 @@ At the start of each session:
 
 1. Read this document.
 2. Check the latest entry in `journal/` to understand recent changes and known issues.
-3. Verify project structure (working directory, git status, etc.).
+3. **Check relevant skills** - Read `.agent/skills/skill-management/SKILL.md` first, then domain-specific skills.
+4. Verify project structure (working directory, git status, etc.).
 
 ## Core Principles (Keep These)
 
-### Skill-First
+### Skill-First Checking (Required)
 
-- Keep this file focused on principles, workflows, and conventions.
-- Put detailed “how to run X” procedures in dedicated docs (or skills) so they don’t go stale.
+**Before starting any work**, check relevant skills and read them.
 
-Project skills live under `.agent/skills/` (authoritative procedures).
+**Entry Point**: Start with `.agent/skills/skill-management/SKILL.md` - it catalogs all available skills and provides the skill-first workflow.
+
+**Note:** Skills exist in two locations:
+- **Project skills** (`.agent/skills/`): Project-specific conventions (docs, testing, deployment, etc.)
+- **System skills** (`/home/liu/.claude/skills/`): Global, reusable tools (python-uv, skill-creator, etc.)
+
+**Relevance is defined by:**
+- **Domain**: The topic area (docs, testing, deployment, bus, etc.)
+- **Technology**: Tools/frameworks involved (mkdocs, pytest, systemd, websockets)
+- **File type**: What you're modifying (.md → docs skill, .py tests → testing skill)
+- **Operation**: What you're doing (serving docs → docs skill, deploying → deployment skill)
+
+**Mandate:**
+- If a skill exists for your domain/tech/operation, **you MUST read it first**
+- Skills contain authoritative conventions that prevent errors
+- Skipping skill review leads to rework (e.g., wrong table formatting, invalid mermaid)
+
+**Example:**
+- Writing documentation → Read `.agent/skills/docs/SKILL.md` first
+- Running tests → Read `.agent/skills/testing/SKILL.md` first  
+- Using deployment scripts → Read `.agent/skills/deployment/SKILL.md` first
+- Working with bus CLI → Read `.agent/skills/bus-cli/SKILL.md` first
+
+**To list available skills:**
+```bash
+ls -la .agent/skills/
+```
 
 ### Save Standard, Call by Adapting
 

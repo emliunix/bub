@@ -13,6 +13,7 @@ nav:
   - Architecture:
       - architecture/index.md
       - Components: components.md
+      - Handoff Architecture: handoff-architecture.md
       - Class Hierarchy: architecture/01-class-hierarchy.md
       - Message Flow: architecture/02-message-flow-sequence.md
       - NEW Architecture: architecture/03-new-architecture-direct-coupling.md
