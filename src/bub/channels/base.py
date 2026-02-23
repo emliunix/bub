@@ -10,7 +10,7 @@ from bub.channels.events import InboundMessage, OutboundMessage
 from bub.message.messages import create_tg_message_payload
 
 if TYPE_CHECKING:
-    from bub.bub_types import MessageBus
+    from bub.types import MessageBus
 
 
 class BaseChannel(ABC):

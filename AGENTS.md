@@ -10,7 +10,7 @@ Use these dedicated docs for details:
 - Scripts, testing, debugging: `docs/testing.md`
 - Deployment: `docs/deployment.md`
 
-For the most up-to-date “what changed”, prefer the newest entry in `journal/`.
+For the most up-to-date "what changed", prefer the newest entry in `journal/`.
 
 ## Workflow Warm Up
 
@@ -62,11 +62,11 @@ ls -la .agent/skills/
 
 (See `docs/architecture.md` and `src/bub/llm/adapters.py`.)
 
-### Don’t Autonomously Run Commands
+### Don't Autonomously Run Commands
 
 Unless explicitly asked:
 
-- Don’t run tests, scripts, linters, deployments, or “health check” commands.
+- Don't run tests, scripts, linters, deployments, or "health check" commands.
 - If verification is needed, propose minimal commands and wait.
 
 ### System Components: Use Deployment Scripts
@@ -95,111 +95,139 @@ uv run bub bus serve          # Bypasses deployment, no journalctl logs
 
 ## Subagent Workflow
 
-When working on complex multi-step tasks, use subagents to split work into independent threads (e.g., protocol types + implementation + caller updates).
+When working on complex multi-step tasks, use subagents to split work into dependency-ordered todos. Each subagent starts as a blank slate and receives a curated "context closure" containing everything it needs to work independently.
 
-### Overview
+### What (The Pattern)
 
-1. **Plan**: Break down the task into concrete todo items.
-2. **Spawn**: Create subagents for each todo item with complete context.
-3. **Wait**: Wait for each subagent to complete and report results.
-4. **Update**: Adjust plan based on results.
-5. **Repeat**: Continue with next todo item.
+A sequential workflow where:
+- Todos are structured as a dependency chain (DAG)
+- Each subagent receives a complete yet bounded context closure
+- Parent agent orchestrates, maintains state, and adjusts the plan as facts unfold
+- Results flow forward to enrich context for subsequent tasks
 
-### Step-by-Step Process
+### How (The Mechanics)
 
-#### 1. Plan the Task
+#### 1. Plan with Dependencies
 
-Create a todo list with specific, actionable items:
+Structure todos as a directed acyclic graph where each task builds on previous results:
 
 ```python
-# Example todo list for debugging
+# Example: Todos with explicit dependencies
 [
-    {"content": "Create minimal reproducible script", "status": "in_progress", "priority": "high"},
-    {"content": "Run script to identify root cause", "status": "pending", "priority": "high"},
-    {"content": "Fix identified issue", "status": "pending", "priority": "high"},
-    {"content": "Verify fix with end-to-end test", "status": "pending", "priority": "medium"},
+    {"content": "1. Design schema for user API", "status": "in_progress", "priority": "high"},
+    {"content": "2. Implement API endpoints (depends on #1)", "status": "pending", "priority": "high"},
+    {"content": "3. Add validation middleware (depends on #2)", "status": "pending", "priority": "high"},
+    {"content": "4. Write tests for endpoints (depends on #2)", "status": "pending", "priority": "medium"},
 ]
 ```
 
-#### 2. Spawn a Subagent
+**Key**: Dependencies are structural. Task 2 cannot succeed without Task 1's output.
 
-For each todo item, spawn a subagent with:
+#### 2. Prepare Context Closure
 
-**Required Context**:
+Before spawning each subagent, curate a context closure—relevant information that is complete yet bounded (like a mathematical closure):
 
-- Complete background information
-- What has been done so far
-- What the current issue is
-- Relevant file paths
-- Any error messages or logs
+**Include in the closure**:
+- Project structure overview (key directories, conventions)
+- Relevant documentation paths
+- Accumulated decisions and findings from previous subagents
+- Error patterns or constraints discovered
+- Specific files/code relevant to the current task
 
-**Clear Goal**:
+**Context Overflow Strategy**:
+When accumulated findings grow too large for a prompt (>2-3 paragraphs of dense context):
+1. Save to a working document: `docs/working/<task-name>-context.md`
+2. Pass to subagent: `See full context in docs/working/api-impl-context.md - includes schema decisions from #1 and error patterns discovered`
+3. Include only the most critical 2-3 facts inline
 
-- Specific task to accomplish
-- Expected outcome
+#### 3. Spawn Subagent
 
-**Expected Result Format**:
-
-- What should be reported back
-- File paths of created/modified files
-- Test results (only if explicitly asked to run tests)
-- Any issues encountered
-
-**Prompt Template**:
+Spawn with the context closure + specific task + constraints:
 
 ```
 You are a subagent working on <topic>.
 
-Context:
-- <what’s happening>
+Project Context:
+- Repository: Python project using FastAPI in src/api/
+- Key files: src/api/models.py, src/api/routes.py
+- Conventions: Follow existing patterns in routes.py
 
-Task:
-1) <step>
-2) <step>
+Accumulated Findings:
+- Schema decision (from #1): Using Pydantic v2 with camelCase aliases
+- Discovered constraint: Must support both JSON and form data
+- Error pattern: Previous attempt failed due to missing validation
 
-Expected result:
-- <what to report back>
+Current Task:
+Implement POST /users endpoint following the schema from docs/working/schema-context.md
+
+Expected Result:
+- Modified src/api/routes.py with new endpoint
+- Validation logic matching schema spec
+- Report any deviations needed from the schema
 
 Constraints:
-- Do NOT spawn more subagents.
-- Do not run commands unless asked.
+- Do NOT spawn more subagents
+- Do not run tests unless explicitly asked
+- Report blockers immediately rather than guessing
 ```
 
-#### 3. Wait and Review
+#### 4. Review & Adjust
 
-Wait for the subagent to complete and review the results:
+After each subagent completes:
 
-- Check if task was completed successfully.
-- Review findings and verify constraints were followed.
-- If results reveal new unknowns, update the plan rather than patching blindly.
+1. **Mark todo complete** and capture key findings
+2. **Adjust dependent todos** based on discoveries:
+   - If Task 1 revealed the schema needs changes → update Task 2's description
+   - If new constraints emerged → add them to subsequent todos
+   - If unexpected issues found → insert new todos or reprioritize
+3. **Enrich the context closure** with new facts for the next subagent
 
-#### 4. Update the Plan
+**Example adjustment**:
+```python
+# Before
+{"content": "2. Implement API endpoints (depends on #1)", ...}
 
-Based on subagent results:
-
-- Mark completed todos as completed.
-- Add new todos if issues were discovered.
-- Update todo descriptions based on findings.
+# After discovering auth requirement in #1
+{"content": "2. Implement API endpoints with JWT auth (depends on #1)", ...}
+```
 
 #### 5. Repeat
 
-Continue with the next todo item until all tasks are complete.
+Pass the enriched context closure to the next subagent. Continue until all todos complete.
+
+### Why (The Rationale)
+
+**Subagents are tabula rasa**: Each subagent starts with zero knowledge of your project structure, conventions, or previous decisions. Without adequate context, they will:
+- Waste time exploring the codebase
+- Make incorrect assumptions
+- Produce work that doesn't integrate with existing code
+
+**Dependencies are structural**: In multi-file changes, later tasks literally cannot begin until earlier tasks produce their outputs. Sequential execution respects these constraints.
+
+**Plans are provisional hypotheses**: Each subagent execution reveals new facts—unexpected constraints, better approaches, hidden dependencies. Rigid plans fail; dynamic replanning succeeds.
+
+**Context must be a closure**: Too little context → confusion and wrong turns. Too much context → noise and token waste. Curate what's relevant and sufficient for the specific task at hand.
+
+**Overflow happens naturally**: Complex investigations generate more context than fits in a prompt. The filesystem is the right place for large context; prompts should reference it with curated highlights.
 
 ### Subagent Constraints
 
 Subagents must not:
 
-- Spawn additional subagents.
-- Create/modify the main plan/todo list.
-- Make architectural decisions without reporting back.
+- Spawn additional subagents
+- Create/modify the main plan/todo list
+- Make architectural decisions without reporting back
+- Run commands unless explicitly asked
 
 ### Best Practices
 
-- Keep scope tight: one todo item should be completable in one subagent session.
-- Provide complete context: subagents don’t have prior conversation state.
-- Define success criteria: what to change, where, and how to verify.
-- Prefer reporting blockers over guessing when architecture decisions are unclear.
-- Write down findings: update today’s journal entry with decisions and outcomes.
+- **Keep scope tight**: One todo item should be completable in one subagent session (15-30 min of focused work)
+- **Curate context like a closure**: Include what's relevant and sufficient—not everything, not nothing
+- **Use overflow strategy**: When context grows large, save to `docs/working/` and pass the path
+- **Define success criteria**: What to change, where, and how to verify
+- **Prefer reporting blockers**: When architecture decisions are unclear, report back rather than guess
+- **Write down findings**: Update today's journal entry with decisions, deviations, and outcomes
+- **Pass findings forward**: Each subagent's results become part of the next subagent's context closure
 
 ## Repository Layout (Short)
 
@@ -447,4 +475,3 @@ Keep entries brief and structured; include:
 - Decisions made (especially protocol/schema choices)
 - Tests or verification performed (only if explicitly run)
 - Follow-ups / TODOs
-

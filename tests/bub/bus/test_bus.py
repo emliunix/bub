@@ -8,84 +8,153 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from bub.bus import AgentBusServer
+from bub.bus.bus import AgentBusClient
+from bub.bus.log import ActivityLogWriter
 from bub.bus.protocol import (
     AgentBusClientApi,
     AgentBusServerApi,
     InitializeParams,
     ProcessMessageParams,
+    ProcessMessageResult,
     SubscribeParams,
 )
 from bub.rpc.framework import JSONRPCFramework
-from .test_transport import MockPeer
+from .test_transport import MockListener, TestClientCallbacks
+
+
+@pytest.fixture
+def make_test_payload():
+    """Factory fixture for creating test message payloads."""
+
+    def _make(content: dict[str, Any] | None = None, from_addr: str = "test:sender") -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "messageId": f"msg_{uuid.uuid4().hex[:8]}",
+            "type": "tg_message",
+            "from": from_addr,
+            "timestamp": "2026-02-19T00:00:00Z",
+        }
+        if content:
+            base["content"] = content
+        return base
+
+    return _make
 
 
 class TestMessageFlow:
     """Test basic message flow scenarios."""
 
     @pytest.mark.asyncio
-    async def test_simple_flow_a_to_b(self):
+    async def test_simple_flow_a_to_b(self, make_test_payload):
         """Test: a sends message to b, b receives it."""
-        peer_a = MockPeer("client:a")
-        peer_b = MockPeer("client:b")
-        peer_b.subscribe("b:*")
+        listener = MockListener()
+        server = AgentBusServer(
+            listener, ActivityLogWriter(Path("/tmp/test_bus_" + str(uuid.uuid4())[:8] + ".sqlite3"))
+        )
+        server_task = asyncio.create_task(server.start_server())
 
-        received = []
+        try:
+            await asyncio.sleep(0.05)
 
-        async def handler(from_addr: str, payload: dict[str, Any]):
-            received.append((from_addr, payload))
+            transport_a = await listener.connect_client()
+            transport_b = await listener.connect_client()
 
-        peer_b.on_message("b:*", handler)
+            callbacks_a = TestClientCallbacks()
+            callbacks_b = TestClientCallbacks()
 
-        message = {
-            "messageId": f"msg_{uuid.uuid4().hex}",
-            "type": "test_message",
-            "from": "client:a",
-            "to": "b:client",
-            "timestamp": "2026-02-19T00:00:00Z",
-            "content": {"text": "Hello from A"},
-        }
+            client_a = AgentBusClient(transport_a, callbacks_a)
+            client_b = AgentBusClient(transport_b, callbacks_b)
 
-        await peer_b.receive_message("client:a", "b:client", message)
+            await client_a._start()
+            await client_b._start()
 
-        assert len(received) == 1
-        assert received[0][0] == "client:a"
-        assert received[0][1]["content"]["text"] == "Hello from A"
+            await client_a.initialize("client:a")
+            await client_b.initialize("client:b")
+
+            await client_b.subscribe("agent:b")
+
+            payload = make_test_payload({"text": "Hello from A"})
+            result = await client_a.send_message(to="agent:b", payload=payload)
+
+            await asyncio.sleep(0.01)
+            assert len(callbacks_b.received) == 1
+            assert callbacks_b.received[0].from_ == client_a._client_id
+            payload_dict = cast(dict[str, Any], callbacks_b.received[0].payload)
+            assert payload_dict["content"]["text"] == "Hello from A"
+
+        finally:
+            await server.stop_server()
+            await listener.stop()
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
 
     @pytest.mark.asyncio
-    async def test_flow_a_to_b_and_a_to_c(self):
+    async def test_flow_a_to_b_and_a_to_c(self, make_test_payload):
         """Test: a sends messages to both b and c."""
-        peer_a = MockPeer("client:a")
-        peer_b = MockPeer("client:b")
-        peer_c = MockPeer("client:c")
+        listener = MockListener()
+        server = AgentBusServer(
+            listener, ActivityLogWriter(Path("/tmp/test_bus_" + str(uuid.uuid4())[:8] + ".sqlite3"))
+        )
+        server_task = asyncio.create_task(server.start_server())
 
-        received_b = []
-        received_c = []
+        try:
+            await asyncio.sleep(0.05)
 
-        async def handler_b(from_addr: str, payload: dict[str, Any]):
-            received_b.append(payload)
+            transport_a = await listener.connect_client()
+            transport_b = await listener.connect_client()
+            transport_c = await listener.connect_client()
 
-        async def handler_c(from_addr: str, payload: dict[str, Any]):
-            received_c.append(payload)
+            callbacks_a = TestClientCallbacks()
+            callbacks_b = TestClientCallbacks()
+            callbacks_c = TestClientCallbacks()
 
-        peer_b.on_message("b:*", handler_b)
-        peer_c.on_message("c:*", handler_c)
+            client_a = AgentBusClient(transport_a, callbacks_a)
+            client_b = AgentBusClient(transport_b, callbacks_b)
+            client_c = AgentBusClient(transport_c, callbacks_c)
 
-        msg_to_b = {"content": {"text": "Hello B"}}
-        await peer_b.receive_message("client:a", "b:client", msg_to_b)
+            await client_a._start()
+            await client_b._start()
+            await client_c._start()
 
-        msg_to_c = {"content": {"text": "Hello C"}}
-        await peer_c.receive_message("client:a", "c:client", msg_to_c)
+            await client_a.initialize("client:a")
+            await client_b.initialize("client:b")
+            await client_c.initialize("client:c")
 
-        assert len(received_b) == 1
-        assert received_b[0]["content"]["text"] == "Hello B"
+            await client_b.subscribe("agent:b")
+            await client_c.subscribe("agent:c")
 
-        assert len(received_c) == 1
-        assert received_c[0]["content"]["text"] == "Hello C"
+            payload_b = make_test_payload({"text": "Hello B"})
+            await client_a.send_message(to="agent:b", payload=payload_b)
+
+            payload_c = make_test_payload({"text": "Hello C"})
+            await client_a.send_message(to="agent:c", payload=payload_c)
+
+            await asyncio.sleep(0.01)
+
+            assert len(callbacks_b.received) == 1
+            payload_dict_b = cast(dict[str, Any], callbacks_b.received[0].payload)
+            assert payload_dict_b["content"]["text"] == "Hello B"
+
+            assert len(callbacks_c.received) == 1
+            payload_dict_c = cast(dict[str, Any], callbacks_c.received[0].payload)
+            assert payload_dict_c["content"]["text"] == "Hello C"
+
+        finally:
+            await server.stop_server()
+            await listener.stop()
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
 
 
 class TestDeadlockScenarios:
@@ -145,7 +214,7 @@ class TestDeadlockScenarios:
 
             # Send message - server handler will try to send back
             await server_api.process_message(
-                ProcessMessageParams(
+                ProcessMessageParams(  # type: ignore[call-arg]
                     from_="client:test",
                     to="server:handler",
                     message_id="msg-001",
@@ -171,70 +240,159 @@ class TestDeadlockScenarios:
                 pass
 
     @pytest.mark.asyncio
-    async def test_potential_deadlock_a_to_b_b_to_a(self):
+    async def test_potential_deadlock_a_to_b_b_to_a(self, make_test_payload):
         """Test: a calls b, b responds by calling a."""
-        peer_a = MockPeer("client:a")
-        peer_b = MockPeer("client:b")
+        listener = MockListener()
+        server = AgentBusServer(
+            listener, ActivityLogWriter(Path("/tmp/test_bus_" + str(uuid.uuid4())[:8] + ".sqlite3"))
+        )
+        server_task = asyncio.create_task(server.start_server())
 
-        messages_a_to_b = []
-        messages_b_to_a = []
+        try:
+            await asyncio.sleep(0.05)
 
-        async def b_handler(from_addr: str, payload: dict[str, Any]):
-            messages_a_to_b.append(payload)
-            response = {"content": {"text": "Response from B"}}
-            await peer_a.receive_message("client:b", "a:client", response)
+            transport_a = await listener.connect_client()
+            transport_b = await listener.connect_client()
 
-        async def a_handler(from_addr: str, payload: dict[str, Any]):
-            messages_b_to_a.append(payload)
+            callbacks_a = TestClientCallbacks()
+            callbacks_b = TestClientCallbacks()
 
-        peer_b.on_message("b:*", b_handler)
-        peer_a.on_message("a:*", a_handler)
+            client_a = AgentBusClient(transport_a, callbacks_a)
+            client_b = AgentBusClient(transport_b, callbacks_b)
 
-        initial_msg = {"content": {"text": "Initial from A"}}
-        await peer_b.receive_message("client:a", "b:client", initial_msg)
+            await client_a._start()
+            await client_b._start()
 
-        await asyncio.sleep(0.01)
+            await client_a.initialize("client:a")
+            await client_b.initialize("client:b")
 
-        assert len(messages_a_to_b) == 1
-        assert len(messages_b_to_a) == 1
-        assert messages_a_to_b[0]["content"]["text"] == "Initial from A"
-        assert messages_b_to_a[0]["content"]["text"] == "Response from B"
+            await client_a.subscribe("client:a")
+            await client_b.subscribe("agent:b")
+
+            # Set up B's response to send back to A
+            original_process_message = callbacks_b.process_message
+
+            async def b_handler_with_response(params: ProcessMessageParams) -> ProcessMessageResult:
+                # Send response back to A
+                await client_b.send_message(to="client:a", payload=make_test_payload({"text": "Response from B"}))
+                return await original_process_message(params)
+
+            callbacks_b.process_message = b_handler_with_response
+
+            payload = make_test_payload({"text": "Initial from A"})
+            await client_a.send_message(to="agent:b", payload=payload)
+
+            await asyncio.sleep(0.05)
+
+            # A should receive B's response
+            assert len(callbacks_a.received) == 1
+            payload_dict = cast(dict[str, Any], callbacks_a.received[0].payload)
+            assert payload_dict["content"]["text"] == "Response from B"
+
+            # B should receive A's initial message
+            assert len(callbacks_b.received) == 1
+            payload_dict_b = cast(dict[str, Any], callbacks_b.received[0].payload)
+            assert payload_dict_b["content"]["text"] == "Initial from A"
+
+        finally:
+            await server.stop_server()
+            await listener.stop()
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
 
     @pytest.mark.asyncio
-    async def test_chain_deadlock_a_to_b_to_c_to_a(self):
+    async def test_chain_deadlock_a_to_b_to_c_to_a(self, make_test_payload):
         """Test: a -> b -> c -> a chain."""
-        peer_a = MockPeer("client:a")
-        peer_b = MockPeer("client:b")
-        peer_c = MockPeer("client:c")
+        listener = MockListener()
+        server = AgentBusServer(
+            listener, ActivityLogWriter(Path("/tmp/test_bus_" + str(uuid.uuid4())[:8] + ".sqlite3"))
+        )
+        server_task = asyncio.create_task(server.start_server())
 
-        chain = []
+        try:
+            await asyncio.sleep(0.05)
 
-        async def c_handler(from_addr: str, payload: dict[str, Any]):
-            chain.append(("C", from_addr, payload))
-            response = {"content": {"text": "C to A", "step": 3}}
-            await peer_a.receive_message("client:c", "a:client", response)
+            transport_a = await listener.connect_client()
+            transport_b = await listener.connect_client()
+            transport_c = await listener.connect_client()
 
-        async def b_handler(from_addr: str, payload: dict[str, Any]):
-            chain.append(("B", from_addr, payload))
-            forward = {"content": {"text": "B to C", "step": 2}}
-            await peer_c.receive_message("client:b", "c:client", forward)
+            callbacks_a = TestClientCallbacks()
+            callbacks_b = TestClientCallbacks()
+            callbacks_c = TestClientCallbacks()
 
-        async def a_handler(from_addr: str, payload: dict[str, Any]):
-            chain.append(("A", from_addr, payload))
+            client_a = AgentBusClient(transport_a, callbacks_a)
+            client_b = AgentBusClient(transport_b, callbacks_b)
+            client_c = AgentBusClient(transport_c, callbacks_c)
 
-        peer_c.on_message("c:*", c_handler)
-        peer_b.on_message("b:*", b_handler)
-        peer_a.on_message("a:*", a_handler)
+            await client_a._start()
+            await client_b._start()
+            await client_c._start()
 
-        initial = {"content": {"text": "A to B", "step": 1}}
-        await peer_b.receive_message("client:a", "b:client", initial)
+            await client_a.initialize("client:a")
+            await client_b.initialize("client:b")
+            await client_c.initialize("client:c")
 
-        await asyncio.sleep(0.05)
+            await client_a.subscribe("client:a")
+            await client_b.subscribe("agent:b")
+            await client_c.subscribe("agent:c")
 
-        assert len(chain) == 3
-        assert chain[0] == ("B", "client:a", {"content": {"text": "A to B", "step": 1}})
-        assert chain[1][0] == "C"
-        assert chain[2][0] == "A"
+            # Track chain
+            chain: list[tuple[str, str, dict[str, Any]]] = []
+
+            # Set up C to send back to A
+            original_c_process = callbacks_c.process_message
+
+            async def c_handler(params: ProcessMessageParams) -> ProcessMessageResult:
+                chain.append(("C", params.from_, params.payload))
+                await client_c.send_message(to="client:a", payload=make_test_payload({"text": "C to A", "step": 3}))
+                return await original_c_process(params)
+
+            callbacks_c.process_message = c_handler
+
+            # Set up B to forward to C
+            original_b_process = callbacks_b.process_message
+
+            async def b_handler(params: ProcessMessageParams) -> ProcessMessageResult:
+                chain.append(("B", params.from_, params.payload))
+                await client_b.send_message(to="agent:c", payload=make_test_payload({"text": "B to C", "step": 2}))
+                return await original_b_process(params)
+
+            callbacks_b.process_message = b_handler
+
+            # Set up A to receive from C
+            original_a_process = callbacks_a.process_message
+
+            async def a_handler(params: ProcessMessageParams) -> ProcessMessageResult:
+                chain.append(("A", params.from_, params.payload))
+                return await original_a_process(params)
+
+            callbacks_a.process_message = a_handler
+
+            # Start chain
+            payload = make_test_payload({"text": "A to B", "step": 1})
+            await client_a.send_message(to="agent:b", payload=payload)
+
+            await asyncio.sleep(0.1)
+
+            # Verify chain
+            assert len(chain) == 3
+            assert chain[0][0] == "B"
+            payload_dict_b = cast(dict[str, Any], chain[0][2])
+            assert payload_dict_b["content"]["text"] == "A to B"
+            assert chain[1][0] == "C"
+            assert chain[2][0] == "A"
+
+        finally:
+            await server.stop_server()
+            await listener.stop()
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
 
 
 class TestServerProtocol:
@@ -243,7 +401,8 @@ class TestServerProtocol:
     @pytest.mark.asyncio
     async def test_address_matching(self):
         """Test address pattern matching logic."""
-        server = AgentBusServer.create(server=("localhost", 0))
+        listener = MockListener()
+        server = AgentBusServer(listener, ActivityLogWriter(Path("/tmp/test_bus_match.sqlite3")))
 
         # Test exact match
         assert server.address_matches("agent:worker-1", "agent:worker-1") is True
@@ -344,39 +503,63 @@ class TestMultipleSubscribers:
     """Test fanout to multiple subscribers."""
 
     @pytest.mark.asyncio
-    async def test_multiple_peers_receive_same_message(self):
+    async def test_multiple_peers_receive_same_message(self, make_test_payload):
         """Test that multiple subscribers receive the same broadcast."""
-        sender = MockPeer("client:sender")
-        subscriber1 = MockPeer("client:sub1")
-        subscriber2 = MockPeer("client:sub2")
+        listener = MockListener()
+        server = AgentBusServer(
+            listener, ActivityLogWriter(Path("/tmp/test_bus_" + str(uuid.uuid4())[:8] + ".sqlite3"))
+        )
+        server_task = asyncio.create_task(server.start_server())
 
-        received1 = []
-        received2 = []
+        try:
+            await asyncio.sleep(0.05)
 
-        async def handler1(from_addr: str, payload: dict[str, Any]):
-            received1.append(payload)
+            transport_sender = await listener.connect_client()
+            transport_sub1 = await listener.connect_client()
+            transport_sub2 = await listener.connect_client()
 
-        async def handler2(from_addr: str, payload: dict[str, Any]):
-            received2.append(payload)
+            callbacks_sender = TestClientCallbacks()
+            callbacks_sub1 = TestClientCallbacks()
+            callbacks_sub2 = TestClientCallbacks()
 
-        subscriber1.on_message("broadcast:*", handler1)
-        subscriber2.on_message("broadcast:*", handler2)
+            client_sender = AgentBusClient(transport_sender, callbacks_sender)
+            client_sub1 = AgentBusClient(transport_sub1, callbacks_sub1)
+            client_sub2 = AgentBusClient(transport_sub2, callbacks_sub2)
 
-        # Send broadcast
-        message = {
-            "messageId": "msg-001",
-            "type": "broadcast",
-            "content": {"text": "hello all"},
-        }
+            await client_sender._start()
+            await client_sub1._start()
+            await client_sub2._start()
 
-        await subscriber1.receive_message("client:sender", "broadcast:all", message)
-        await subscriber2.receive_message("client:sender", "broadcast:all", message)
+            await client_sender.initialize("client:sender")
+            await client_sub1.initialize("client:sub1")
+            await client_sub2.initialize("client:sub2")
 
-        # Both should receive
-        assert len(received1) == 1
-        assert len(received2) == 1
-        assert received1[0]["content"]["text"] == "hello all"
-        assert received2[0]["content"]["text"] == "hello all"
+            # Subscribe to the same pattern
+            await client_sub1.subscribe("broadcast:*")
+            await client_sub2.subscribe("broadcast:*")
+
+            # Send broadcast
+            payload = make_test_payload({"text": "hello all"})
+            await client_sender.send_message(to="broadcast:all", payload=payload)
+
+            await asyncio.sleep(0.05)
+
+            # Both should receive
+            assert len(callbacks_sub1.received) == 1
+            assert len(callbacks_sub2.received) == 1
+            payload_dict_1 = cast(dict[str, Any], callbacks_sub1.received[0].payload)
+            payload_dict_2 = cast(dict[str, Any], callbacks_sub2.received[0].payload)
+            assert payload_dict_1["content"]["text"] == "hello all"
+            assert payload_dict_2["content"]["text"] == "hello all"
+
+        finally:
+            await server.stop_server()
+            await listener.stop()
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
 
 
 class TestProcessMessage:
@@ -420,7 +603,7 @@ class TestProcessMessage:
 
             # Process a message
             result = await api.process_message(
-                ProcessMessageParams(
+                ProcessMessageParams(  # type: ignore[call-arg]
                     from_="tg:123",
                     to="agent:test",
                     message_id="msg-001",
@@ -451,26 +634,65 @@ class TestWildcardSubscription:
     """Test wildcard subscription behavior."""
 
     @pytest.mark.asyncio
-    async def test_wildcard_receives_matching_messages(self):
+    async def test_wildcard_receives_matching_messages(self, make_test_payload):
         """Test that wildcard subscription receives only matching messages."""
-        peer = MockPeer("client:test")
-        peer.subscribe("tg:*")
+        listener = MockListener()
+        server = AgentBusServer(
+            listener, ActivityLogWriter(Path("/tmp/test_bus_" + str(uuid.uuid4())[:8] + ".sqlite3"))
+        )
+        server_task = asyncio.create_task(server.start_server())
 
-        received = []
+        try:
+            await asyncio.sleep(0.05)
 
-        async def handler(from_addr: str, payload: dict[str, Any]):
-            received.append((from_addr, payload))
+            transport_a = await listener.connect_client()
+            transport_b = await listener.connect_client()
+            transport_c = await listener.connect_client()
 
-        peer.on_message("tg:*", handler)
+            callbacks_a = TestClientCallbacks()
+            callbacks_b = TestClientCallbacks()
+            callbacks_c = TestClientCallbacks()
 
-        # Send matching messages
-        await peer.receive_message("client:a", "tg:chat1", {"content": {"text": "msg1"}})
-        await peer.receive_message("client:b", "tg:chat2", {"content": {"text": "msg2"}})
+            client_a = AgentBusClient(transport_a, callbacks_a)
+            client_b = AgentBusClient(transport_b, callbacks_b)
+            client_c = AgentBusClient(transport_c, callbacks_c)
 
-        # Send non-matching message
-        await peer.receive_message("client:c", "wa:chat3", {"content": {"text": "msg3"}})
+            await client_a._start()
+            await client_b._start()
+            await client_c._start()
 
-        # Should only receive tg:* messages
-        assert len(received) == 2
-        assert received[0][1]["content"]["text"] == "msg1"
-        assert received[1][1]["content"]["text"] == "msg2"
+            await client_a.initialize("client:a")
+            await client_b.initialize("client:b")
+            await client_c.initialize("client:c")
+
+            # Subscribe to wildcard pattern
+            await client_b.subscribe("tg:*")
+
+            # Send matching messages
+            payload1 = make_test_payload({"text": "msg1"})
+            await client_a.send_message(to="tg:chat1", payload=payload1)
+
+            payload2 = make_test_payload({"text": "msg2"})
+            await client_a.send_message(to="tg:chat2", payload=payload2)
+
+            # Send non-matching message
+            payload3 = make_test_payload({"text": "msg3"})
+            await client_c.send_message(to="wa:chat3", payload=payload3)
+
+            await asyncio.sleep(0.05)
+
+            # Should only receive tg:* messages (2 from A)
+            assert len(callbacks_b.received) == 2
+            payload_dict_0 = cast(dict[str, Any], callbacks_b.received[0].payload)
+            payload_dict_1 = cast(dict[str, Any], callbacks_b.received[1].payload)
+            assert payload_dict_0["content"]["text"] == "msg1"
+            assert payload_dict_1["content"]["text"] == "msg2"
+
+        finally:
+            await server.stop_server()
+            await listener.stop()
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass

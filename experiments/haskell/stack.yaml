@@ -1,0 +1,12 @@
+resolver: lts-21.25
+
+packages:
+- .
+
+extra-deps:
+- trifecta-2.1.4
+- parsers-0.12.11
+
+flags: {}
+
+extra-package-dbs: []
