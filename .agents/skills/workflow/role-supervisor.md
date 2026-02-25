@@ -1,204 +1,192 @@
 # Role: Supervisor
 
-## Purpose
-Dumb orchestrator that manages agent execution lifecycle. Only spawns agents based on kanban state, never makes decisions or interprets results.
+## What you must follow
 
-## State Machine
+Dumb orchestrator that manages agent execution lifecycle. Only spawns agents based on kanban state, never makes decisions or interprets results.
 
 Supervisor maintains minimal state and operates in a loop:
 
+Act like a code executor that strictly follows the following pseudo code `supervisor_loop`.
+
 ```python
-def supervisor_loop(kanban_file):
-    while True:
-        # 1. Read current kanban state (source of truth)
-        kanban = read(kanban_file)
+def supervisor_loop(initial_task: str):
+    """Main entry point for workflow execution."""
+    # Initialize workflow by creating kanban with user request
+    kanban_file = execute_script(f"{skill_path}/scripts/create-kanban.py", {
+        "title": "Workflow",
+        "request": initial_task
+    })
+    
+    # Spawn Manager to populate kanban with initial tasks (done_task=None for initial)
+    manager_data = spawn_manager_with_retry(kanban_file, done_task=None)
+    next_task = manager_data["next_task"]
+    
+    # Write initial todo list
+    write_todo(manager_data["tasks"])
+    
+    while next_task is not None:
+        # Spawn task agent to execute current task
+        # Task agent must end with message "DONE"
+        spawn_task_agent(kanban_file, next_task)
         
-        # 2. Check if workflow complete
-        if kanban.current is None or kanban.phase == "complete":
-            break
+        # Spawn Manager to determine next task (pass done_task)
+        done_task = next_task
+        manager_data = spawn_manager_with_retry(kanban_file, done_task)
+        next_task = manager_data["next_task"]
         
-        # 3. Determine role from task file header
-        task_file = kanban.current
-        agent_role = determine_role(task_file)
-        
-        # 4. Spawn agent with minimal context
-        result = spawn_agent(agent_role, task_file)
-        
-        # 5. Validate output format (not content)
-        if not validate_output(result, agent_role):
-            log_retry(task_file, agent_role)
-            continue  # Retry same task
-        
-        # 6. Notify Manager that task is done, pass current task list
-        manager_result = spawn_agent("Manager", {
-            "kanban_file": kanban_file,
-            "done_task": task_file,
-            "tasks": kanban.tasks  # Current task list for Manager to update
-        })
-        
-        # 7. Validate Manager output format
-        if not validate_output(manager_result, "Manager"):
-            log_retry(kanban_file, "Manager", {"done_task": task_file})
-            continue  # Retry Manager
-        
-        # 8. Manager returns updated task list and next_task
-        #    Supervisor uses returned tasks for next iteration
-        if manager_result.get("next_task") is None:
-            break  # Workflow complete
+        # Update todo list with current task states
+        write_todo(manager_data["tasks"])
 ```
 
-## Spawn Agent - Inputs/Outputs
-
-### Input Specification (Supervisor → Agent)
-
-When spawning any agent, Supervisor provides:
+## Script Execution
 
 ```python
+def execute_script(script_path: str, args: dict) -> str:
+    """Execute a bash script with arguments.
+    
+    Models bash execution by running script with args.
+    Returns stdout (usually file path or status).
+    
+    Example:
+        kanban_file = execute_script(
+            f"{skill_path}/scripts/create-kanban.py",
+            {"title": "API Refactor", "request": initial_task}
+        )
+    """
+    # Executes: python script_path --key value --key2 value2
+    # Returns stdout as string
+    pass
+```
+
+## Agent Spawning
+
+**Task Agent and Manager agent interfaces are documented in SKILL.md.**
+
+### Manager Agent
+
+```python
+def spawn_manager(kanban_file: str, done_task: str | None, message: str | None) -> str:
+    """Spawn Manager agent.
+    
+    Args:
+        kanban_file: Path to kanban
+        done_task: Just completed task file, or None for initial call
+        message: Optional context from previous step (e.g., "Invalid JSON: ...")
+    
+    Returns:
+        Valid JSON string:
+        {
+            "next_task": "path/to/task.md",  // Next task or null to stop
+            "tasks": [
+                {"state": "done|todo", "file": "path/to/task.md"}
+            ]
+        }
+    """
+    pass
+```
+
+## Manager Output Validation
+
+Manager MUST output valid JSON with schema:
+```json
 {
-    # Required: What the agent should do
-    "instruction": str,  # For single-shot tasks
-    
-    # OR for workflow tasks:
-    "task_file": str,           # Path to task file
-    "kanban_file": str,         # Path to kanban (for Manager reconciliation)
-    "done_task": str,           # Just completed task (for Manager reconciliation)
-}
-
-**Note:** Supervisor passes task list to Manager for reconciliation. Other agents (Architect/Implementor) read task file directly.
-```
-
-### Output Specification (Agent → Supervisor)
-
-**Important:** Work logs go to task files. Manager updates kanban file AND returns task list to Supervisor.
-
-Every agent MUST return output in this exact format:
-
-```python
-{
-    "status": "ok" | "blocked" | "error" | "escalate",
-    "message": str,  # Human-readable summary
-    
-    # Manager only: updated task state
-    "next_task": str | None,  # Path to next task, or null if workflow complete
-    "tasks": List[str],       # Manager only: current task list
-    
-    # Note: Architect/Implementor do NOT return work items. They write to task file work log.
+    "next_task": "path/to/task.md",
+    "tasks": [
+        {"state": "done", "file": "path/to/done-task.md"},
+        {"state": "todo", "file": "path/to/next-task.md"}
+    ]
 }
 ```
 
-### Status Values
+```python
+def validate_manager_output(result: str) -> dict:
+    """Validate Manager output is valid JSON with required fields."""
+    try:
+        data = json_parse(result)
+        if not isinstance(data, dict):
+            return None
+        if "next_task" not in data:
+            return None
+        if "tasks" not in data:
+            return None
+        return data
+    except JSONError:
+        return None
+```
 
-- `ok`: Task completed successfully, work log written
-- `blocked`: Cannot proceed, requires escalation (work log explains why)
-- `error`: Agent crashed or failed (invalid output format)
-- `escalate`: Explicit escalation requested (work log explains why)
-
-## Retry Rule (CRITICAL)
-
-**If an agent does not reply with the requested output format, Supervisor MUST:**
-
-1. **Log the failure**
-2. **Reschedule the SAME agent with EXACT same parameters**
-3. **Do NOT modify instructions, inputs, or expected outputs**
-4. **Retry up to MAX_RETRIES (default: 3)**
+## Retry Logic
 
 ```python
-def validate_output(result, expected_role):
-    """Check if agent returned valid output."""
-    if not isinstance(result, dict):
-        return False
-    if "status" not in result:
-        return False
-    if result["status"] not in ["ok", "blocked", "error", "escalate"]:
-        return False
-    if "message" not in result:
-        return False
-    return True
-
-def spawn_agent(role, inputs, retry_count=0):
-    """Spawn agent with exact inputs."""
+def spawn_manager_with_retry(
+    kanban_file: str, 
+    done_task: str | None, 
+    retry_count: int = 0,
+    last_error: str | None = None
+) -> dict:
+    """Spawn Manager with retry logic.
+    
+    On retry, passes error message to Manager so it can correct output.
+    """
     MAX_RETRIES = 3
     
-    # Execute agent
-    result = execute_agent(role, inputs)
+    # Spawn Manager with optional error context
+    result_json = spawn_manager(kanban_file, done_task, message=last_error)
     
-    # Validate output format
-    if not validate_output(result, role):
-        if retry_count < MAX_RETRIES:
-            log_event(f"Agent {role} returned invalid output. Retrying {retry_count + 1}/{MAX_RETRIES}")
-            # RESCHEDULE with EXACT same parameters
-            return spawn_agent(role, inputs, retry_count + 1)
-        else:
-            raise Error(f"Agent {role} failed after {MAX_RETRIES} retries")
+    # Validate JSON output
+    result = validate_manager_output(result_json)
+    
+    if result is None:
+        if retry_count >= MAX_RETRIES:
+            raise Error(f"Manager failed after {MAX_RETRIES} retries")
+        
+        # Retry with error context
+        error_msg = f"Invalid JSON. Expected: {{\"next_task\": str, \"tasks\": [...]}}. Got: {result_json[:200]}"
+        return spawn_manager_with_retry(kanban_file, done_task, retry_count + 1, error_msg)
     
     return result
 ```
 
-### Retry Logging
+## Todo List Management
 
-Log format for retries:
-
-```markdown
-## Supervisor Log
-
-### [timestamp] Retry Event
-
-**Agent:** {role}  
-**Task:** {task_file or instruction}  
-**Attempt:** {retry_count + 1}/{MAX_RETRIES}  
-**Issue:** Invalid output format
-
-**Expected:**
-```json
-{expected_output_schema}
+```python
+def write_todo(tasks: list[dict]) -> None:
+    """Write todo list for tracking task states.
+    
+    Updates todo.md with current task states for visibility.
+    Called after each Manager response to persist task progress.
+    
+    Args:
+        tasks: List of task dicts with "state" and "file" keys
+               Example: [{"state": "done", "file": "tasks/001-design.md"},
+                        {"state": "todo", "file": "tasks/002-impl.md"}]
+    
+    """
+    pass
 ```
 
-**Received:**
-```json
-{actual_output}
-```
+## Agent Input/Output Summary
 
-**Action:** Rescheduling with exact same parameters
-```
+| Agent | Input | Output |
+|-------|-------|--------|
+| Task Agent (Architect/Implementor) | `kanban_file: str, task_file: str` | None (ends with "DONE") |
+| Manager | `kanban_file: str, done_task: str\|None, message: str\|None` | **JSON string** |
 
 ## Constraints
 
-- **NEVER** interpret agent output content - only validate format
-- **NEVER** modify inputs when retrying - use exact same parameters
-- **NEVER** make decisions about workflow - only Manager updates kanban
-- **NEVER** pass task lists to agents - agents read kanban file directly
-- **ALWAYS** validate output format before accepting
-- **ALWAYS** log retry events for debugging
-- **MAX_RETRIES** = 3 for any single task
+- **ONLY** operations allowed: `execute_script` (once, at start), `spawn_task_agent`, `spawn_manager`
+- **NEVER** read kanban or task files directly
+- **NEVER** interpret agent output content
+- **MAX_RETRIES** = 3 for Manager failures
 
 ## Communication Model
 
-**All state lives in files:**
-1. **Kanban file**: Source of truth for workflow state (tasks, current task, phase)
-2. **Task files**: Source of truth for task specification and work logs
+**Supervisor operations:**
+1. Create kanban with user request (once)
+2. Spawn task agent with kanban_file
+3. Spawn manager with kanban_file
+4. Loop until manager returns None
 
-**Communication flow:**
-```
-Supervisor reads kanban → Executes task → Notifies Manager (with tasks) → Manager updates kanban → Supervisor receives updated tasks → Loop
-```
-
-**Data flow:**
-- **Supervisor → Manager**: Passes current task list for reconciliation
-- **Manager → Supervisor**: Returns updated task list and next_task
-- **Architect/Implementor**: Write work logs to task files (no return data needed except status)
-
-## Agent Role Mapping
-
-| Kanban State | Agent Role | Input Type |
-|--------------|------------|------------|
-| phase="design", current=task_file | Architect | task_file |
-| phase="plan", current=task_file | Manager | kanban reconciliation |
-| phase="execute", sub_phase="review", current=task_file | Architect | task_file |
-| phase="execute", current=task_file | Implementor | task_file |
-| phase="validate", current=task_file | Architect | task_file |
-
-def determine_role(task_file):
-    """Determine which agent role should execute this task."""
-    meta = read(task_file)
-    return meta.get("role", "Implementor")
+**Agents handle all file operations:**
+- Task agent: reads kanban, reads task, executes, writes work log
+- Manager: reads kanban, updates kanban, returns next_task
 ```
