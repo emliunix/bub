@@ -18,7 +18,7 @@ Creates a new task file with a validated YAML header.
 **Usage:**
 ```bash
 # Basic usage (kanban and creator-role are required)
-uv run scripts/create-task.py \
+.agents/skills/workflow/scripts/create-task.py \
     --role Architect \
     --expertise "System Design,Python" \
     --title "Design API Layer" \
@@ -26,7 +26,7 @@ uv run scripts/create-task.py \
     --creator-role manager
 
 # Full usage with all options
-uv run scripts/create-task.py \
+.agents/skills/workflow/scripts/create-task.py \
     --role Implementor \
     --expertise "Software Engineering,Type Theory" \
     --skills "python-project,testing" \
@@ -47,7 +47,7 @@ uv run scripts/create-task.py \
 - `--expertise, -e` (required): Comma-separated expertise areas
 - `--title, -t` (required): Task title (used for filename slug)
 - `--kanban, -k` (required): Path to kanban file for global context
-- `--creator-role, -cr` (required): Role of the creator - must be `manager` or `user`. Only Manager and users are allowed to create tasks; agents (Architect, Implementor) should NEVER create task files directly.
+- `--creator-role, -cr` (required): Role of the creator - valid values: `manager`, `user`, `architect`, `implementor`. **IMPORTANT**: Only `manager` and `user` are allowed to create tasks. If `architect` or `implementor` is specified, the script will exit with error: "role {role} is not allowed to create task". This prevents agents from creating task files directly - they should log work items instead.
 - `--skills, -s`: Comma-separated skills to load
 - `--type`: Task type (exploration, design, review, implement, redesign; auto-inferred if not specified)
 - `--priority`: Priority level (critical, high, medium, low; default: medium)
@@ -68,12 +68,12 @@ Creates a new kanban file with a validated YAML header and optionally an initial
 **Usage:**
 ```bash
 # Create kanban with exploration task
-uv run scripts/create-kanban.py \
+.agents/skills/workflow/scripts/create-kanban.py \
     --title "API Refactor" \
     --request "Refactor the API layer for better performance"
 
 # Create kanban without exploration task
-uv run scripts/create-kanban.py \
+.agents/skills/workflow/scripts/create-kanban.py \
     --title "Bug Fix" \
     --request "Fix critical authentication bug" \
     --no-exploration
@@ -96,47 +96,58 @@ uv run scripts/create-kanban.py \
 
 ### 3. log-task.py
 
-Logs work to a task file using a two-phase commit system.
+Logs work to a task file using a two-phase commit system with subcommands.
+
+**Subcommands:**
+- `generate` - Create temp file for writing work log
+- `commit` - Read temp file and append formatted log to task
+- `quick` - Directly log content without temp file
 
 **Phase 1 - Generate temp file:**
 ```bash
-TEMP_FILE=$(uv run scripts/log-task.py \
-    --task ./tasks/0-explore.md \
-    --title "Initial Analysis" \
-    --phase generate)
+# Generate creates ./tmp-{uuid}-log-content.md in workspace
+TEMP_FILE=$(.agents/skills/workflow/scripts/log-task.py generate ./tasks/0-explore.md "Initial Analysis")
 echo "Temp file: $TEMP_FILE"
 # Agent writes work log to $TEMP_FILE...
 ```
 
 **Phase 2 - Commit log:**
 ```bash
-uv run scripts/log-task.py \
-    --task ./tasks/0-explore.md \
-    --title "Initial Analysis" \
-    --phase commit \
-    --temp-file "$TEMP_FILE"
+# Commit reads temp, formats, appends to task, deletes temp
+.agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" "$TEMP_FILE"
 ```
 
-**Single-phase (direct content):**
+**Quick mode (direct content):**
 ```bash
-uv run scripts/log-task.py \
-    --task ./tasks/0-explore.md \
-    --title "Quick Update" \
-    --content "Fixed the bug in auth module"
+# For simple logs, bypass temp file
+.agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Update" "Fixed the bug in auth module"
 ```
 
-**Options:**
-- `--task, -t` (required): Path to the task file
-- `--title` (required): Title for this work log entry
-- `--phase`: Phase of logging (generate, commit; default: generate)
-- `--temp-file`: Path to temp file (required for commit phase)
-- `--content, -c`: Direct content to log (skips temp file)
-- `--temp-dir`: Directory for temporary files
+**Subcommand Details:**
+
+`generate TASK TITLE`
+- Creates temp file: `./tmp-{uuid}-log-content.md`
+- Output: Path to temp file (print only, for scripting)
+- Temp file contains template with Facts/Analysis/Conclusion sections
+
+`commit TASK TITLE TEMP_FILE`
+- Reads temp file content
+- Formats with timestamp and proper structure
+- Appends to task file's Work Log section
+- Deletes temp file
+- Output: "Work log committed to: {task_file}"
+
+`quick TASK TITLE CONTENT`
+- Bypasses temp file creation
+- Directly commits content as Facts section
+- Analysis and Conclusion set to defaults
+- Output: "Work log committed to: {task_file}"
 
 **Why two-phase?**
 - Agents can write freely without worrying about YAML frontmatter
 - Proper formatting and timestamping is handled by the script
 - Logs are consistently formatted with Facts/Analysis/Conclusion structure
+- Workspace-local temp files are easy to find and edit
 
 ## File Naming Convention
 

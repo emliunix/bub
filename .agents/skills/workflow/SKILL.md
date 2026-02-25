@@ -98,6 +98,45 @@ This allows Architect to determine mode without explicit mode field.
 | `code-reading` | `.agents/skills/code-reading-assistant/SKILL.md` | All | Codebase exploration and Q&A |
 | `skill-management` | `.agents/skills/skill-management/SKILL.md` | All | Skill catalog and navigation |
 
+## Helper Scripts
+
+This skill includes executable Python scripts in `scripts/` for managing tasks and kanbans:
+
+### create-task.py
+Creates task files with validated YAML headers. Only Manager and users can create tasks.
+```bash
+.agents/skills/workflow/scripts/create-task.py \
+    --role Architect \
+    --expertise "System Design" \
+    --kanban tasks/0-kanban.md \
+    --creator-role manager \
+    --title "Design API"
+```
+
+### create-kanban.py
+Creates kanban files with exploration task:
+```bash
+.agents/skills/workflow/scripts/create-kanban.py \
+    --title "API Refactor" \
+    --request "Refactor the API layer"
+```
+
+### log-task.py
+Logs work using subcommands (generate/commit/quick):
+```bash
+# Phase 1: Generate temp file
+TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
+
+# Phase 2: Commit after editing
+.agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" $TEMP
+
+# Or use quick mode for simple logs
+.agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed bug"
+```
+
+All scripts use PEP 723 inline dependencies and can be run directly with `./script.py`.
+See `scripts/README.md` for full documentation.
+
 ## Skill Loading Rules
 
 - **Manager**: Must load `skill-management` first to discover other skills
