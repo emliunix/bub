@@ -60,9 +60,39 @@ def execute_script(script_path: str, args: dict) -> str:
 
 ## Agent Spawning
 
-**Task Agent and Manager agent interfaces are documented in SKILL.md.**
+### Task Agent
+
+**Bootstrap Prompt** (Supervisor provides this to Task Agent on spawn):
+
+```
+kanban_file: <path>
+task_file: <path>
+
+Run check-task.py to get your briefing.
+```
+
+The Task Agent then:
+1. Runs `check-task.py --task <task_file>` to generate briefing
+2. Reads role definition specified in briefing
+3. Loads required skills
+4. Executes task and ends with "DONE"
 
 ### Manager Agent
+
+**Bootstrap Prompt** (Supervisor provides this to Manager on spawn):
+
+```
+**Role**: manager
+Load skill workflow and follow the role
+```
+
+This minimal prompt instructs the Manager to:
+1. Load the `workflow` skill
+2. Read `role-manager.md` for the algorithm
+3. Read `patterns.md` for workflow patterns
+4. Use `scripts/create-task.py` for creating tasks
+
+**Inputs/Outputs**:
 
 ```python
 def spawn_manager(kanban_file: str, done_task: str | None, message: str | None) -> str:
@@ -71,12 +101,12 @@ def spawn_manager(kanban_file: str, done_task: str | None, message: str | None) 
     Args:
         kanban_file: Path to kanban
         done_task: Just completed task file, or None for initial call
-        message: Optional context from previous step (e.g., "Invalid JSON: ...")
+        message: Optional error context for retries (e.g., "Invalid JSON: ...")
     
     Returns:
         Valid JSON string:
         {
-            "next_task": "path/to/task.md",  // Next task or null to stop
+            "next_task": "path/to/task.md",
             "tasks": [
                 {"state": "done|todo", "file": "path/to/task.md"}
             ]
