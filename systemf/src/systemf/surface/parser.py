@@ -1,15 +1,17 @@
-"""Recursive descent parser for System F surface language.
+"""Parsy-based parser for System F surface language.
 
-Implements a hand-written parser with Pratt parsing for operators.
+Implements a monadic parser using parsy combinators and @generate decorator
+for Haskell-like do-notation syntax.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+import parsy
+from parsy import Parser as P, Result, generate
 
 from systemf.surface.ast import (
     SurfaceAbs,
+    SurfaceAnn,
     SurfaceApp,
     SurfaceBranch,
     SurfaceCase,
@@ -20,13 +22,13 @@ from systemf.surface.ast import (
     SurfacePattern,
     SurfaceTerm,
     SurfaceTermDeclaration,
+    SurfaceType,
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceTypeArrow,
     SurfaceTypeConstructor,
     SurfaceTypeForall,
     SurfaceTypeVar,
-    SurfaceAnn,
     SurfaceVar,
 )
 from systemf.surface.lexer import Lexer, Token
@@ -41,521 +43,745 @@ class ParseError(Exception):
         self.location = location
 
 
-class Parser:
-    """Recursive descent parser for surface language.
+# =============================================================================
+# Token Primitives
+# =============================================================================
 
-    Grammar:
-        decl ::= "data" CON ident* "=" constr ("|" constr)*
-               | ident (":" type)? "=" term
 
-        constr ::= CON type_atom*
+def match_token(token_type: str) -> P:
+    """Match a token of specific type."""
 
-        term ::= "\\" ident (":" type)? "->" term
-               | "let" ident "=" term "in" term
-               | "case" term "of" "{" branch* "}"
-               | "/\\" ident "." term
-               | app
+    @P
+    def match(tokens: list[Token], index: int) -> Result:
+        if index < len(tokens) and tokens[index].type == token_type:
+            return Result.success(index + 1, tokens[index])
+        return Result.failure(index, f"expected {token_type}")
 
-        app ::= atom+
+    return match
 
-        atom ::= ident
-               | CON atom*
-               | "(" term ")"
-               | atom "@" type
-               | atom "[" type "]"
-               | atom ":" type
 
-        type ::= forall_type
+def match_value(token_type: str, value: str) -> P:
+    """Match a token with specific type and value."""
 
-        forall_type ::= "forall" ident+ "." arrow_type
-                      | arrow_type
+    @P
+    def match(tokens: list[Token], index: int) -> Result:
+        if index < len(tokens):
+            tok = tokens[index]
+            if tok.type == token_type and tok.value == value:
+                return Result.success(index + 1, tok)
+        return Result.failure(index, f"expected {token_type}({value!r})")
 
-        arrow_type ::= app_type ("->" arrow_type)?
+    return match
 
-        app_type ::= atom_type+
 
-        atom_type ::= ident | CON | "(" type ")"
+# =============================================================================
+# Token Matchers
+# =============================================================================
 
-        branch ::= pattern "->" term
+# Keywords
+DATA = match_token("DATA")
+LET = match_token("LET")
+IN = match_token("IN")
+CASE = match_token("CASE")
+OF = match_token("OF")
+FORALL = match_token("FORALL")
+LAMBDA = match_token("LAMBDA")
+TYPELAMBDA = match_token("TYPELAMBDA")
 
-        pattern ::= CON ident*
+# Operators
+ARROW = match_token("ARROW")
+EQUALS = match_token("EQUALS")
+COLON = match_token("COLON")
+BAR = match_token("BAR")
+AT = match_token("AT")
+DOT = match_token("DOT")
+
+# Delimiters
+LPAREN = match_token("LPAREN")
+RPAREN = match_token("RPAREN")
+LBRACKET = match_token("LBRACKET")
+RBRACKET = match_token("RBRACKET")
+LBRACE = match_token("LBRACE")
+RBRACE = match_token("RBRACE")
+
+# Indentation tokens
+INDENT = match_token("INDENT")
+DEDENT = match_token("DEDENT")
+
+# Values
+IDENT = match_token("IDENT").map(lambda t: t.value)
+CONSTRUCTOR = match_token("CONSTRUCTOR").map(lambda t: t.value)
+NUMBER = match_token("NUMBER").map(lambda t: t.value)
+EOF = match_token("EOF")
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+@P
+def peek_token(tokens: list[Token], index: int) -> Result:
+    """Peek at next token without consuming."""
+    if index < len(tokens):
+        return Result.success(index, tokens[index])
+    return Result.failure(index, "unexpected end of input")
+
+
+# Forward declarations for recursive parsers
+term_parser: P = parsy.forward_declaration()
+type_parser: P = parsy.forward_declaration()
+decl_term_parser: P = parsy.forward_declaration()  # Parser that stops at decl boundaries
+simple_term_parser: P = parsy.forward_declaration()  # Non-greedy term parser for branch bodies
+decl_simple_term_parser: P = parsy.forward_declaration()  # Non-greedy decl term parser
+
+
+# =============================================================================
+# Indentation-Aware Combinators
+# =============================================================================
+
+
+def indented_block(content_parser: P) -> P:
+    """Create a parser for INDENT content DEDENT sequence.
+
+    Used for parsing content that is indented relative to its parent.
     """
 
-    def __init__(self, tokens: list[Token]):
-        """Initialize parser with token stream."""
-        self.tokens = tokens
-        self.pos = 0
+    @generate
+    def block_parser():
+        yield INDENT
+        content = yield content_parser
+        yield DEDENT
+        return content
 
-    def _current(self) -> Token:
-        """Get current token."""
-        if self.pos < len(self.tokens):
-            return self.tokens[self.pos]
-        return self.tokens[-1]  # EOF token
+    return block_parser
 
-    def _peek(self, offset: int = 0) -> Token:
-        """Peek at token ahead."""
-        idx = self.pos + offset
-        if idx < len(self.tokens):
-            return self.tokens[idx]
-        return self.tokens[-1]
 
-    def _advance(self) -> Token:
-        """Consume and return current token."""
-        token = self._current()
-        if self.pos < len(self.tokens) - 1:
-            self.pos += 1
-        return token
+def indented_many(item_parser: P) -> P:
+    """Create a parser for one or more indented items (no separator).
 
-    def _expect(self, token_type: str) -> Token:
-        """Expect current token to be of specific type."""
-        token = self._current()
-        if token.type != token_type:
-            raise ParseError(f"Expected {token_type}, got {token.type}", token.location)
-        return self._advance()
+    Each item must be at the same indentation level within the block.
+    """
 
-    def _match(self, *token_types: str) -> bool:
-        """Check if current token matches any of the types."""
-        return self._current().type in token_types
+    @generate
+    def many_parser():
+        yield INDENT
+        first = yield item_parser
+        items = [first]
+        # Parse remaining items - each at the same indentation level
+        while True:
+            # Peek at next token to check if we're still in the block
+            next_tok = yield peek_token
+            if next_tok.type == "DEDENT":
+                break
+            # Try to parse another item
+            item = yield item_parser.optional()
+            if item is None:
+                break
+            items.append(item)
+        yield DEDENT
+        return items
 
-    def _consume(self, token_type: str) -> bool:
-        """Consume token if it matches type."""
-        if self._match(token_type):
-            self._advance()
-            return True
-        return False
+    return many_parser
 
-    def at_end(self) -> bool:
-        """Check if at end of input."""
-        return self._current().type == "EOF"
 
-    # =====================================================================
-    # Declaration Parsing
-    # =====================================================================
+# =============================================================================
+# Type Parsers
+# =============================================================================
 
-    def parse(self) -> list[SurfaceDeclaration]:
-        """Parse token stream into surface AST."""
-        decls = []
-        while not self.at_end():
-            decls.append(self.parse_declaration())
-        return decls
 
-    def parse_declaration(self) -> SurfaceDeclaration:
-        """Parse a declaration."""
-        if self._match("DATA"):
-            return self.parse_data_declaration()
+@generate
+def atom_type():
+    """Parse atomic type: ident | CON | ( type )."""
+    # Parenthesized type
+    paren = yield (LPAREN >> type_parser << RPAREN).optional()
+    if paren is not None:
+        return paren
+
+    # Type variable
+    ident = yield match_token("IDENT").optional()
+    if ident is not None:
+        return SurfaceTypeVar(ident.value, ident.location)
+
+    # Type constructor
+    con = yield match_token("CONSTRUCTOR").optional()
+    if con is not None:
+        return SurfaceTypeConstructor(con.value, [], con.location)
+
+    # No match - fail
+    yield parsy.fail("expected type")
+
+
+@generate
+def app_type():
+    """Parse type application (left-associative)."""
+    loc_token = yield peek_token
+    loc = loc_token.location
+    atoms = yield atom_type.at_least(1)
+
+    if len(atoms) == 1:
+        return atoms[0]
+
+    # Build left-associative application chain
+    result = atoms[0]
+    for next_atom in atoms[1:]:
+        if isinstance(result, SurfaceTypeConstructor):
+            # Add to existing constructor args
+            result = SurfaceTypeConstructor(result.name, result.args + [next_atom], result.location)
         else:
-            return self.parse_term_declaration()
+            # Start new constructor
+            result = SurfaceTypeConstructor(str(result), [next_atom], loc)
+    return result
 
-    def parse_data_declaration(self) -> SurfaceDataDeclaration:
-        """Parse: data Name params = Con1 args1 | Con2 args2 | ..."""
-        data_kw = self._expect("DATA")
-        name_tok = self._expect("CONSTRUCTOR")
 
-        # Parse optional type parameters
-        params = []
-        while self._match("IDENT"):
-            params.append(self._advance().value)
+@generate
+def arrow_type():
+    """Parse arrow type (right-associative)."""
+    arg = yield app_type
+    arrow = yield (ARROW >> arrow_type).optional()
+    if arrow is not None:
+        loc = arg.location
+        return SurfaceTypeArrow(arg, arrow, loc)
+    return arg
 
-        self._expect("EQUALS")
 
-        # Parse constructors
-        constructors = []
-        while True:
-            con_tok = self._expect("CONSTRUCTOR")
-            con_name = con_tok.value
+@generate
+def forall_type():
+    """Parse forall type."""
+    loc_token = yield FORALL
+    loc = loc_token.location
+    vars = yield IDENT.at_least(1)
+    yield DOT
+    body = yield forall_type | arrow_type
 
-            # Parse constructor argument types
-            arg_types = []
-            while self._match("IDENT", "CONSTRUCTOR", "LPAREN"):
-                # Don't consume if this looks like the start of a term declaration
-                # (identifier/constructor followed by : or =)
-                if self._peek(1).type in ("COLON", "EQUALS"):
-                    # This looks like a term declaration name, not a type
-                    break
-                arg_types.append(self.parse_atom_type())
+    # Build nested forall from right to left
+    for var in reversed(vars):
+        body = SurfaceTypeForall(var, body, loc)
+    return body
 
-            constructors.append((con_name, arg_types))
 
-            if not self._consume("BAR"):
-                break
+# Define the actual type parser
+type_parser.become(forall_type | arrow_type)
 
-        return SurfaceDataDeclaration(
-            name=name_tok.value,
-            params=params,
-            constructors=constructors,
-            location=data_kw.location,
-        )
 
-    def parse_term_declaration(self) -> SurfaceTermDeclaration:
-        """Parse: name : type = body  or  name = body."""
-        name_tok = self._expect("IDENT")
-        name = name_tok.value
-        loc = name_tok.location
+# =============================================================================
+# Term Parsers
+# =============================================================================
 
-        type_annotation = None
-        if self._consume("COLON"):
-            type_annotation = self.parse_type()
 
-        self._expect("EQUALS")
-        body = self.parse_declaration_body()
+@generate
+def atom_base():
+    """Parse base atom: paren | ident | con | number."""
+    # Parenthesized term
+    paren = yield (LPAREN >> term_parser << RPAREN).optional()
+    if paren is not None:
+        return paren
 
-        return SurfaceTermDeclaration(name, type_annotation, body, loc)
+    # Variable
+    ident = yield match_token("IDENT").optional()
+    if ident is not None:
+        return SurfaceVar(ident.value, ident.location)
 
-    def parse_declaration_body(self) -> SurfaceTerm:
-        """Parse the body of a term declaration.
+    # Number literal (treated as constructor)
+    num = yield match_token("NUMBER").optional()
+    if num is not None:
+        return SurfaceConstructor(num.value, [], num.location)
 
-        This is like parse_term but stops when it sees what looks like
-        the start of a new declaration (identifier/constructor followed by COLON).
-        """
-        term = self.parse_term()
+    # Constructor application or nullary constructor
+    con = yield match_token("CONSTRUCTOR").optional()
+    if con is not None:
+        con_name = con.value
+        con_loc = con.location
 
-        # Check if what follows looks like a new declaration
-        # (identifier/constructor followed by :)
-        # If so, don't include it in this body
-        while not self.at_end():
-            current = self._current()
-            next_tok = self._peek(1)
-
-            if current.type in ("IDENT", "CONSTRUCTOR") and next_tok.type in ("COLON", "EQUALS"):
-                # This looks like a new declaration, stop here
-                break
-
-            # Otherwise, try to continue parsing as application
-            if current.type in (
-                "IDENT",
-                "CONSTRUCTOR",
-                "LPAREN",
-                "LAMBDA",
-                "LET",
-                "CASE",
-                "TYPELAMBDA",
-                "NUMBER",
-            ):
-                loc = current.location
-                next_atom = self.parse_atom()
-                term = SurfaceApp(term, next_atom, loc)
-            else:
-                break
-
-        return term
-
-    # =====================================================================
-    # Term Parsing
-    # =====================================================================
-
-    def parse_term(self) -> SurfaceTerm:
-        """Parse a term."""
-        return self.parse_lambda()
-
-    def parse_lambda(self) -> SurfaceTerm:
-        """Parse lambda, let, case, type abstraction, or application."""
-        loc = self._current().location
-
-        # Lambda abstraction: \x -> body or \x:T -> body
-        if self._consume("LAMBDA"):
-            var_tok = self._expect("IDENT")
-            var = var_tok.value
-            var_type = None
-
-            if self._consume("COLON"):
-                var_type = self._parse_type_for_annotation()
-
-            self._expect("ARROW")
-            body = self.parse_lambda()  # Right-associative
-            return SurfaceAbs(var, var_type, body, loc)
-
-        # Type abstraction: /\a. body
-        if self._match("TYPELAMBDA") or (self._match("AT") and self._peek(1).type == "IDENT"):
-            if self._match("TYPELAMBDA"):
-                self._advance()
-            else:
-                self._advance()  # consume @
-            var_tok = self._expect("IDENT")
-            self._expect("DOT")
-            body = self.parse_lambda()
-            return SurfaceTypeAbs(var_tok.value, body, loc)
-
-        # Let binding: let x = e1 in e2
-        if self._consume("LET"):
-            name_tok = self._expect("IDENT")
-            self._expect("EQUALS")
-            value = self.parse_lambda()
-            self._expect("IN")
-            body = self.parse_lambda()
-            return SurfaceLet(name_tok.value, value, body, loc)
-
-        # Case expression: case e of { branches }
-        if self._consume("CASE"):
-            scrutinee = self.parse_lambda()
-            self._expect("OF")
-            self._expect("LBRACE")
-            branches = self.parse_branches()
-            self._expect("RBRACE")
-            return SurfaceCase(scrutinee, branches, loc)
-
-        # Application
-        return self.parse_application()
-
-    def parse_branches(self) -> list:
-        """Parse case branches separated by |."""
-        branches = []
-        while not self._match("RBRACE"):
-            branch = self.parse_branch()
-            branches.append(branch)
-            if not self._consume("BAR"):
-                break
-        return branches
-
-    def parse_branch(self) -> SurfaceBranch:
-        """Parse a case branch: pattern -> body."""
-        loc = self._current().location
-        pattern = self.parse_pattern()
-        self._expect("ARROW")
-        body = self.parse_term()
-        return SurfaceBranch(pattern, body, loc)
-
-    def parse_pattern(self) -> SurfacePattern:
-        """Parse a pattern: Con vars."""
-        loc = self._current().location
-        con_tok = self._expect("CONSTRUCTOR")
-        con_name = con_tok.value
-
-        vars = []
-        while self._match("IDENT"):
-            vars.append(self._advance().value)
-
-        return SurfacePattern(con_name, vars, loc)
-
-    def parse_application(self) -> SurfaceTerm:
-        """Parse function application (left-associative)."""
-        loc = self._current().location
-        atom = self.parse_atom()
-
-        # If the first atom is a NUMBER, don't treat it as a function
-        # This prevents "1 y = 2" from being parsed as "(1 y) = 2"
-        if isinstance(atom, SurfaceConstructor) and atom.name.isdigit():
-            return atom
-
-        # Build left-associative application chain
-        while True:
-            if self.at_end():
-                break
-
-            next_tok = self._current()
-
-            # Type application: e @T or e [T]
-            if next_tok.type == "AT":
-                self._advance()
-                type_arg = self.parse_type()
-                atom = SurfaceTypeApp(atom, type_arg, loc)
-                continue
-
-            if next_tok.type == "LBRACKET":
-                self._advance()
-                type_arg = self.parse_type()
-                self._expect("RBRACKET")
-                atom = SurfaceTypeApp(atom, type_arg, loc)
-                continue
-
-            # Type annotation: e : T
-            if next_tok.type == "COLON":
-                self._advance()
-                type_ann = self.parse_type()
-                atom = SurfaceAnn(atom, type_ann, loc)
-                continue
-
-            # Check if next token can start a new atom
-            if next_tok.type in (
-                "IDENT",
-                "CONSTRUCTOR",
-                "LPAREN",
-                "LAMBDA",
-                "LET",
-                "CASE",
-                "TYPELAMBDA",
-                "NUMBER",
-            ):
-                next_atom = self.parse_atom()
-                atom = SurfaceApp(atom, next_atom, loc)
-            else:
-                break
-
-        return atom
-
-    def parse_atom(self) -> SurfaceTerm:
-        """Parse atomic term."""
-        loc = self._current().location
-
-        # Parenthesized term
-        if self._consume("LPAREN"):
-            term = self.parse_term()
-            self._expect("RPAREN")
-            return term
-
-        # Variable
-        if self._match("IDENT"):
-            tok = self._advance()
-            return SurfaceVar(tok.value, tok.location)
-
-        # Constructor application or nullary constructor
-        if self._match("CONSTRUCTOR"):
-            return self.parse_constructor()
-
-        # Number literal (treated as constructor)
-        if self._match("NUMBER"):
-            tok = self._advance()
-            return SurfaceConstructor(tok.value, [], tok.location)
-
-        raise ParseError(f"Unexpected token: {self._current().type}", self._current().location)
-
-    def parse_constructor(self) -> SurfaceTerm:
-        """Parse constructor: Con args..."""
-        loc = self._current().location
-        con_tok = self._expect("CONSTRUCTOR")
-        con_name = con_tok.value
-
+        # Parse constructor arguments (atoms), stopping at declaration boundaries
         args = []
         while True:
-            # Try to parse argument atoms
-            if self._match("IDENT"):
-                tok = self._current()
-                args.append(SurfaceVar(tok.value, tok.location))
-                self._advance()
-            elif self._match("CONSTRUCTOR"):
-                args.append(self.parse_constructor())
-            elif self._match("LPAREN"):
-                self._advance()
-                term = self.parse_term()
-                self._expect("RPAREN")
-                args.append(term)
-            elif self._match("NUMBER"):
-                tok = self._advance()
-                args.append(SurfaceConstructor(tok.value, [], tok.location))
-            else:
+            # Check for declaration boundary before trying to parse next atom
+            is_boundary = yield is_decl_boundary
+            if is_boundary:
                 break
 
-        return SurfaceConstructor(con_name, args, loc)
+            # Check for indentation boundary
+            at_indent_boundary = yield is_indent_boundary
+            if at_indent_boundary:
+                break
 
-    # =====================================================================
-    # Type Parsing
-    # =====================================================================
+            next_atom = yield atom_base.optional()
+            if next_atom is None:
+                break
+            args.append(next_atom)
+
+        return SurfaceConstructor(con_name, args, con_loc)
+
+    # No match - fail
+    yield parsy.fail("expected term")
+
+
+@generate
+def atom_parser():
+    """Parse atom with post-fix operators."""
+    atom = yield atom_base
+
+    # Post-fix operators: @T, [T], :T
+    while True:
+        # Type application with @
+        type_app = yield (AT >> type_parser).optional()
+        if type_app is not None:
+            atom = SurfaceTypeApp(atom, type_app, atom.location)
+            continue
+
+        # Type application with brackets
+        type_bracket = yield (LBRACKET >> type_parser << RBRACKET).optional()
+        if type_bracket is not None:
+            atom = SurfaceTypeApp(atom, type_bracket, atom.location)
+            continue
+
+        # Type annotation
+        type_ann = yield (COLON >> type_parser).optional()
+        if type_ann is not None:
+            atom = SurfaceAnn(atom, type_ann, atom.location)
+            continue
+
+        break
+
+    return atom
+
+
+@generate
+def app_parser():
+    """Parse application (left-associative) with post-fix operators."""
+    loc_token = yield peek_token
+    loc = loc_token.location
+
+    # Parse first atom
+    result = yield atom_base
+
+    # Continue parsing: either application or post-fix operators
+    while True:
+        # Try post-fix type application with @
+        type_app = yield (AT >> type_parser).optional()
+        if type_app is not None:
+            result = SurfaceTypeApp(result, type_app, result.location)
+            continue
+
+        # Try post-fix type application with brackets
+        type_bracket = yield (LBRACKET >> type_parser << RBRACKET).optional()
+        if type_bracket is not None:
+            result = SurfaceTypeApp(result, type_bracket, result.location)
+            continue
+
+        # Try post-fix type annotation
+        type_ann = yield (COLON >> type_parser).optional()
+        if type_ann is not None:
+            result = SurfaceAnn(result, type_ann, result.location)
+            continue
+
+        # Check for indentation boundary before trying application
+        at_indent_boundary = yield is_indent_boundary
+        if at_indent_boundary:
+            break
+
+        # Try next atom for application
+        next_atom = yield atom_base.optional()
+        if next_atom is not None:
+            result = SurfaceApp(result, next_atom, loc)
+            continue
+
+        break
+
+    return result
+
+
+@P
+def is_decl_boundary(tokens: list[Token], index: int) -> Result:
+    """Check if we're at a declaration boundary (IDENT/CONSTRUCTOR followed by = or :)."""
+    if index < len(tokens):
+        current = tokens[index]
+        if current.type in ("IDENT", "CONSTRUCTOR"):
+            if index + 1 < len(tokens):
+                next_tok = tokens[index + 1]
+                if next_tok.type in ("COLON", "EQUALS"):
+                    return Result.success(index, True)
+    return Result.success(index, False)
+
+
+@P
+def is_indent_boundary(tokens: list[Token], index: int) -> Result:
+    """Check if we're at an indentation boundary (DEDENT or end of input)."""
+    if index >= len(tokens):
+        return Result.success(index, True)
+    if tokens[index].type == "DEDENT":
+        return Result.success(index, True)
+    return Result.success(index, False)
+
+
+@generate
+def decl_app_parser():
+    """Parse application for declaration body, stopping at declaration boundaries."""
+    loc_token = yield peek_token
+    loc = loc_token.location
+
+    # Parse first atom
+    result = yield atom_base
+
+    # Continue parsing: either application or post-fix operators
+    while True:
+        # Try post-fix type application with @
+        type_app = yield (AT >> type_parser).optional()
+        if type_app is not None:
+            result = SurfaceTypeApp(result, type_app, result.location)
+            continue
+
+        # Try post-fix type application with brackets
+        type_bracket = yield (LBRACKET >> type_parser << RBRACKET).optional()
+        if type_bracket is not None:
+            result = SurfaceTypeApp(result, type_bracket, result.location)
+            continue
+
+        # Try post-fix type annotation
+        type_ann = yield (COLON >> type_parser).optional()
+        if type_ann is not None:
+            result = SurfaceAnn(result, type_ann, result.location)
+            continue
+
+        # Check for declaration boundary before trying application
+        is_boundary = yield is_decl_boundary
+        if is_boundary:
+            break
+
+        # Check for indentation boundary
+        at_indent_boundary = yield is_indent_boundary
+        if at_indent_boundary:
+            break
+
+        # Try next atom for application
+        next_atom = yield atom_base.optional()
+        if next_atom is not None:
+            result = SurfaceApp(result, next_atom, loc)
+            continue
+
+        break
+
+    return result
+
+
+@generate
+def lambda_parser():
+    r"""Parse lambda abstraction with optional indentation for multi-line bodies.
+
+    Syntax:
+        \x -> expr                    (single-line)
+        \x ->
+          expr                        (multi-line with indentation)
+    """
+    loc_token = yield LAMBDA
+    loc = loc_token.location
+    var = yield IDENT
+    # For lambda annotations, only parse app_type (not arrow_type) to avoid
+    # consuming the lambda arrow as a type arrow
+    var_type = yield (COLON >> app_type).optional()
+    yield ARROW
+    # Check for optional indented block or single-line body
+    body = yield indented_block(term_parser) | term_parser
+    return SurfaceAbs(var, var_type, body, loc)
+
+
+@generate
+def let_parser():
+    """Parse let binding with indentation-aware body.
+
+    New syntax:
+        let x = value
+          body
+
+    Instead of old:
+        let x = value in body
+    """
+    loc_token = yield LET
+    loc = loc_token.location
+    name = yield IDENT
+    yield EQUALS
+    value = yield term_parser
+    body = yield indented_block(term_parser)
+    return SurfaceLet(name, value, body, loc)
+
+
+@generate
+def case_parser():
+    """Parse case expression with indentation-aware branches.
+
+    New syntax:
+        case expr of
+          Pat1 -> expr1
+          Pat2 -> expr2
+
+    Instead of old:
+        case expr of { Pat1 -> expr1 | Pat2 -> expr2 }
+    """
+    loc_token = yield CASE
+    loc = loc_token.location
+    scrutinee = yield term_parser
+    yield OF
+    branches = yield indented_many(branch_parser)
+    return SurfaceCase(scrutinee, branches, loc)
+
+
+@generate
+def type_abs_parser():
+    """Parse type abstraction."""
+    loc_token = yield TYPELAMBDA
+    loc = loc_token.location
+    var = yield IDENT
+    yield DOT
+    body = yield term_parser
+    return SurfaceTypeAbs(var, body, loc)
+
+
+# Declaration-aware versions that stop at declaration boundaries
+@generate
+def decl_lambda_parser():
+    """Parse lambda abstraction (declaration context) with optional indentation."""
+    loc_token = yield LAMBDA
+    loc = loc_token.location
+    var = yield IDENT
+    var_type = yield (COLON >> app_type).optional()
+    yield ARROW
+    # Check for optional indented block or single-line body
+    body = yield indented_block(decl_term_parser) | decl_term_parser
+    return SurfaceAbs(var, var_type, body, loc)
+
+
+@generate
+def decl_let_parser():
+    """Parse let binding (declaration context) with indentation-aware body."""
+    loc_token = yield LET
+    loc = loc_token.location
+    name = yield IDENT
+    yield EQUALS
+    value = yield decl_term_parser
+    body = yield indented_block(decl_term_parser)
+    return SurfaceLet(name, value, body, loc)
+
+
+@generate
+def decl_case_parser():
+    """Parse case expression (declaration context) with indentation-aware branches."""
+    loc_token = yield CASE
+    loc = loc_token.location
+    scrutinee = yield decl_term_parser
+    yield OF
+    branches = yield indented_many(decl_branch_parser)
+    return SurfaceCase(scrutinee, branches, loc)
+
+
+@generate
+def decl_type_abs_parser():
+    """Parse type abstraction (declaration context)."""
+    loc_token = yield TYPELAMBDA
+    loc = loc_token.location
+    var = yield IDENT
+    yield DOT
+    body = yield decl_term_parser
+    return SurfaceTypeAbs(var, body, loc)
+
+
+# Define the actual term parsers
+term_parser.become(lambda_parser | let_parser | case_parser | type_abs_parser | app_parser)
+decl_term_parser.become(
+    decl_lambda_parser | decl_let_parser | decl_case_parser | decl_type_abs_parser | decl_app_parser
+)
+
+# Define simple term parsers for branch bodies (use atom_parser instead of app_parser)
+simple_term_parser.become(lambda_parser | let_parser | case_parser | type_abs_parser | atom_parser)
+decl_simple_term_parser.become(
+    decl_lambda_parser | decl_let_parser | decl_case_parser | decl_type_abs_parser | atom_parser
+)
+
+
+# =============================================================================
+# Pattern and Branch Parsers
+# =============================================================================
+# Pattern and Branch Parsers
+# =============================================================================
+
+
+@generate
+def pattern_parser():
+    """Parse pattern: CON ident*."""
+    loc_token = yield peek_token
+    loc = loc_token.location
+    con = yield match_token("CONSTRUCTOR")
+    vars = yield IDENT.many()
+    return SurfacePattern(con.value, vars, loc)
+
+
+@generate
+def branch_parser():
+    """Parse branch: pattern -> term."""
+    loc_token = yield peek_token
+    loc = loc_token.location
+    pat = yield pattern_parser
+    yield ARROW
+    body = yield simple_term_parser
+    return SurfaceBranch(pat, body, loc)
+
+
+@generate
+def decl_branch_parser():
+    """Parse branch: pattern -> term (declaration context)."""
+    loc_token = yield peek_token
+    loc = loc_token.location
+    pat = yield pattern_parser
+    yield ARROW
+    body = yield decl_simple_term_parser
+    return SurfaceBranch(pat, body, loc)
+
+
+def sep_by(parser: P, sep: P) -> P:
+    """Parse zero or more parser separated by sep."""
+
+    @generate
+    def sep_by_parser():
+        first = yield parser
+        rest = yield (sep >> parser).many()
+        return [first] + rest
+
+    return sep_by_parser.optional() | parsy.success([])
+
+
+def sep_by1(parser: P, sep: P) -> P:
+    """Parse one or more parser separated by sep."""
+
+    @generate
+    def sep_by1_parser():
+        first = yield parser
+        rest = yield (sep >> parser).many()
+        return [first] + rest
+
+    return sep_by1_parser
+
+
+# =============================================================================
+# Declaration Parsers
+# =============================================================================
+
+
+@generate
+def constructor_parser():
+    """Parse constructor: CON type_atom*."""
+    con = yield match_token("CONSTRUCTOR")
+    con_name = con.value
+
+    # Parse argument types
+    arg_types = []
+    while True:
+        # Check for declaration boundary first
+        is_boundary = yield is_decl_boundary
+        if is_boundary:
+            break
+
+        next_tok = yield peek_token
+        if next_tok.type not in ("IDENT", "CONSTRUCTOR", "LPAREN"):
+            break
+
+        ty = yield atom_type
+        arg_types.append(ty)
+
+    return (con_name, arg_types)
+
+
+@generate
+def data_declaration():
+    """Parse data declaration with indentation-aware constructors.
+
+    New syntax:
+        data Name params =
+          Con1
+          Con2 type1 type2
+
+    Instead of old:
+        data Name params = Con1 | Con2 type1 type2
+    """
+    loc_token = yield DATA
+    loc = loc_token.location
+    name = yield CONSTRUCTOR
+    params = yield IDENT.many()
+    yield EQUALS
+    constrs = yield indented_many(constructor_parser)
+    return SurfaceDataDeclaration(name, params, constrs, loc)
+
+
+@generate
+def term_declaration():
+    """Parse term declaration."""
+    name_tok = yield match_token("IDENT")
+    name = name_tok.value
+    loc = name_tok.location
+    type_ann = yield (COLON >> type_parser).optional()
+    yield EQUALS
+    body = yield declaration_body
+    return SurfaceTermDeclaration(name, type_ann, body, loc)
+
+
+@generate
+def declaration_body():
+    """Parse term as declaration body."""
+    # Use decl_term_parser which stops at declaration boundaries
+    return (yield decl_term_parser)
+
+
+@generate
+def declaration_parser():
+    """Parse any declaration."""
+    result = yield data_declaration | term_declaration
+    return result
+
+
+# Program parser
+program_parser = declaration_parser.many() << EOF
+
+
+# =============================================================================
+# Parser Class and Convenience Functions
+# =============================================================================
+
+
+class Parser:
+    """Parsy-based parser for surface language."""
+
+    def __init__(self, tokens: list[Token]):
+        self.tokens = tokens
+
+    def parse(self) -> list[SurfaceDeclaration]:
+        """Parse token stream into declarations."""
+        try:
+            return program_parser.parse(self.tokens)
+        except parsy.ParseError as e:
+            loc = self._get_error_location(e)
+            raise ParseError(f"expected {e.expected}", loc)
+
+    def parse_term(self) -> SurfaceTerm:
+        """Parse a single term."""
+        try:
+            return (term_parser << EOF).parse(self.tokens)
+        except parsy.ParseError as e:
+            loc = self._get_error_location(e)
+            raise ParseError(f"expected {e.expected}", loc)
 
     def parse_type(self) -> SurfaceType:
-        """Parse a type expression."""
-        return self.parse_forall_type()
+        """Parse a single type."""
+        try:
+            return (type_parser << EOF).parse(self.tokens)
+        except parsy.ParseError as e:
+            loc = self._get_error_location(e)
+            raise ParseError(f"expected {e.expected}", loc)
 
-    def parse_forall_type(self) -> SurfaceType:
-        """Parse forall type or arrow type."""
-        loc = self._current().location
-
-        if self._consume("FORALL"):
-            # Parse one or more type variables
-            vars = []
-            while self._match("IDENT"):
-                vars.append(self._advance().value)
-
-            if not vars:
-                raise ParseError("Expected type variable after forall", self._current().location)
-
-            self._expect("DOT")
-            body = self.parse_forall_type()
-
-            # Build nested forall types
-            for var in reversed(vars):
-                body = SurfaceTypeForall(var, body, loc)
-            return body
-
-        return self.parse_arrow_type()
-
-    def parse_arrow_type(self) -> SurfaceType:
-        """Parse arrow type (right-associative)."""
-        loc = self._current().location
-        arg = self.parse_app_type()
-
-        if self._consume("ARROW"):
-            ret = self.parse_arrow_type()  # Right-associative
-            return SurfaceTypeArrow(arg, ret, loc)
-
-        return arg
-
-    def parse_app_type(self) -> SurfaceType:
-        """Parse type application (left-associative)."""
-        loc = self._current().location
-        atom = self.parse_atom_type()
-
-        # Build left-associative application chain
-        atoms = [atom]
-        while self._match("IDENT", "CONSTRUCTOR", "LPAREN"):
-            atoms.append(self.parse_atom_type())
-
-        # Combine atoms into application
-        result = atoms[0]
-        for next_atom in atoms[1:]:
-            if isinstance(result, SurfaceTypeConstructor):
-                # Add to existing constructor args
-                result = SurfaceTypeConstructor(
-                    result.name, result.args + [next_atom], result.location
-                )
-            else:
-                # Start new constructor
-                result = SurfaceTypeConstructor(str(result), [next_atom], loc)
-
-        return result
-
-    def parse_atom_type(self) -> SurfaceType:
-        """Parse atomic type."""
-        loc = self._current().location
-
-        # Parenthesized type
-        if self._consume("LPAREN"):
-            ty = self.parse_type()
-            self._expect("RPAREN")
-            return ty
-
-        # Type variable
-        if self._match("IDENT"):
-            tok = self._advance()
-            return SurfaceTypeVar(tok.value, tok.location)
-
-        # Type constructor
-        if self._match("CONSTRUCTOR"):
-            tok = self._advance()
-            return SurfaceTypeConstructor(tok.value, [], tok.location)
-
-        raise ParseError(
-            f"Unexpected token in type: {self._current().type}", self._current().location
-        )
-
-    def _parse_type_for_annotation(self) -> "SurfaceType":
-        r"""Parse type annotation, being careful not to consume lambda arrow.
-
-        When parsing a type annotation like `\x:Int -> body`, we need to
-        parse `Int` as the type, not `Int -> body`.
-
-        We parse an app type and check if the next token is ARROW followed
-        by something that looks like a type (not a term). If it looks like
-        the lambda arrow, we stop and don't include it in the type.
-        """
-        loc = self._current().location
-        arg = self.parse_app_type()
-
-        # Check if this might be an arrow type vs lambda arrow
-        # Only consume ARROW if followed by something that looks like a type
-        # and not the body of a lambda
-        if self._match("ARROW"):
-            # Look ahead: if next tokens look like a type, it might be an arrow type
-            # For now, we only parse app types in annotations (no arrows)
-            # This is a conservative approach that can be refined
-            pass
-
-        return arg
+    def _get_error_location(self, e: parsy.ParseError) -> Location:
+        idx = min(e.index, len(self.tokens) - 1)
+        return self.tokens[idx].location
 
 
-# =============================================================================
-# Convenience Functions
-# =============================================================================
-
-
+# Convenience functions (same API as old parser)
 def parse_term(source: str, filename: str = "<stdin>") -> SurfaceTerm:
     """Parse a single term from source.
 
@@ -571,11 +797,13 @@ def parse_term(source: str, filename: str = "<stdin>") -> SurfaceTerm:
         >>> print(term)
         \\x -> x
     """
-    from systemf.surface.lexer import Lexer
-
-    tokens = Lexer(source, filename).tokenize()
-    parser = Parser(tokens)
-    return parser.parse_term()
+    tokens = Lexer(source, filename, skip_indent=False).tokenize()
+    try:
+        return (term_parser << EOF).parse(tokens)
+    except parsy.ParseError as e:
+        idx = min(e.index, len(tokens) - 1)
+        loc = tokens[idx].location
+        raise ParseError(f"expected {e.expected}", loc)
 
 
 def parse_program(source: str, filename: str = "<stdin>") -> list[SurfaceDeclaration]:
@@ -593,8 +821,6 @@ def parse_program(source: str, filename: str = "<stdin>") -> list[SurfaceDeclara
         >>> len(decls)
         1
     """
-    from systemf.surface.lexer import Lexer
-
-    tokens = Lexer(source, filename).tokenize()
+    tokens = Lexer(source, filename, skip_indent=False).tokenize()
     parser = Parser(tokens)
     return parser.parse()

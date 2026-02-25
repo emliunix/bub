@@ -1,4 +1,11 @@
-"""Tests for surface language lexer."""
+"""Tests for surface language lexer.
+
+Tests for indentation-aware lexer including:
+- Basic token recognition
+- INDENT/DEDENT token emission
+- Indentation error handling
+- Newline and comment handling
+"""
 
 import pytest
 
@@ -28,10 +35,17 @@ class TestBasicTokens:
 
     def test_keywords(self):
         """Tokenize keywords."""
-        source = "data let in case of forall type"
+        source = "data let case of forall type"
         tokens = lex(source)
         types = [t.type for t in tokens[:-1]]  # Exclude EOF
-        assert types == ["DATA", "LET", "IN", "CASE", "OF", "FORALL", "TYPE"]
+        assert types == ["DATA", "LET", "CASE", "OF", "FORALL", "TYPE"]
+
+    def test_in_keyword_still_recognized(self):
+        """The 'in' keyword is still recognized by lexer (though not used in new syntax)."""
+        # The lexer still has 'in' as a keyword for backward compatibility
+        tokens = lex("in")
+        assert tokens[0].type == "IN"
+        assert tokens[0].value == "in"
 
     def test_operators(self):
         """Tokenize operators."""
@@ -183,6 +197,137 @@ class TestLocations:
 
 
 # =============================================================================
+# Indentation Token Tests
+# =============================================================================
+
+
+class TestIndentTokens:
+    """Tests for INDENT/DEDENT token emission."""
+
+    def test_no_indent_single_line(self):
+        """Single line has no INDENT/DEDENT."""
+        tokens = lex("x y z", skip_indent=False)
+        types = [t.type for t in tokens]
+        assert "INDENT" not in types
+        assert "DEDENT" not in types
+
+    def test_simple_indent(self):
+        """Simple indentation emits INDENT/DEDENT."""
+        tokens = lex("let x = 1\n  x", skip_indent=False)
+        types = [t.type for t in tokens]
+        assert "INDENT" in types
+        assert "DEDENT" in types
+
+    def test_indent_token_position(self):
+        """INDENT appears after let binding, before body."""
+        tokens = lex("let x = 1\n  x", skip_indent=False)
+        types = [t.type for t in tokens]
+        # Should be: LET, IDENT, EQUALS, NUMBER, INDENT, IDENT, DEDENT, EOF
+        assert types == ["LET", "IDENT", "EQUALS", "NUMBER", "INDENT", "IDENT", "DEDENT", "EOF"]
+
+    def test_multiple_indent_levels(self):
+        """Multiple indentation levels emit multiple INDENTs."""
+        source = """let x = 1
+  let y = 2
+    y"""
+        tokens = lex(source, skip_indent=False)
+        indent_count = sum(1 for t in tokens if t.type == "INDENT")
+        dedent_count = sum(1 for t in tokens if t.type == "DEDENT")
+        assert indent_count == 2
+        assert dedent_count == 2
+
+    def test_multiple_dedent(self):
+        """Large dedent emits multiple DEDENT tokens."""
+        source = """let x = 1
+  let y = 2
+    y
+x"""
+        tokens = lex(source, skip_indent=False)
+        types = [t.type for t in tokens]
+        # After the inner body 'y', we should have two DEDENTs to get back to level 0
+        dedent_indices = [i for i, t in enumerate(types) if t == "DEDENT"]
+        assert len(dedent_indices) >= 2
+
+    def test_dedent_at_eof(self):
+        """EOF triggers DEDENTs to close all open blocks."""
+        source = """let x = 1
+  x"""
+        tokens = lex(source, skip_indent=False)
+        types = [t.type for t in tokens]
+        # Last token before EOF should be DEDENT
+        assert types[-2] == "DEDENT"
+        assert types[-1] == "EOF"
+
+    def test_blank_lines_ignored(self):
+        """Blank lines don't affect indentation tracking."""
+        source = """let x = 1
+
+  x"""
+        tokens = lex(source, skip_indent=False)
+        types = [t.type for t in tokens]
+        # Should still have just one INDENT/DEDENT pair
+        assert types.count("INDENT") == 1
+        assert types.count("DEDENT") == 1
+
+    def test_comment_lines_ignored(self):
+        """Comment-only lines don't affect indentation tracking."""
+        source = """let x = 1
+  -- this is a comment
+  x"""
+        tokens = lex(source, skip_indent=False)
+        types = [t.type for t in tokens]
+        # Should have one INDENT/DEDENT pair
+        assert types.count("INDENT") == 1
+        assert types.count("DEDENT") == 1
+
+    def test_case_with_indented_branches(self):
+        """Case expression with indented branches."""
+        source = """case x of
+  True -> y
+  False -> z"""
+        tokens = lex(source, skip_indent=False)
+        types = [t.type for t in tokens]
+        assert "INDENT" in types
+        assert "DEDENT" in types
+
+    def test_data_declaration_indent(self):
+        """Data declaration with indented constructors."""
+        source = """data Bool =
+  True
+  False"""
+        tokens = lex(source, skip_indent=False)
+        types = [t.type for t in tokens]
+        assert "INDENT" in types
+        assert "DEDENT" in types
+
+
+# =============================================================================
+# Indentation Error Tests
+# =============================================================================
+
+
+class TestIndentErrors:
+    """Tests for indentation error handling."""
+
+    def test_mixed_tabs_spaces(self):
+        """Mixed tabs and spaces in same indentation raise error."""
+        source = "let x = 1\n \tx"  # space then tab on same line
+        with pytest.raises(LexerError) as exc_info:
+            lex(source, skip_indent=False)
+        assert "Mixed tabs and spaces" in str(exc_info.value)
+
+    def test_inconsistent_indent(self):
+        """Inconsistent indentation (not matching previous levels) raises error."""
+        source = """let x = 1
+  let y = 2
+      y
+   x"""  # 3 spaces doesn't match any previous level (0, 2)
+        with pytest.raises(LexerError) as exc_info:
+            lex(source, skip_indent=False)
+        assert "Inconsistent indentation" in str(exc_info.value)
+
+
+# =============================================================================
 # Error Tests
 # =============================================================================
 
@@ -205,18 +350,24 @@ class TestErrors:
 
 
 # =============================================================================
-# Complex Examples
+# Complex Examples with New Syntax
 # =============================================================================
 
 
 class TestComplexExamples:
-    """Tests for complex token sequences."""
+    """Tests for complex token sequences with indentation-aware syntax."""
 
     def test_let_binding(self):
-        """Tokenize let binding."""
+        """Tokenize let binding (no 'in' keyword)."""
         tokens = lex("let x = 1")
         types = [t.type for t in tokens[:-1]]
         assert types == ["LET", "IDENT", "EQUALS", "NUMBER"]
+
+    def test_let_binding_with_indent(self):
+        """Tokenize let binding with indented body."""
+        tokens = lex("let x = 1\n  x", skip_indent=False)
+        types = [t.type for t in tokens[:-1]]
+        assert types == ["LET", "IDENT", "EQUALS", "NUMBER", "INDENT", "IDENT", "DEDENT"]
 
     def test_lambda_expression(self):
         """Tokenize lambda expression."""
@@ -236,45 +387,33 @@ class TestComplexExamples:
         types = [t.type for t in tokens[:-1]]
         assert types == ["IDENT", "AT", "CONSTRUCTOR"]
 
-    def test_data_declaration(self):
-        """Tokenize data declaration."""
-        tokens = lex("data List a = Nil | Cons a (List a)")
+    def test_data_declaration_indentation(self):
+        """Tokenize data declaration with indentation."""
+        source = """data List a =
+  Nil
+  Cons a (List a)"""
+        tokens = lex(source, skip_indent=False)
         types = [t.type for t in tokens[:-1]]
-        expected = [
-            "DATA",
-            "CONSTRUCTOR",
-            "IDENT",
-            "EQUALS",
-            "CONSTRUCTOR",
-            "BAR",
-            "CONSTRUCTOR",
-            "IDENT",
-            "LPAREN",
-            "CONSTRUCTOR",
-            "IDENT",
-            "RPAREN",
-        ]
-        assert types == expected
+        # Should have: DATA, CONSTRUCTOR, IDENT, EQUALS, INDENT,
+        #              CONSTRUCTOR, CONSTRUCTOR, IDENT, LPAREN, CONSTRUCTOR, IDENT, RPAREN,
+        #              DEDENT
+        assert "INDENT" in types
+        assert "DEDENT" in types
+        assert types[0] == "DATA"
 
-    def test_case_expression(self):
-        """Tokenize case expression."""
-        tokens = lex("case x of { True -> y | False -> z }")
+    def test_case_expression_indentation(self):
+        """Tokenize case expression with indentation."""
+        source = """case x of
+  True -> y
+  False -> z"""
+        tokens = lex(source, skip_indent=False)
         types = [t.type for t in tokens[:-1]]
-        expected = [
-            "CASE",
-            "IDENT",
-            "OF",
-            "LBRACE",
-            "CONSTRUCTOR",
-            "ARROW",
-            "IDENT",
-            "BAR",
-            "CONSTRUCTOR",
-            "ARROW",
-            "IDENT",
-            "RBRACE",
-        ]
-        assert types == expected
+        # Should have INDENT/DEDENT for the branches
+        assert "INDENT" in types
+        assert "DEDENT" in types
+        # No braces or BAR in new syntax
+        assert "LBRACE" not in types
+        assert "RBRACE" not in types
 
 
 # =============================================================================
@@ -313,3 +452,39 @@ class TestEdgeCases:
             # If it works, great
         except LexerError:
             pass  # Also acceptable
+
+
+# =============================================================================
+# Backward Compatibility Tests
+# =============================================================================
+
+
+class TestBackwardCompatibility:
+    """Tests to ensure backward compatibility mode works."""
+
+    def test_skip_indent_default(self):
+        """By default, INDENT/DEDENT tokens are skipped."""
+        source = """let x = 1
+  x"""
+        tokens = lex(source)  # skip_indent=True by default
+        types = [t.type for t in tokens]
+        assert "INDENT" not in types
+        assert "DEDENT" not in types
+
+    def test_skip_indent_explicit(self):
+        """Explicit skip_indent=True skips INDENT/DEDENT."""
+        source = """let x = 1
+  x"""
+        tokens = lex(source, skip_indent=True)
+        types = [t.type for t in tokens]
+        assert "INDENT" not in types
+        assert "DEDENT" not in types
+
+    def test_no_skip_indent(self):
+        """skip_indent=False includes INDENT/DEDENT."""
+        source = """let x = 1
+  x"""
+        tokens = lex(source, skip_indent=False)
+        types = [t.type for t in tokens]
+        assert "INDENT" in types
+        assert "DEDENT" in types

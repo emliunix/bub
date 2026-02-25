@@ -88,7 +88,9 @@ def main():
     demo_section("1. Basic Data Types")
 
     run_demo(
-        """data Bool = True | False
+        """data Bool =
+  True
+  False
 """,
         "Declaring a boolean type",
     )
@@ -107,7 +109,9 @@ id = /\a. \x:a -> x
     demo_section("3. Type Application")
 
     run_demo(
-        r"""data Int = Zero | Succ Int
+        r"""data Int =
+  Zero
+  Succ Int
 id : forall a. a -> a
 id = /\a. \x:a -> x
 int_id : Int -> Int
@@ -120,9 +124,13 @@ int_id = id @Int
     demo_section("4. Pattern Matching")
 
     run_demo(
-        r"""data Bool = True | False
+        r"""data Bool =
+  True
+  False
 not : Bool -> Bool
-not = \b:Bool -> case b of { True -> False | False -> True }
+not = \b:Bool -> case b of
+  True -> False
+  False -> True
 """,
         "Pattern matching on booleans",
     )
@@ -131,10 +139,16 @@ not = \b:Bool -> case b of { True -> False | False -> True }
     demo_section("5. Maybe Type (Option)")
 
     run_demo(
-        r"""data Maybe a = Nothing | Just a
-data Bool = True | False
+        r"""data Maybe a =
+  Nothing
+  Just a
+data Bool =
+  True
+  False
 isJust : forall a. Maybe a -> Bool
-isJust = /\a. \m:Maybe a -> case m of { Nothing -> False | Just x -> True }
+isJust = /\a. \m:Maybe a -> case m of
+  Nothing -> False
+  Just x -> True
 """,
         "Generic Maybe type with operation",
     )
@@ -143,10 +157,16 @@ isJust = /\a. \m:Maybe a -> case m of { Nothing -> False | Just x -> True }
     demo_section("6. Polymorphic Lists")
 
     run_demo(
-        r"""data List a = Nil | Cons a (List a)
-data Int = Zero | Succ Int
+        r"""data List a =
+  Nil
+  Cons a (List a)
+data Int =
+  Zero
+  Succ Int
 length : forall a. List a -> Int
-length = /\a. \xs:List a -> case xs of { Nil -> Zero | Cons y ys -> Succ (length @a ys) }
+length = /\a. \xs:List a -> case xs of
+  Nil -> Zero
+  Cons y ys -> Succ (length @a ys)
 """,
         "List length function",
     )
@@ -155,9 +175,12 @@ length = /\a. \xs:List a -> case xs of { Nil -> Zero | Cons y ys -> Succ (length
     demo_section("7. Let Bindings")
 
     run_demo(
-        r"""data Int = Zero | Succ Int
+        r"""data Int =
+  Zero
+  Succ Int
 double : Int -> Int
-double = \n:Int -> let twice = Succ (Succ n) in twice
+double = \n:Int -> let twice = Succ (Succ n)
+  twice
 """,
         "Local definitions",
     )
@@ -166,7 +189,9 @@ double = \n:Int -> let twice = Succ (Succ n) in twice
     demo_section("8. Higher-Order Functions")
 
     run_demo(
-        r"""data Bool = True | False
+        r"""data Bool =
+  True
+  False
 const : forall a. forall b. a -> b -> a
 const = /\a. /\b. \x:a -> \y:b -> x
 k : Bool
@@ -181,8 +206,13 @@ k = const @Bool @Bool True False
     ✨ Demonstrated Features:
     
     ✅ Data type declarations
-       data Bool = True | False
-       data List a = Nil | Cons a (List a)
+       data Bool =
+         True
+         False
+       
+       data List a =
+         Nil
+         Cons a (List a)
     
     ✅ Polymorphic types
        forall a. a -> a
@@ -196,10 +226,13 @@ k = const @Bool @Bool True False
        \x:Int -> x + 1
     
     ✅ Pattern matching
-       case xs of { Nil -> ... | Cons y ys -> ... }
+       case xs of
+         Nil -> ...
+         Cons y ys -> ...
     
     ✅ Let bindings
-       let x = e1 in e2
+       let x = e1
+         e2
     
     ✅ Higher-order functions
        Functions that take/return other functions
