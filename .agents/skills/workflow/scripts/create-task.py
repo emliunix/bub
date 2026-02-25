@@ -112,6 +112,7 @@ def generate_task_header(
     header += f"skills: {skills}\n"
     header += f"type: {task_type}\n"
     header += f"priority: {priority}\n"
+    header += f"state: todo\n"
     header += f"dependencies: {dependencies}\n"
     header += f"refers: {refers}\n"
     header += f"kanban: {kanban}\n"
@@ -164,7 +165,9 @@ Examples:
         """,
     )
 
-    parser.add_argument("--role", "-r", required=True, choices=VALID_ROLES, help=f"Agent role. Must be one of: {', '.join(VALID_ROLES)}")
+    parser.add_argument(
+        "--role", "-r", required=True, choices=VALID_ROLES, help=f"Agent role. Must be one of: {', '.join(VALID_ROLES)}"
+    )
     parser.add_argument(
         "--expertise",
         "-e",

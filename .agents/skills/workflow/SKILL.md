@@ -54,6 +54,29 @@ flowchart TD
 | Task Agent (Architect/Implementor) | `kanban_file: str, task_file: str` | None (ends with "DONE") |
 | Manager | `kanban_file: str, done_task: str\|None, message: str\|None` | **JSON**: `{"next_task": str, "tasks": [...]}` |
 
+### Task Agent Onboarding (REQUIRED)
+
+When spawned as a task agent (Architect or Implementor), you **MUST** follow this protocol:
+
+```bash
+# Step 1: Generate your briefing from task metadata
+.agents/skills/workflow/scripts/check-task.py --task <task_file>
+
+# Step 2: Read your role definition
+# The briefing will tell you which file to read (e.g., role-architect.md)
+
+# Step 3: Load required skills
+# The briefing lists skills you must consult before starting
+```
+
+**You MUST NOT skip these steps.**
+
+The briefing provides:
+- Your role definition file path
+- Required skills to load
+- Task context (expertise, dependencies, references)
+- Reminders of what you MUST and MUST NOT do
+
 ### Manager
 
 **Purpose**: Orchestrate workflow phases and task sequencing. **Manager is the ONLY role that updates kanban state.** Manager does NOT perform real work - only creates tasks and manages kanban.md.
@@ -74,11 +97,9 @@ flowchart TD
 
 **Purpose**: Design core systems and validate implementations.
 
-**Task Title Convention**: Tasks for Architect must have titles starting with:
-- `Design - ` for design phase tasks
-- `Review - ` for review phase tasks
-
-This allows Architect to determine mode without explicit mode field.
+**Task Type Routing**: Architect uses the `type` field to determine mode:
+- `type: design` - Design phase tasks (create types.py, define contracts)
+- `type: review` - Review phase tasks (validate implementation)
 
 **Modes**:
 - **DESIGN**: Create types.py and define test contracts
@@ -87,6 +108,8 @@ This allows Architect to determine mode without explicit mode field.
 **Output Requirement**: MUST end response with message "DONE" to signal completion.
 
 **Algorithm**: See `role-architect.md`
+
+**Review Process**: See `review.md` for detailed review workflow, checklists, and output formats
 
 ### Implementor
 
@@ -108,6 +131,8 @@ This allows Architect to determine mode without explicit mode field.
 | `python-project` | `/home/liu/.claude/skills/python-project/SKILL.md` | Implementor | Python project management with uv |
 | `code-reading` | `.agents/skills/code-reading-assistant/SKILL.md` | All | Codebase exploration and Q&A |
 | `skill-management` | `.agents/skills/skill-management/SKILL.md` | All | Skill catalog and navigation |
+
+**Skill Loading**: Skills are automatically loaded by the agent tool based on the `skills` field in task metadata. Manager should select appropriate skills when creating tasks (see `role-manager.md` for skill selection guidelines).
 
 ## Helper Scripts
 
@@ -145,6 +170,19 @@ TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Ana
 .agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed bug"
 ```
 
+### check-task.py
+Generates agent briefing from task metadata. **Task agents MUST run this first** to get their role instructions.
+```bash
+# Task agent onboarding - REQUIRED first step
+.agents/skills/workflow/scripts/check-task.py --task tasks/0-design-api.md
+```
+
+This script renders a standardized briefing that tells agents:
+- Which role definition to read (e.g., `role-architect.md`)
+- What skills to load
+- Task context (expertise, dependencies, files)
+- MUST/MUST NOT reminders
+
 All scripts use PEP 723 inline dependencies and can be run directly with `./script.py`.
 See `scripts/README.md` for full documentation.
 
@@ -179,36 +217,39 @@ In task files:
 skills: [python-project, testing]
 ```
 
+## Task File Reference
+
+**Complete specification**: See `task.md` for full task file format including metadata fields, work log structure, and examples.
+
 ## Work Log Requirement
 
-**⚠️ CRITICAL**: You MUST read `work-log.md` before writing any work log.
+**⚠️ CRITICAL**: You MUST read `task.md` (Work Log section) before writing any work log.
 
 All agents must write a work log before completing their task. Work logs are the primary communication mechanism between agents.
 
-### Required Structure
+### Script Usage (REQUIRED)
 
-Every work log MUST include three sections:
+**You MUST use `log-task.py` to write work logs.** Manual editing of work logs is not allowed.
 
-| Section | Key | Required | Description |
-|---------|-----|----------|-------------|
-| Facts | **F:** | Yes | What was done (files, code, tests) |
-| Analysis | **A:** | Yes | Problems, alternatives, decisions |
-| Conclusion | **C:** | Yes | Status (ok/blocked/escalate), next steps |
+```bash
+# Generate temp file for editing
+TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
+# Edit the temp file, then commit
+.agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" "$TEMP"
 
-### Optional Sections
+# Or for quick logs
+.agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed the bug"
+```
 
-| Section | When to Use |
-|---------|-------------|
-| Suggested Work Items | Architect proposing tasks for Manager |
-| Blockers | When status = blocked |
-| References | Links to docs, related tasks |
-| Plan Adjustment Log | Manager recording plan changes |
+### Work Log Structure (Summary)
 
-### Status Values
+Every work log MUST include three sections (see `task.md` for complete spec):
 
-- `ok` - Task completed successfully
-- `blocked` - Cannot proceed, needs help
-- `escalate` - Needs different expertise
+| Section | Key | Description |
+|---------|-----|-------------|
+| Facts | **F:** | What was done (files, code, tests) |
+| Analysis | **A:** | Problems, alternatives, decisions |
+| Conclusion | **C:** | Status (ok/blocked/escalate), next steps |
 
 ### Constraint
 

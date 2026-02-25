@@ -1,5 +1,18 @@
 # Role: Implementor
 
+## Getting Started (REQUIRED)
+
+Before doing any work:
+
+1. **Run check-task.py to get your briefing:**
+   ```bash
+   .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
+   ```
+
+2. **Read this file completely** (`role-implementor.md`)
+
+3. **Load required skills** listed in the briefing
+
 ## Purpose
 Execute implementation tasks according to specification.
 
@@ -18,7 +31,7 @@ def execute(task_file):
     task = read(task_file)
     
     # 0. Work log setup (REQUIRED per skills.md Work Logging Requirement)
-    work_facts = []
+    work_facts = ["Read specification from task file"]
     work_analysis = []
     
     # 1. Load skills and expertise
@@ -31,63 +44,39 @@ def execute(task_file):
     
     # 2. Read specification
     spec = extract_spec(task)
-    work_facts.append("Read specification from task file")
     
     # 3. Implement
     try:
-        result = implement(spec)
-        work_facts.extend(result.modified_files)
-        work_facts.append("All tests pass")
+        # Implement the specification
+        modified_files = implement(spec)
+        work_facts = [modified_files, "All tests pass"]
         
-        # Write work log (REQUIRED)
-        append(task_file, f"""
-## Implementation Log
-### [{now()}] - COMPLETED
-{result.summary}
-
-## Work Log
-
-**Facts:**
-- {chr(10).join('- ' + f for f in work_facts)}
-
-**Analysis:**
-- Implementation approach: [describe your approach]
-- Challenges encountered: [any issues and how resolved]
-- Deviations from spec: [none, or explain why]
-
-**Conclusion:**
-- Implementation complete and tested
-- Ready for review
-- No blockers
-""")
+        # Check for issues outside current scope
+        discovered = check_for_unrelated_issues()
+        if discovered:
+            work_facts.append("Discovered issues for future tasks")
+        
+        # Log work using script
+        execute_script(f"{skill_path}/scripts/log-task.py", {
+            "command": "quick",
+            "task": task_file,
+            "title": "Implementation Complete",
+            "facts": work_facts,
+            "analysis": work_analysis,
+            "conclusion": "ok"
+        })
         return "ok"
         
-    except Blocker as e:
-        work_facts.append(f"Blocked: {e.message}")
-        work_analysis.append(f"Root cause: {e.root_cause}")
-        
-        # Escalation trigger - with work log (REQUIRED)
-        append(task_file, f"""
-## Implementation Log
-### [{now()}] - BLOCKED
-Blocker: {e.message}
-Requires: architect decision / plan adjustment / subdivision
-
-## Work Log - ESCALATION
-
-**Facts:**
-- {chr(10).join('- ' + f for f in work_facts)}
-
-**Analysis:**
-- {chr(10).join('- ' + a for a in work_analysis)}
-- Attempted workarounds: [if any]
-- Why escalation is necessary: [explain]
-
-**Conclusion:**
-- **ESCALATE** - Cannot complete with current specification/resources
-- Requires: [architect decision / plan adjustment / subdivision]
-- Impact: [what depends on this]
-""")
+    except Exception as e:
+        # Log escalation
+        execute_script(f"{skill_path}/scripts/log-task.py", {
+            "command": "quick", 
+            "task": task_file,
+            "title": "Blocked",
+            "facts": ["Implementation blocked"],
+            "analysis": ["Cannot proceed with current spec"],
+            "conclusion": "escalate"
+        })
         return "blocked"
 ```
 
@@ -107,6 +96,78 @@ Before starting, verify you have expertise in ALL areas listed in `task.expertis
 - (Populated from task file)
 
 If you lack any required expertise, escalate immediately.
+
+## Task Analysis (Pre-Implementation)
+
+Before implementing, analyze the task:
+
+**1. Divisibility Check**
+- Can this task be split into independent sub-tasks?
+- Are there natural boundaries (different files, different concerns)?
+- If YES: Escalate with suggested work items for subdivision
+
+**2. Prerequisites Check**
+- Are all dependencies satisfied?
+- Are required types/interfaces already defined?
+- Are test contracts established?
+- If NO: Escalate with missing prerequisites information
+
+**Example escalation for subdivision:**
+```markdown
+## Work Log
+
+### [14:30] Task Analysis | escalate
+
+**F:**
+- Analyzed task requirements
+- Identified 3 independent components: auth, validation, storage
+- Each can be implemented separately
+
+**A:**
+- Current task bundles unrelated concerns
+- Better to implement auth first, then validation, then storage
+- Reduces risk and enables parallel work
+
+**C:**
+- **ESCALATE** - Task should be subdivided
+- Requires: Manager to create 3 separate tasks
+- Impact: Better task granularity
+
+## Suggested Work Items
+
+```yaml
+work_items:
+  - description: Implement authentication layer
+    files: [src/auth.py, tests/test_auth.py]
+    expertise_required: ["Security", "Authentication"]
+    priority: high
+  - description: Implement input validation
+    files: [src/validation.py, tests/test_validation.py]
+    expertise_required: ["Data Validation"]
+    priority: medium
+```
+
+**Example escalation for missing prerequisites:**
+```markdown
+## Work Log
+
+### [14:30] Prerequisites Check | escalate
+
+**F:**
+- Attempted to implement API endpoint
+- Required User types not defined in types.py
+- Database schema interface missing
+
+**A:**
+- Cannot implement without type definitions
+- Need schema contract first
+- Implementation would be speculative
+
+**C:**
+- **ESCALATE** - Missing required prerequisites
+- Missing: User type definition, Database schema interface
+- Requires: Architect to define core types first
+```
 
 ## Completion Checklist
 

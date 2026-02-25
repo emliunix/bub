@@ -1,15 +1,118 @@
 # Role: Architect
 
+## Getting Started (REQUIRED)
+
+Before doing any work:
+
+1. **Run check-task.py to get your briefing:**
+   ```bash
+   .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
+   ```
+
+2. **Read this file completely** (`role-architect.md`)
+
+3. **Load required skills** listed in the briefing
+
 ## Purpose
 Design core systems and validate implementations against design. Two modes: DESIGN and REVIEW.
 
-## Task Title Convention
+## Task Type Routing
 
-Tasks for Architect must have titles starting with the mode indicator:
-- **Design - `** for design phase tasks (e.g., "Design - API Authentication System")
-- **Review - `** for review phase tasks (e.g., "Review - User Model Implementation")
+Architect uses the `type` field in task metadata to determine mode:
 
-This convention allows Architect to determine which mode to enter without explicit mode field in inputs. The Supervisor and Manager must follow this naming convention when creating Architect tasks.
+| Task Type | Mode | Description |
+|-----------|------|-------------|
+| `type: design` | DESIGN | Create types.py and define test contracts |
+| `type: review` | REVIEW | Validate implementation quality |
+
+**Manager MUST set correct `type` when creating Architect tasks.**
+
+**Algorithm for mode selection:**
+```python
+def determine_mode(task_file):
+    task_meta = read_yaml_frontmatter(task_file)
+    
+    if task_meta.get("type") == "design":
+        return design_mode(task_file)
+    elif task_meta.get("type") == "review":
+        return review_mode(task_file)
+    else:
+        # Default to design for exploration or unknown types
+        return design_mode(task_file)
+```
+
+## Task Analysis (Pre-Work)
+
+Before starting any work, analyze the task:
+
+**1. Scope Analysis**
+- Can this design task be divided into smaller independent design tasks?
+- Are there orthogonal concerns (e.g., data model vs. API design)?
+- If YES: Create component breakdown with architecture document
+  - Define overall architecture showing how components interact
+  - Create work items for each component design with dependencies
+  - Components are designed in dependency order (dependencies first)
+  - DON'T escalate - handle scope as part of design work
+
+**2. Prerequisites Check (Design Mode)**
+- Do you have access to existing types.py and relevant code?
+- Are requirements clear and complete?
+- Are there existing patterns to follow?
+- If requirements unclear: Escalate with questions
+
+**3. Discovered Issues (During Work)**
+- While designing/reviewing, you may find issues unrelated to current task
+- Examples: bugs in existing code, missing documentation, technical debt
+- Log these as discovered work items for future tasks
+
+**Example: Large scope component breakdown**
+```markdown
+## Work Log
+
+### [10:00] Scope Analysis | ok
+
+**F:**
+- Analyzed design requirements for API layer
+- Identified 2 independent components: authentication and data layer
+- Created architecture document defining component interactions
+
+**A:**
+- Authentication and data layer are separate concerns
+- Auth service must be designed first (other components depend on it)
+- Data layer can be designed in parallel with auth client components
+- Architecture ensures organic integration of components
+
+**C:**
+- Large scope decomposed into component designs
+- Architecture document defines how components work together
+- Component work items created with annotated dependencies
+
+## Component Work Items
+
+```yaml
+work_items:
+  - description: Design authentication service - core types and interfaces
+    files: [docs/auth_architecture.md, src/types/auth.py]
+    expertise_required: ["Security", "Authentication", "Type Design"]
+    priority: high
+    dependencies: []  # No dependencies, design first
+    
+  - description: Design data access layer - types and interfaces  
+    files: [docs/data_architecture.md, src/types/data.py]
+    expertise_required: ["Data Modeling", "Type Design"]
+    priority: high
+    dependencies: []  # No dependencies, can design in parallel with auth
+    
+  - description: Design auth client components
+    files: [docs/auth_client.md, src/types/auth_client.py]
+    expertise_required: ["Security", "Type Design"]
+    priority: medium
+    dependencies: ["Design authentication service"]  # Depends on auth service design
+```
+
+**Note:** Manager will create these tasks respecting the dependency graph.
+Components with no dependencies can be designed in parallel.
+Components with dependencies wait for their dependencies to complete.
 
 ## Modes
 
@@ -27,202 +130,273 @@ Create core specifications in types.py and define test contracts.
 
 ```python
 def design_mode(task_file):
-    # 0. Verify work log requirement (see skills.md Work Logging Requirement)
+    """
+    Design core types and architecture with full-picture vision.
+    
+    For large scope: Break down into components and define architecture,
+    DON'T escalate. Create work items for sub-component designs with dependencies.
+    """
+    # 0. Verify work log requirement
     # Must write work log before completing
     
     # 1. Load context
-    # PSEUDO-CODE: Read task metadata and content, load specified skills
     task = read(task_file)
     load_skills(task.skills)
     
-    # 2. Design core types
-    # PSEUDO-CODE: Analyze requirements and design types in types.py
-    # If types.py already exists: merge new types, don't overwrite
-    # If conflict with existing types: escalate with analysis
-    types_spec = analyze_requirements(task)
-    write("src/bub/types.py", types_spec)  # IMPLEMENTATION: Handle merge/append
+    # 2. Analyze scope
+    scope_analysis = analyze_scope(task)
+    is_large_scope = scope_analysis.requires_component_breakdown
     
-    # 3. Define tests
-    # PSEUDO-CODE: Generate test specifications based on types
-    # Tests serve as contracts for Implementor to fulfill
-    test_spec = generate_tests(types_spec)
-    write("tests/test_types.py", test_spec)
-    
-    # Track facts for work log
-    facts = [
-        f"Defined {len(types_spec)} types in types.py",
-        f"Created test cases in tests/test_types.py"
-    ]
+    # Track facts and analysis
+    facts = []
     analysis_notes = []
-    work_items = []
     
-    # 4. Log work items for Manager to create tasks
-    # Architect SUGGESTS work items; Manager CREATES task files
-    for component in components:
-        work_items.append({
-            "description": f"Implement {component}",
-            "files": [f"src/{component}.py"],
-            "related_domains": ["Software Engineering", component_domain(component)],
-            "expertise_required": ["Code Implementation", f"{component} Domain"],
-            "dependencies": [],
-            "estimated_effort": "medium"
+    if is_large_scope:
+        # Large scope: Create architecture document
+        architecture = design_architecture(scope_analysis)
+        # Write architecture to docs/architecture.md
+        
+        # Build component work items with dependencies
+        work_items = build_component_work_items(architecture)
+        
+        facts = [
+            "Created architecture document",
+            "Defined component work items with dependencies"
+        ]
+        
+        analysis = [
+            "Components designed to work together organically",
+            "Dependencies documented for parallel/sequential execution"
+        ]
+        
+        # Log work using script
+        execute_script(f"{skill_path}/scripts/log-task.py", {
+            "command": "quick",
+            "task": task_file,
+            "title": "Architecture Design Complete",
+            "facts": facts,
+            "analysis": analysis,
+            "conclusion": "ok",
+            "work_items": work_items
         })
-        analysis_notes.append(f"Component {component} requires domain expertise in {component_domain(component)}")
-    
-    # 5. Append work items to task file (Manager will read these)
-    append(task_file, f"""
-## Architect Output
-- types.py updated with {len(types_spec)} types
-- tests defined in tests/test_types.py
-
-## Work Items (for Manager)
-The following work items should be turned into task files by the Manager:
-
-{format_work_items(work_items)}
-
-NOTE: Manager will create actual task files with appropriate metadata (role, skills, expertise, dependencies).
-
-## Work Log
-
-### [{now()}] Design Session
-
-**Facts:**
-- {chr(10).join('- ' + f for f in facts)}
-- Created {len(work_items)} work items for implementation
-
-**Analysis:**
-- {chr(10).join('- ' + note for note in analysis_notes)}
-- Design patterns used: [document any architectural decisions]
-
-**Conclusion:**
-- Design complete and ready for implementation
-- Types and tests committed to codebase
-- No blockers identified
-""")
-    
-    return work_items
+        
+        return work_items
+        
+    else:
+        # Small scope: Design directly
+        types_spec = analyze_requirements(task)
+        # Write types to src/bub/types.py
+        
+        # Define tests
+        test_spec = generate_tests(types_spec)
+        # Write tests to tests/test_types.py
+        
+        facts.extend([
+            "Defined types in types.py",
+            "Created test contracts"
+        ])
+        
+        # Create implementation work items
+        work_items = []
+        for component in extract_components(types_spec):
+            work_items.append({
+                "description": f"Implement {component}",
+                "files": [f"src/{component}.py"],
+                "related_domains": ["Software Engineering"],
+                "expertise_required": ["Code Implementation"],
+                "dependencies": [],
+                "priority": "medium"
+            })
+        
+        # Check for discovered issues
+        discovered = check_for_discovered_issues_during_design()
+        if discovered:
+            facts.append("Discovered issues for future tasks")
+        
+        # Log work using script
+        execute_script(f"{skill_path}/scripts/log-task.py", {
+            "command": "quick",
+            "task": task_file,
+            "title": "Design Complete",
+            "facts": facts,
+            "analysis": ["Design decisions documented"],
+            "conclusion": "ok",
+            "work_items": work_items,
+            "discovered_issues": discovered
+        })
+        
+        return work_items
 ```
 
 ### Mode: REVIEW (phase=execute, sub_phase=review)
 Validate implementation quality and correctness.
 
+**Full documentation:** See `review.md` for detailed review process, checklists, and output formats.
+
 **Inputs:**
 - Implementation task file (completed)
-- Original specification
+- Original specification (from refers field or linked task)
 
 **Outputs:**
 - Review verdict (pass / escalate)
-- If escalate: new work items appended to task
+- If escalate: additional work items appended to same task file
+
+**Quick Reference:**
+- Load context: Task metadata, work log, modified files, original spec
+- Analyze changes: Review code, find issues, check core modifications
+- Evaluate compliance: Compare against spec, assess system impact
+- Make decision: Pass if acceptable, escalate if critical issues found
 
 ```python
 def review_mode(task_file):
-    impl = read(task_file)
+    """
+    Review implementation against design specification.
     
-    # 0. Verify work log requirement (see skills.md Work Logging Requirement)
-    # Must write work log before completing
+    See review.md for detailed review process.
     
-    # Check for issues
-    # PSEUDO-CODE: Review implementation against original design
-    # Load original spec from design task (via refers field or linked task)
-    issues = []
-    review_facts = [f"Reviewed implementation in {task_file}"]
+    High-level flow:
+    1. Load context (task metadata, work log, modified files, spec)
+    2. Analyze code changes for issues and core modifications
+    3. Evaluate spec compliance and system impact
+    4. Make pass/escalate decision and log result
     
-    # Check for anti-patterns and incomplete work
-    # EXTEND: Add more keywords: FIXME, HACK, XXX, temp_, quick_fix
-    if "workaround" in impl.lower():
-        issues.append("Implementation uses workaround")
-    if "TODO" in impl:
-        issues.append("Incomplete: TODOs remain")
+    Returns:
+        "pass" if implementation meets specification
+        "escalate" if issues found requiring fixes
+    """
+    # Step 1: Load review context
+    # See review.md for load_review_context() details
+    context = load_review_context(task_file)
     
-    # Compare implementation to specification
-    # PSEUDO-CODE: Load spec from original design task, verify implementation
-    # If spec unclear or ambiguous: escalate with questions
-    if not matches_spec(impl, read_spec()):
-        issues.append("Deviates from specification")
+    # Step 2: Analyze changes
+    # See review.md for:
+    # - analyze_code_changes(): Review code for issues
+    # - check_core_modifications(): Check core type/protocol changes
+    issues = analyze_code_changes(context.modified_files, context.original_spec)
+    core_mods = check_core_modifications(context.modified_files, context.original_spec)
     
-    if issues:
-        review_facts.append(f"Found {len(issues)} issues")
-        
-        # ESCALATION - Log analysis, Manager creates task
-        log_escalation_analysis(task_file, issues)
-        
-        # Write work log for escalation
-        append(task_file, f"""
-## Review Log
-### [{now()}] Architect - ESCALATED
-Issues: {issues}
-Analysis logged above. Manager will create escalation task.
-
-## Work Log - ESCALATION
-
-**Facts:**
-- {chr(10).join('- ' + f for f in review_facts)}
-- Specification violations detected
-
-**Analysis:**
-- {chr(10).join('- Issue: ' + issue for issue in issues)}
-- Root cause analysis logged in escalation section above
-- Impact assessment: [document what depends on this]
-
-**Conclusion:**
-- **ESCALATE** - Implementation does not meet specification
-- Requires design review and potential spec changes
-- Escalation task will be created by Manager
-""")
-        return "escalate"
-    else:
-        review_facts.append("No issues found - implementation matches specification")
-        
-        # Write work log for pass
-        append(task_file, f"""
-## Review Log
-### [{now()}] Architect - PASSED
-No issues found
-
-## Work Log
-
-**Facts:**
-- {chr(10).join('- ' + f for f in review_facts)}
-
-**Analysis:**
-- Implementation follows design specification
-- Code quality acceptable
-- No architectural concerns
-
-**Conclusion:**
-- **PASS** - Implementation approved
-- Ready for integration
-""")
-        return "pass"
-
-def log_escalation_analysis(original_task, issues):
-    # Architect logs ANALYSIS work item in the original task file
-    # Manager will create the actual escalation task file
-    # 
-    # PSEUDO-CODE: Extract root cause from issues, create work item for Manager
-    # If issues indicate fundamental design flaw: suggest redesign work item
-    # If issues indicate implementation error: suggest fix work item
-    # Format work item as structured data (YAML/JSON) for reliable parsing
+    # Step 3: Evaluate compliance
+    # See review.md for evaluate_spec_compliance() details
+    compliance, deviations, assessment = evaluate_spec_compliance(
+        context.implementation, 
+        context.original_spec,
+        core_mods
+    )
     
-    append(original_task, f"""
-## Review Log - ESCALATION ANALYSIS
+    # Step 4: Make decision
+    # See review.md for make_review_decision() details
+    decision, work_items, reasoning = make_review_decision(issues, core_mods, compliance)
+    
+    # Log result using log-task.py
+    # See review.md for log_review_result() details
+    execute_script(f"{skill_path}/scripts/log-task.py", {
+        "command": "quick",
+        "task": task_file,
+        "title": f"Review {'Passed' if decision == 'pass' else 'Escalated'}",
+        "content": format_review_content(decision, issues, core_mods, compliance, work_items)
+    })
+    
+    return decision
 
-### Root Cause Analysis
-{analyze_root_cause(issues)}
 
-### Resolution Work Item (for Manager)
-{{
-    "description": "Fix issues in implementation",
-    "files": [extract_files(original_task)],
-    "related_domains": ["Problem Analysis", "System Design"],
-    "expertise_required": ["Critical Thinking", "Root Cause Analysis"],
-    "dependencies": [],
-    "priority": "high",
-    "notes": "{escape_quotes(issues)}"
-}}
+# Review helper functions - see review.md for full details
 
-Manager should create task file for this escalation.
-""")
+def load_review_context(task_file):
+    """Load all context needed for review. See review.md for details."""
+    pass
+
+def analyze_code_changes(modified_files, original_spec):
+    """Review code changes for issues. See review.md for details."""
+    pass
+
+def check_core_modifications(modified_files, original_spec):
+    """Check if changes modify core types/protocols. See review.md for details."""
+    pass
+
+def evaluate_spec_compliance(implementation, original_spec, core_mods):
+    """Evaluate spec compliance. See review.md for details."""
+    pass
+
+def make_review_decision(issues, core_mods, compliance):
+    """Make pass/escalate decision. See review.md for details."""
+    pass
+
+def format_review_content(decision, issues, core_mods, compliance, work_items):
+    """Format review content for work log. See review.md for output format."""
+    pass
+
+
+def list_modified_files(impl):
+    """Extract list of files modified in implementation."""
+    pass
+
+
+def type_definitions_match(impl, spec):
+    """Check if type definitions in implementation match specification."""
+    pass
+
+
+def interfaces_match(impl, spec):
+    """Check if interfaces in implementation match specification."""
+    pass
+
+
+def behavior_matches(impl, spec):
+    """Check if behavior matches specification (test contracts)."""
+    pass
+
+
+def architecture_principles_followed(impl):
+    """Check if architecture principles are followed."""
+    pass
+
+
+def is_critical(issue):
+    """
+    Determine if issue is critical.
+    
+    Critical criteria:
+    - Security vulnerability
+    - Data corruption risk
+    - Major specification violation
+    - Breaking API change
+    """
+    pass
+
+
+def extract_affected_files(issue, impl):
+    """Extract files affected by this issue."""
+    pass
+
+
+def analyze_root_cause(issue):
+    """Analyze root cause of issue."""
+    pass
+
+
+def format_escalation_log(facts, issues, work_items):
+    """
+    Format escalation work log entry.
+    
+    Structure:
+    - Facts: What was reviewed
+    - Analysis: Issues found and root causes  
+    - Conclusion: ESCALATE status
+    - Additional Work Items: YAML formatted for Manager
+    """
+    pass
+
+
+def format_pass_log(facts):
+    """
+    Format pass work log entry.
+    
+    Structure:
+    - Facts: What was reviewed
+    - Analysis: Why implementation meets spec
+    - Conclusion: PASS status
+    """
+    pass
 ```
 
 ## Work Item Format

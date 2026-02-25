@@ -149,6 +149,72 @@ echo "Temp file: $TEMP_FILE"
 - Logs are consistently formatted with Facts/Analysis/Conclusion structure
 - Workspace-local temp files are easy to find and edit
 
+### 4. check-task.py
+
+Generates agent briefing from task file metadata. Relieves Supervisor from manually crafting prompts for task agents.
+
+**Usage:**
+```bash
+# Generate briefing for task agent
+.agents/skills/workflow/scripts/check-task.py --task tasks/0-design-api.md
+```
+
+**Output:**
+Renders a standardized briefing that agents should follow:
+
+```markdown
+# Agent Briefing: Architect
+
+**Role:** Architect
+**Task Type:** design
+**Priority:** high
+
+## Required Actions
+
+1. **Read your role definition:** `role-architect.md`
+   - You MUST understand your responsibilities
+   - You MUST follow the algorithm specified in your role
+
+2. **Load required skills:**
+   - `code-reading` (read SKILL.md)
+
+## Task Context
+
+**Expertise Required:** System Design, Python
+**Task File:** tasks/0-design-api.md
+
+## Instructions
+
+You are a **Architect** agent.
+
+**You MUST:**
+- Read `role-architect.md` completely before starting
+- Follow the instructions in your role definition strictly
+- Load and consult all required skills before proceeding
+- Write a work log using `log-task.py` before completing
+
+**Do NOT:**
+- Skip reading your role definition
+- Deviate from your role's algorithm without escalation
+- Spawn subagents or create new tasks
+
+## Your Expertise
+
+Apply your expertise in these domains:
+- System Design
+- Python
+
+---
+
+**Begin by reading:** `role-architect.md`
+```
+
+**Purpose:**
+- Ensures agents always load their role definition
+- Provides consistent task context
+- Lists required skills and expertise
+- Reminds agents of work log requirements
+
 ## File Naming Convention
 
 All files in `./tasks/` use global sequenced numbering:
@@ -171,6 +237,7 @@ expertise: ['System Design', 'Python']
 skills: ['code-reading']
 type: design
 priority: high
+state: todo  # todo | done | escalated | cancelled
 dependencies: []
 refers: []
 kanban: tasks/0-kanban-project.md

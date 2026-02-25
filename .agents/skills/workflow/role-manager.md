@@ -83,42 +83,32 @@ def execute(input):
 
 def create_kanban(user_request):
     """Create initial kanban with exploration task."""
-    kanban_id = get_next_id("./tasks/")
-    kanban = {
-        "meta": {"id": kanban_id, "created": now(), "request": user_request},
-        "phase": "exploration",
-        "tasks": [],
-        "current": None,
-        "log": []
-    }
-    
-    # Initial task: ALWAYS exploration (Manager never explores)
-    initial_task = f"./tasks/{get_next_id('./tasks/')}-explore-request.md"
-    write(initial_task, {
-        "role": "Architect",
-        "skills": ["code-reading"],
-        "expertise": ["System Design", "Domain Analysis", "Code Exploration"],
-        "dependencies": [],
-        "refers": [],
-        "type": "exploration",
-        "priority": "high"
+    # Create kanban file
+    kanban_file = execute_script(f"{skill_path}/scripts/create-kanban.py", {
+        "title": "Workflow",
+        "request": user_request
     })
     
+    # Create initial exploration task
+    initial_task = execute_script(f"{skill_path}/scripts/create-task.py", {
+        "role": "Architect",
+        "type": "exploration",
+        "kanban": kanban_file
+    })
+    
+    # Update kanban with initial task
+    kanban = read(kanban_file)
     kanban["tasks"] = [initial_task]
     kanban["current"] = initial_task
-    
-    path = f"./tasks/{kanban_id}-kanban-{slug(user_request)}.md"
-    write(path, kanban)
+    write(kanban_file, kanban)
     
     # Log plan creation
-    log_plan_adjustment(path, "kanban_created", {
-        "reason": "New request received",
-        "action": "Created exploration task",
-        "next_step": "Architect will explore codebase and create work items"
+    log_plan_adjustment(kanban_file, "kanban_created", {
+        "action": "Created exploration task"
     })
     
     return {
-        "kanban_file": path,
+        "kanban_file": kanban_file,
         "next_task": initial_task,
         "tasks": [initial_task]
     }
@@ -128,17 +118,14 @@ def reconcile_tasks(kanban_file, done_task, tasks):
     kb = read(kanban_file)
     done_content = read(done_task)
     
-    # 0. Verify work log exists (REQUIRED)
-    if "## Work Log" not in done_content:
-        raise Error("Task missing work log. Must write work log before completing.")
+    # 0. Validate work log structure (REQUIRED)
+    is_valid, errors = validate_work_log(done_content)
+    if not is_valid:
+        raise Error("Invalid work log structure")
     
-    # 1. Remove completed task from dependency arrays
+    # 1. Keep completed task in dependency arrays for context
+    # Dependencies serve as context trail for implementers/architects
     remaining = [t for t in tasks if t != done_task]
-    for task in remaining:
-        meta = read(task)
-        if done_task in meta.get("dependencies", []):
-            meta["dependencies"].remove(done_task)
-            write(task, meta)
     
     # 2. Extract information from completed task
     task_meta = read(done_task)
@@ -151,6 +138,10 @@ def reconcile_tasks(kanban_file, done_task, tasks):
     
     if blockers:
         # Task blocked - need more information
+        # Update task state to escalated
+        task_meta["state"] = "escalated"
+        write(done_task, task_meta)
+        
         # Create exploration task to resolve blocker
         exploration_task = create_exploration_task(kanban_file, done_task, blockers)
         new_tasks.append(exploration_task)
@@ -163,22 +154,63 @@ def reconcile_tasks(kanban_file, done_task, tasks):
         })
     
     elif escalations:
-        # Escalation requires redesign
-        kb["phase"] = "design"
+        # Escalation: Task needs review before continuing
+        # Update task state to escalated
+        task_meta["state"] = "escalated"
+        write(done_task, task_meta)
         
-        # Create redesign task for Architect
-        redesign_task = create_redesign_task(kanban_file, done_task, escalations)
-        new_tasks.append(redesign_task)
+        # Manager assigns SAME task file to Architect for review (no new task created)
+        # Architect will append review results to same file
+        # Then Manager creates prerequisite tasks and updates dependencies
         
-        log_plan_adjustment(kanban_file, "escalation_received", {
-            "escalated_task": done_task,
-            "issues": escalations,
-            "action": "Created redesign task for Architect",
-            "new_phase": "design"
-        })
+        # Check if escalation contains work items (review already done)
+        additional_items = extract_additional_work_items(done_content)
+        
+        if additional_items:
+            # Review has been completed, work items extracted
+            # Create prerequisite tasks from the work items
+            prereq_tasks = []
+            for item in additional_items:
+                prereq_tasks.extend(create_tasks_from_work_item(item, done_task))
+            
+            new_tasks.extend(prereq_tasks)
+            
+            # Update original task dependencies to include new prerequisite tasks
+            current_deps = task_meta.get("dependencies", [])
+            task_meta["dependencies"] = current_deps + prereq_tasks
+            write(done_task, task_meta)
+            
+            # Keep original task in remaining (will be retried after prereqs complete)
+            remaining.append(done_task)
+            
+            log_plan_adjustment(kanban_file, "escalation_prerequisites_created", {
+                "original_task": done_task,
+                "issues": escalations,
+                "prerequisite_tasks": prereq_tasks,
+                "action": "Created prerequisite tasks from escalation; original task updated with dependencies"
+            })
+        else:
+            # Escalation just happened, need to assign to Architect for review
+            # Don't create new task - same task file continues
+            # Architect will be assigned to review this same file
+            # After review, work items will be added, then this branch will trigger
+            
+            log_plan_adjustment(kanban_file, "escalation_for_review", {
+                "task": done_task,
+                "issues": escalations,
+                "action": "Task assigned to Architect for review using same task file",
+                "next_step": "Architect will review and add work items to same file"
+            })
+            
+            # Put task back in queue for Architect to review
+            remaining.append(done_task)
     
     elif work_items:
         # Normal completion with work items
+        # Mark task as done
+        task_meta["state"] = "done"
+        write(done_task, task_meta)
+        
         for item in work_items:
             # Determine if we have enough info to create tasks
             if not has_adequate_information(item):
@@ -204,6 +236,10 @@ def reconcile_tasks(kanban_file, done_task, tasks):
     
     else:
         # Task completed but no work items
+        # Mark task as done
+        task_meta["state"] = "done"
+        write(done_task, task_meta)
+        
         # Check if this was the final task
         if not remaining and not new_tasks:
             log_plan_adjustment(kanban_file, "workflow_complete", {
@@ -281,129 +317,69 @@ def format_details(details):
     return "\n".join(lines)
 
 def create_exploration_task(kanban_file, blocked_task, blockers):
-    """Create task to explore and resolve blockers."""
-    task_id = get_next_id("./tasks/")
-    task_path = f"./tasks/{task_id}-explore-blockers.md"
-    
-    write(task_path, {
+    """Create exploration task to resolve blockers."""
+    return execute_script("scripts/create-task.py", {
         "role": "Architect",
-        "skills": ["code-reading"],
-        "expertise": ["Problem Analysis", "Code Exploration", "System Design"],
-        "dependencies": [],
-        "refers": [blocked_task],
         "type": "exploration",
-        "priority": "critical",
-        "context": {
-            "blocked_task": blocked_task,
-            "blockers": blockers
-        }
+        "kanban": kanban_file,
+        "refers": blocked_task
     })
-    
-    return task_path
+
 
 def create_exploration_for_item(kanban_file, parent_task, work_item):
-    """Create exploration task for work item with inadequate information."""
-    task_id = get_next_id("./tasks/")
-    slug_desc = slug(work_item.get("description", "exploration"))[:30]
-    task_path = f"./tasks/{task_id}-explore-{slug_desc}.md"
-    
-    write(task_path, {
+    """Create exploration task for work item with missing info."""
+    return execute_script("scripts/create-task.py", {
         "role": "Architect",
-        "skills": ["code-reading"],
-        "expertise": ["Code Exploration", "Requirements Analysis"],
-        "dependencies": [],
-        "refers": [parent_task],
-        "type": "exploration",
-        "priority": "high",
-        "context": {
-            "parent_task": parent_task,
-            "work_item_description": work_item.get("description"),
-            "missing_info": "files or domains"
-        }
+        "type": "exploration", 
+        "kanban": kanban_file,
+        "refers": parent_task
     })
-    
-    return task_path
+
 
 def create_redesign_task(kanban_file, escalated_task, issues):
     """Create redesign task for escalated implementation."""
-    task_id = get_next_id("./tasks/")
-    task_path = f"./tasks/{task_id}-redesign.md"
-    
-    write(task_path, {
+    return execute_script("scripts/create-task.py", {
         "role": "Architect",
-        "skills": ["code-reading"],
-        "expertise": ["System Design", "Critical Thinking", "Root Cause Analysis"],
-        "dependencies": [],
-        "refers": [escalated_task],
         "type": "redesign",
-        "priority": "critical",
-        "context": {
-            "escalated_task": escalated_task,
-            "issues": issues
-        }
+        "kanban": kanban_file,
+        "refers": escalated_task
     })
-    
-    return task_path
 ```
 
 ## Task Creation from Work Items
 
 ```python
 def create_tasks_from_work_item(item, parent_task):
-    """Create tasks from work item. Returns list of task paths."""
+    """Create tasks from work item."""
     tasks = []
     
-    # Determine if Architect review is needed
-    needs_review = (
-        "core types" in item.get("description", "").lower() or
-        any("architecture" in d.lower() for d in item.get("related_domains", []))
-    )
+    # Check if review needed (core types or architecture involved)
+    needs_review = is_architecture_related(item)
     
     if needs_review:
-        # Task 1: Architect Review
-        task1_id = get_next_id("./tasks/")
-        task1_path = f"./tasks/{task1_id}-{slug(item['description'][:40])}-review.md"
-        write(task1_path, {
+        # Create review task first
+        review = execute_script("scripts/create-task.py", {
             "role": "Architect",
-            "skills": item.get("skills", ["code-reading"]),
-            "expertise": item.get("expertise_required", ["System Design"]),
-            "dependencies": [parent_task],
-            "refers": [],
             "type": "review",
-            "priority": item.get("priority", "high"),
-            "work_item": item
+            "dependencies": parent_task
         })
-        tasks.append(task1_path)
+        tasks.append(review)
         
-        # Task 2: Implementation (depends on review)
-        task2_id = get_next_id("./tasks/")
-        task2_path = f"./tasks/{task2_id}-{slug(item['description'][:40])}-implement.md"
-        write(task2_path, {
+        # Create implementation task (depends on review)
+        impl = execute_script("scripts/create-task.py", {
             "role": "Implementor",
-            "skills": item.get("skills", []),
-            "expertise": item.get("expertise_required", ["Code Implementation"]),
-            "dependencies": [task1_path],
-            "refers": [],
             "type": "implement",
-            "priority": item.get("priority", "medium"),
-            "work_item": item
+            "dependencies": review
         })
-        tasks.append(task2_path)
+        tasks.append(impl)
     else:
-        # Direct implementation (no review needed)
-        task_id = get_next_id("./tasks/")
-        task_path = f"./tasks/{task_id}-{slug(item['description'][:40])}-implement.md"
-        write(task_path, {
+        # Direct implementation
+        impl = execute_script("scripts/create-task.py", {
             "role": "Implementor",
-            "skills": item.get("skills", []),
-            "expertise": item.get("expertise_required", ["Code Implementation"]),
-            "dependencies": [parent_task],
-            "refers": [],
             "type": "implement",
-            "priority": item.get("priority", "medium"),
-            "work_item": item
+            "dependencies": parent_task
         })
-        tasks.append(task_path)
+        tasks.append(impl)
     
     return tasks
 ```
@@ -413,43 +389,164 @@ def create_tasks_from_work_item(item, parent_task):
 ```python
 def extract_work_items(task_content):
     """Extract work items from task file content."""
-    # PSEUDO-CODE: Parse markdown for Work Items section
-    # Look for structured data (YAML/JSON) in the task file
-    # Return list of work item dicts
     work_items = []
     
-    # Look for "## Work Items" section
-    if "## Work Items" in task_content:
-        section = extract_section(task_content, "## Work Items")
-        # Parse items from section
-        # Handle both YAML list format and JSON
-        
+    # Find Work Items section
+    if "## Work Items" not in task_content:
+        return work_items
+    
+    # Extract YAML between section header and next H2 or EOF
+    section = extract_yaml_section(task_content, "## Work Items")
+    if section:
+        work_items = yaml.safe_load(section).get("work_items", [])
+    
     return work_items
 
+def validate_work_log(task_content):
+    """
+    Validate work log has proper F/A/C structure.
+    
+    Required structure per task.md (Work Log section):
+    - '## Work Log' section exists
+    - At least one entry with '### [timestamp] Title | status' header
+    - Entry has **F:** (Facts) section
+    - Entry has **A:** (Analysis) section  
+    - Entry has **C:** (Conclusion) with status: ok/blocked/escalate
+    
+    For Architect tasks:
+    - If status is 'ok', should have '## Suggested Work Items' section
+    
+    Returns: (is_valid: bool, errors: list[str])
+    """
+    pass
+
 def extract_escalations(task_content):
-    """Extract escalation information from task."""
-    escalations = []
+    """
+    Extract escalation information from task using structured parsing.
     
-    if "ESCALATE" in task_content.upper() or "## Work Log - ESCALATION" in task_content:
-        # Extract escalation details
-        # Look for issue descriptions in work log
-        pass
+    Parse work log entries by their F/A/C structure and status header.
+    Look for entries with status '| escalate' or '| blocked' in header.
     
-    return escalations
+    Escalation triggers (OR conditions):
+    - Header ends with '| escalate' or '| blocked'
+    - C: section status word is 'escalate' or 'blocked'
+    - Entry has '## Suggested Work Items' with critical priority items
+      AND status indicates escalation
+    
+    Returns list of escalation dicts with:
+    - status: 'escalate' or 'blocked'
+    - timestamp: from entry header
+    - facts: what was attempted (F: section)
+    - analysis: root cause analysis (A: section)
+    - required_work: from Suggested Work Items section (if present)
+    """
+    pass
+
+def extract_additional_work_items(task_content):
+    """
+    Extract additional work items from review escalation.
+    
+    When a review escalates (e.g., implementation doesn't meet spec),
+    Architect adds work items to the same task file under 
+    '## Additional Work Items (For Manager)' section.
+    
+    These work items represent prerequisite tasks that must be completed
+    before the original review task can proceed.
+    
+    Returns list of work item dicts, same format as extract_work_items().
+    """
+    pass
+
+def parse_work_log_entries(content):
+    """
+    Parse work log section into structured entries.
+    
+    Each entry has format per task.md (Work Log section):
+    ### [timestamp] Title | status
+    **F:** Facts section (concrete actions)
+    **A:** Analysis section (problems, alternatives)
+    **C:** Conclusion section (status, next steps)
+    
+    Extract all entries between '## Work Log' and next H2 or EOF.
+    Parse header to extract timestamp, title, status.
+    """
+    pass
+
+def extract_section(entry_content, section_marker):
+    """
+    Extract content for a specific F/A/C section.
+    
+    Section starts at marker (e.g., '**F:**') and ends at:
+    - Next **X:** marker (**A:** or **C:**)
+    - Next work log entry header (### [timestamp])
+    - End of entry content
+    """
+    pass
+
+def should_trigger_escalation_recovery(entry):
+    """
+    Determine if work log entry triggers Escalation Recovery pattern.
+    
+    Trigger conditions (OR):
+    1. Header ends with '| escalate' (explicit status)
+    2. Header ends with '| blocked' AND has Blockers section details
+    3. C: section first word is 'ESCALATE' or 'BLOCKED' (uppercase emphasis)
+    4. Entry has Suggested Work Items with critical priority
+       AND conclusion indicates architecture/core types issue
+    
+    Do NOT trigger:
+    - Status is 'ok' but text contains 'escalate' (false positive)
+    - Status is 'blocked' but no blocker details in Blockers section
+    
+    Returns: (should_escalate: bool, reason: str)
+    """
+    pass
 
 def extract_blockers(task_content):
-    """Extract blocker information from task."""
-    blockers = []
+    """
+    Extract blocker information from task work log.
     
-    if "## Work Log - BLOCKED" in task_content or "blocked" in task_content.lower():
-        # Extract blocker details
-        pass
+    Look for:
+    - '## Blockers' section with structured details
+    - Status '| blocked' in work log entry header
+    - C: section mentioning 'blocked' as status
     
-    return blockers
+    Blocker structure per task.md (Work Log section):
+    - **Issue**: Description
+      - Impact: What's blocked
+      - Solutions: Ideas for resolution
+    
+    Returns list of blocker dicts with issue, impact, solutions.
+    """
+    pass
 ```
 
 ## Task File Format
 
+**Complete specification**: See `task.md` for full task file format including metadata fields, work log structure, and examples.
+
+**Manager MUST use create-task.py script** to create task files:
+
+```bash
+execute_script(f"{skill_path}/scripts/create-task.py", {
+    "role": "Architect",
+    "expertise": "System Design,Python",
+    "skills": "code-reading",
+    "title": "Design API",
+    "type": "design",
+    "priority": "high",
+    "kanban": kanban_file,
+    "creator-role": "manager"
+})
+```
+
+The script automatically:
+- Validates all required fields
+- Generates next sequential ID
+- Sets `state: todo` (cannot be overridden)
+- Creates file with proper YAML header and body
+
+**Example Task Structure:**
 ```yaml
 ---
 role: Implementor
@@ -457,8 +554,9 @@ skills: [python-project]
 expertise: ["Software Engineering", "Type Theory"]
 dependencies: []
 refers: []
-type: implement  # exploration | design | review | implement | redesign
-priority: high   # critical | high | medium | low
+type: implement     # exploration | design | review | implement | redesign
+priority: high      # critical | high | medium | low
+state: todo         # todo | done | escalated | cancelled
 ---
 
 # Task: Title
@@ -474,6 +572,23 @@ What needs to be done.
 
 ## Work Log
 ```
+
+### Task State Field
+
+The `state` field tracks task lifecycle:
+
+| State | Description |
+|-------|-------------|
+| `todo` | Task ready to be worked on |
+| `done` | Task completed successfully |
+| `escalated` | Task escalated for review, work items added |
+| `cancelled` | Task cancelled (no longer needed) |
+
+**Manager Responsibility:**
+- Set `state: todo` when creating tasks
+- Update `state: done` when task completes successfully
+- Update `state: escalated` when task escalates (work items added)
+- Set `state: cancelled` if task becomes obsolete
 
 ## Constraints
 
@@ -513,10 +628,30 @@ Every significant decision is logged:
 - **next_step:** What happens next
 ```
 
-Event types:
+## Skill Selection Guidelines
+
+**Manager MUST select appropriate skills when creating tasks:**
+
+| Task Type | Required Skills |
+|-----------|----------------|
+| `exploration` | `code-reading` |
+| `design` | `code-reading`, domain-specific |
+| `review` | `code-reading` |
+| `implement` | Skills from work item + `testing` if tests needed |
+| `redesign` | `code-reading`, domain-specific |
+
+**Common Skill Combinations:**
+- **Documentation task**: `docs`
+- **Python implementation**: `python-project`, `testing`
+- **Architecture design**: `code-reading`, domain skills
+- **Code review**: `code-reading`
+
+## Event Types
+
 - `kanban_created` - New workflow started
 - `blocker_detected` - Task blocked, exploration created
-- `escalation_received` - Implementation escalated, redesign created
+- `escalation_for_review` - Task escalated, assigned to Architect for review (same task file)
+- `escalation_prerequisites_created` - Review completed, prerequisite tasks created from work items, original task dependencies updated
 - `inadequate_information` - Missing info for planning, exploration created
 - `tasks_created` - New tasks created from work items
 - `workflow_complete` - All tasks finished
