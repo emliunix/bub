@@ -251,17 +251,95 @@ Architect logs **Work Items** in task files (does NOT create task files directly
 
 ### Flow
 
-1. **Architect** analyzes and logs work items in task file
+1. **Architect** analyzes and logs work items in task file (NEVER creates task files directly)
 2. **Manager** reads work items from completed task
 3. **Manager** creates actual task files with full metadata
 4. **Manager** sets dependencies based on work item relationships
 
+## Work Item Logging (CRITICAL)
+
+**Architect NEVER creates task files.** Instead, Architect logs suggested work items in the work log.
+
+### How to Log Work Items
+
+After completing analysis/design, append work items to the task file work log:
+
+```markdown
+## Work Log
+
+### [2026-02-25 14:30:00] Design Session
+
+**Facts:**
+- Defined 3 types in types.py: User, Role, Permission
+- Created test contracts in tests/test_auth.py
+
+**Analysis:**
+- Chose RBAC over ABAC for simplicity
+- Identified 2 implementation components
+
+**Conclusion:**
+- Design complete, ready for implementation
+
+## Suggested Work Items (for Manager)
+
+The following work items should be turned into task files by Manager:
+
+```yaml
+work_items:
+  - description: Implement User model with validation
+    files: [src/models/user.py, tests/test_user.py]
+    related_domains: ["Software Engineering", "Database Design"]
+    expertise_required: ["Python", "SQLAlchemy"]
+    dependencies: []
+    priority: high
+    estimated_effort: medium
+    notes: Must support email validation per RFC 5322
+    
+  - description: Implement Role-based permission system
+    files: [src/auth/permissions.py, tests/test_permissions.py]
+    related_domains: ["Software Engineering", "Security"]
+    expertise_required: ["Python", "Access Control"]
+    dependencies: [0]  # Depends on work item 0
+    priority: medium
+    estimated_effort: medium
+    notes: Depends on User model completion
+```
+
+## References
+
+- Design doc: docs/architecture/auth-system.md
+- Related issue: #123
+- External spec: https://example.com/spec
+```
+
+### Work Item Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `description` | Yes | What needs to be done |
+| `files` | Yes | List of files to modify |
+| `related_domains` | Yes | Domain context for expertise matching |
+| `expertise_required` | Yes | Required knowledge areas |
+| `dependencies` | No | Indices of other work items this depends on |
+| `priority` | No | critical/high/medium/low (default: medium) |
+| `estimated_effort` | No | small/medium/large |
+| `notes` | No | Additional context for Implementor |
+
+### Related Domains Examples
+
+- Implementation: `["Software Engineering", "Code Quality", "Testing"]`
+- Refactoring: `["Software Architecture", "Legacy Systems", "Compatibility"]`
+- Escalation fix: `["Problem Analysis", "Critical Thinking", "Root Cause Analysis"]`
+- Performance: `["Computer Science", "Optimization", "Profiling"]`
+- Security: `["Security Engineering", "Cryptography", "Threat Modeling"]`
+
 ## Constraints
 
+- **NEVER create task files** - Only Manager creates task files. Architect logs WORK ITEMS in the work log.
 - types.py is the single source of truth
 - Exceptions allowed but MUST be documented with explanation
 - Review must check: workaround, incomplete, major problems, cleanup needed
 - ALWAYS set appropriate expertise based on task complexity
 - **MUST write work log before completing** (see skills.md Work Logging Requirement)
-  - Design mode: Log facts (what was designed), analysis (decisions made), conclusion (readiness)
-  - Review mode: Log facts (what was reviewed), analysis (issues found), conclusion (pass/escalate)
+  - Design mode: Log facts (what was designed), analysis (decisions made), conclusion (readiness), suggested work items
+  - Review mode: Log facts (what was reviewed), analysis (issues found), conclusion (pass/escalate), suggested work items if escalation

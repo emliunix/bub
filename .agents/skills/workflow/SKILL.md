@@ -109,9 +109,9 @@ In task files:
 skills: [python-project, testing]
 ```
 
-## Work Logging Requirement
+## Work Log Definition
 
-All agents **must** write a work log before completing their task, regardless of success or failure.
+A work log is the primary communication mechanism between agents. It captures what was done, why decisions were made, and what comes next.
 
 ### Purpose
 
@@ -121,10 +121,137 @@ Work logs provide:
 - **Handoff context**: Essential information for the next agent in the chain
 - **Learning**: Pattern recognition across similar tasks
 
-### Content Requirements
+### Work Log Structure
 
-Every work log must include:
+Every work log entry follows this structure:
 
+```markdown
+### [timestamp] Title
+
+**Facts:**
+- List of concrete actions taken
+- Files modified, code written, tests run
+- Commands executed, data gathered
+
+**Analysis:**
+- Problems encountered
+- Approaches considered
+- Decisions made and why
+- Trade-offs evaluated
+
+**Conclusion:**
+- Status: ok | blocked | escalate
+- Summary of outcome
+- Next steps or recommendations
+```
+
+### Optional Sections
+
+Depending on the role and task, work logs may include:
+
+#### Suggested Work Items (Architect)
+```markdown
+## Suggested Work Items (for Manager)
+
+```yaml
+work_items:
+  - description: What needs to be done
+    files: [src/file.py, tests/test_file.py]
+    related_domains: ["Software Engineering", "Domain"]
+    expertise_required: ["Skill1", "Skill2"]
+    dependencies: [0]  # Indices of other work items
+    priority: high     # critical | high | medium | low
+    estimated_effort: medium  # small | medium | large
+    notes: Additional context
+```
+```
+
+#### References
+```markdown
+## References
+
+- Design doc: docs/architecture/feature.md
+- Related PR: #456
+- External spec: https://example.com/spec
+- Task dependencies: tasks/0-design.md
+```
+
+#### Blockers (if status = blocked)
+```markdown
+## Blockers
+
+- **Blocker 1**: Description of what's blocking progress
+  - Impact: What can't proceed
+  - Possible solutions: Ideas for resolution
+  - Required expertise: What help is needed
+```
+
+#### Plan Adjustments (Manager in kanban.md)
+```markdown
+## Plan Adjustment Log
+
+### [timestamp] EVENT_TYPE
+
+**Details:**
+- **reason:** Why adjustment was needed
+- **action:** What Manager did
+- **next_step:** What happens next
+```
+
+### Work Log Placement
+
+- **Architect/Implementor**: Append to the task file they're working on
+- **Manager**: Append to kanban.md
+
+### Escalation Work Logs
+
+When escalating, work logs are **especially critical**:
+
+```markdown
+## Work Log - ESCALATION
+
+### [timestamp] Blocked Implementation
+
+**Facts:**
+- Attempted implementation per spec
+- Blocked at line 45: UserSchema missing required field
+
+**Analysis:**
+- Root cause: Core types incomplete for use case
+- Attempted workaround: local schema extension (rejected - violates architecture)
+- Required expertise: Need Architect to update types.py
+
+**Conclusion:**
+- **ESCALATE** to Architect
+- Required: Update UserSchema in types.py to include email field
+- Impact: All existing implementations need review
+
+## Suggested Work Items
+
+```yaml
+work_items:
+  - description: Fix UserSchema to include email field
+    files: [src/types.py, tests/test_types.py]
+    related_domains: ["System Design", "Type Systems"]
+    expertise_required: ["Type Design", "Schema Validation"]
+    priority: critical
+    notes: This is blocking all auth implementation
+```
+```
+
+### Constraint
+
+**You MUST write a work log before completing.** No exceptions. Even for failures, the work log documents what was attempted and why it failed.
+
+---
+
+## Work Logging Requirement
+
+All agents **must** write a work log before completing their task, regardless of success or failure.
+
+### Content Requirements by Role
+
+Every work log must include the three core sections:
 1. **Facts**: What was actually done (files modified, code written, tests run)
 2. **Analysis**: What problems were encountered, what approaches were tried
 3. **Conclusion**: Pass/fail/escalate status and why
@@ -136,21 +263,52 @@ Every work log must include:
 ```markdown
 ## Work Log
 
-### [timestamp] Design Session
+### [2026-02-25 14:30:00] Design Session
 
 **Facts:**
 - Analyzed requirements from user request
 - Defined 3 new types in types.py: User, Role, Permission
-- Created test cases in tests/test_auth.py
+- Created test contracts in tests/test_auth.py
+- Reviewed existing User class in models.py
 
 **Analysis:**
 - Identified ambiguity in permission inheritance
 - Considered RBAC vs ABAC models, chose RBAC for simplicity
-- Noticed existing User class in models.py needs deprecation
+- Noticed existing User class needs deprecation path
 
 **Conclusion:**
-- Design complete, 2 work items logged for Manager
-- Potential future issue: Need migration path for existing User class
+- Design complete, ready for implementation
+- 2 work items identified for Manager to create
+- Future issue: Need migration path for existing User class
+
+## Suggested Work Items (for Manager)
+
+```yaml
+work_items:
+  - description: Implement User model with validation
+    files: [src/models/user.py, tests/test_user.py]
+    related_domains: ["Software Engineering", "Database Design"]
+    expertise_required: ["Python", "SQLAlchemy", "Data Validation"]
+    dependencies: []
+    priority: high
+    estimated_effort: medium
+    notes: Must support email validation per RFC 5322
+    
+  - description: Implement Role-based permission system
+    files: [src/auth/permissions.py, tests/test_permissions.py]
+    related_domains: ["Software Engineering", "Security"]
+    expertise_required: ["Python", "Access Control"]
+    dependencies: [0]
+    priority: medium
+    estimated_effort: medium
+    notes: Depends on User model completion
+```
+
+## References
+
+- Design doc: docs/architecture/auth-system.md
+- Related issue: #123
+- External spec: https://datatracker.ietf.org/doc/html/rfc5322
 ```
 
 #### Implementor (writes to task.md)
@@ -210,36 +368,6 @@ Manager maintains TWO logs in kanban.md:
 - **action:** Created exploration task to resolve blocker
 - **exploration_task:** tasks/4-explore-user-model.md
 ```
-
-### Work Log Placement
-
-- **Architect/Implementor**: Append to the task file they're working on
-- **Manager**: Append to kanban.md
-
-### Escalation Work Logs
-
-When escalating, work logs are **especially critical**:
-
-```markdown
-## Work Log - ESCALATION
-
-**Facts:**
-- Attempted implementation per spec
-- Blocked at line 45: UserSchema missing required field
-
-**Analysis:**
-- Root cause: Core types incomplete for use case
-- Attempted workaround: local schema extension (rejected - violates architecture)
-
-**Conclusion:**
-- **ESCALATE** to Architect
-- Required: Update UserSchema in types.py to include email field
-- Impact: All existing implementations need review
-```
-
-### Constraint
-
-**You MUST write a work log before completing.** No exceptions. Even for failures, the work log documents what was attempted and why it failed.
 
 ## Rationale: Design Decisions
 

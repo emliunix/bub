@@ -45,28 +45,32 @@ If Manager cannot adequately plan due to missing information:
 
 # Mode 2: Task Reconciliation
 {
-    "kanban_file": "./kanbans/7-api-refactor.md",
+    "kanban_file": "./tasks/7-kanban-api-refactor.md",
     "done_task": "tasks/3-handler-refactor.md",
-    "tasks": ["tasks/3-handler-refactor.md", "tasks/4-test-update.md"]
+    "tasks": ["tasks/3-handler-refactor.md", "tasks/4-test-update.md"]  # Current task list
 }
 ```
 
 ## Outputs
 
+**Important:** Manager updates kanban file and returns current state.
+
 ```python
 # Mode 1 Response
 {
-    "kanban_file": "./kanbans/7-api-refactor.md",
-    "next_task": "tasks/0-explore-codebase.md",
-    "tasks": ["tasks/0-explore-codebase.md"]  # Known tasks (not necessarily complete)
+    "kanban_file": "./tasks/7-kanban-api-refactor.md",
+    "next_task": "tasks/0-explore-codebase.md",  # Next task to execute, or null if complete
+    "tasks": ["tasks/0-explore-codebase.md"]  # Current known task list
 }
 
 # Mode 2 Response
 {
-    "next_task": "tasks/4-test-update.md",  # Highest priority non-blocked task, null if complete
-    "tasks": ["tasks/4-test-update.md", "tasks/5-docs-update.md"]  # Updated known task list
+    "next_task": "tasks/4-test-update.md",  # Next task to execute, or null if complete
+    "tasks": ["tasks/4-test-update.md", "tasks/5-docs-update.md"]  # Updated task list
 }
 ```
+
+**Note:** Manager reads kanban file to get current state, updates it, and returns the updated task list. Supervisor uses this to track workflow progress.
 
 ## Algorithm
 
@@ -79,7 +83,7 @@ def execute(input):
 
 def create_kanban(user_request):
     """Create initial kanban with exploration task."""
-    kanban_id = get_next_id("./kanbans/")
+    kanban_id = get_next_id("./tasks/")
     kanban = {
         "meta": {"id": kanban_id, "created": now(), "request": user_request},
         "phase": "exploration",
@@ -103,7 +107,7 @@ def create_kanban(user_request):
     kanban["tasks"] = [initial_task]
     kanban["current"] = initial_task
     
-    path = f"./kanbans/{kanban_id}-{slug(user_request)}.md"
+    path = f"./tasks/{kanban_id}-kanban-{slug(user_request)}.md"
     write(path, kanban)
     
     # Log plan creation

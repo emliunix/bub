@@ -8,40 +8,43 @@ Dumb orchestrator that manages agent execution lifecycle. Only spawns agents bas
 Supervisor maintains minimal state and operates in a loop:
 
 ```python
-def supervisor_loop():
+def supervisor_loop(kanban_file):
     while True:
-        # 1. Read current kanban state
-        kanban = read(kanban.current)
+        # 1. Read current kanban state (source of truth)
+        kanban = read(kanban_file)
         
-        # 2. Determine next action based on kanban
-        if kanban.phase == "complete":
+        # 2. Check if workflow complete
+        if kanban.current is None or kanban.phase == "complete":
             break
-            
-        # 3. Spawn appropriate agent with exact instructions
+        
+        # 3. Determine role from task file header
         task_file = kanban.current
         agent_role = determine_role(task_file)
         
-        # 4. Execute agent and validate output
+        # 4. Spawn agent with minimal context
         result = spawn_agent(agent_role, task_file)
         
-        # 5. Check result format
+        # 5. Validate output format (not content)
         if not validate_output(result, agent_role):
-            # RESCHEDULE with exact same parameters
             log_retry(task_file, agent_role)
-            continue  # Loop again with same task
+            continue  # Retry same task
         
-        # 6. Notify manager of completion
-        manager_input = {
-            "kanban_file": kanban.file,
+        # 6. Notify Manager that task is done, pass current task list
+        manager_result = spawn_agent("Manager", {
+            "kanban_file": kanban_file,
             "done_task": task_file,
-            "tasks": kanban.tasks
-        }
-        result = spawn_agent("Manager", manager_input)
+            "tasks": kanban.tasks  # Current task list for Manager to update
+        })
         
-        # Check manager output
-        if not validate_output(result, "Manager"):
-            log_retry(kanban.file, "Manager", manager_input)
-            continue
+        # 7. Validate Manager output format
+        if not validate_output(manager_result, "Manager"):
+            log_retry(kanban_file, "Manager", {"done_task": task_file})
+            continue  # Retry Manager
+        
+        # 8. Manager returns updated task list and next_task
+        #    Supervisor uses returned tasks for next iteration
+        if manager_result.get("next_task") is None:
+            break  # Workflow complete
 ```
 
 ## Spawn Agent - Inputs/Outputs
@@ -57,13 +60,16 @@ When spawning any agent, Supervisor provides:
     
     # OR for workflow tasks:
     "task_file": str,           # Path to task file
-    "kanban_file": str,         # Path to kanban (for Manager)
+    "kanban_file": str,         # Path to kanban (for Manager reconciliation)
     "done_task": str,           # Just completed task (for Manager reconciliation)
-    "tasks": List[str],         # All remaining tasks (for Manager)
 }
+
+**Note:** Supervisor passes task list to Manager for reconciliation. Other agents (Architect/Implementor) read task file directly.
 ```
 
 ### Output Specification (Agent → Supervisor)
+
+**Important:** Work logs go to task files. Manager updates kanban file AND returns task list to Supervisor.
 
 Every agent MUST return output in this exact format:
 
@@ -72,14 +78,11 @@ Every agent MUST return output in this exact format:
     "status": "ok" | "blocked" | "error" | "escalate",
     "message": str,  # Human-readable summary
     
-    # Role-specific outputs
-    "kanban_file": str,      # Manager only: path to kanban
-    "next_task": str | None, # Manager only: next task or null if complete
-    "tasks": List[str],      # Manager only: updated task list
+    # Manager only: updated task state
+    "next_task": str | None,  # Path to next task, or null if workflow complete
+    "tasks": List[str],       # Manager only: current task list
     
-    # Architect/Implementor work items (Architect writes to task file, 
-    # Manager reads from task file)
-    # No output fields required - work is in task file work log
+    # Note: Architect/Implementor do NOT return work items. They write to task file work log.
 }
 ```
 
@@ -163,9 +166,26 @@ Log format for retries:
 - **NEVER** interpret agent output content - only validate format
 - **NEVER** modify inputs when retrying - use exact same parameters
 - **NEVER** make decisions about workflow - only Manager updates kanban
+- **NEVER** pass task lists to agents - agents read kanban file directly
 - **ALWAYS** validate output format before accepting
 - **ALWAYS** log retry events for debugging
 - **MAX_RETRIES** = 3 for any single task
+
+## Communication Model
+
+**All state lives in files:**
+1. **Kanban file**: Source of truth for workflow state (tasks, current task, phase)
+2. **Task files**: Source of truth for task specification and work logs
+
+**Communication flow:**
+```
+Supervisor reads kanban → Executes task → Notifies Manager (with tasks) → Manager updates kanban → Supervisor receives updated tasks → Loop
+```
+
+**Data flow:**
+- **Supervisor → Manager**: Passes current task list for reconciliation
+- **Manager → Supervisor**: Returns updated task list and next_task
+- **Architect/Implementor**: Write work logs to task files (no return data needed except status)
 
 ## Agent Role Mapping
 
