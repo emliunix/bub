@@ -156,3 +156,8 @@ ignore = [
 
 [tool.ruff.format]
 preview = true
+
+[tool.uv.workspace]
+members = [
+    "systemf",
+]

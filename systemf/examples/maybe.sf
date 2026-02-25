@@ -1,0 +1,25 @@
+-- Maybe data type for handling optional values
+
+data Maybe a = Nothing | Just a
+
+-- isJust : ∀a. Maybe a -> Bool
+-- Returns true if the value is present
+isJust : ∀a. Maybe a → Bool = Λa. λm:Maybe a.
+  case m of
+    Nothing → False
+    Just x → True
+
+-- fromMaybe : ∀a. a -> Maybe a -> a
+-- Returns the value if present, otherwise returns default
+fromMaybe : ∀a. a → Maybe a → a = Λa. λdefault:a. λm:Maybe a.
+  case m of
+    Nothing → default
+    Just x → x
+
+-- mapMaybe : ∀a. ∀b. (a -> b) -> Maybe a -> Maybe b
+-- Maps a function over a Maybe value
+mapMaybe : ∀a. ∀b. (a → b) → Maybe a → Maybe b =
+  Λa. Λb. λf:(a → b). λm:Maybe a.
+    case m of
+      Nothing → Nothing [b]
+      Just x → Just [b] (f x)
