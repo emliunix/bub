@@ -31,13 +31,12 @@ class TestFullPipeline:
         assert len(core_decls) == 1
         assert core_decls[0].name == "id"
 
-    @pytest.mark.xfail(reason="Parser treats multiple constructors as single constructor with args")
     def test_bool_type(self):
         """Full pipeline with boolean type."""
         source = """
         data Bool =
           True
-          False
+          | False
         """
 
         tokens = lex(source)
@@ -48,13 +47,12 @@ class TestFullPipeline:
         assert "True" in constr_types
         assert "False" in constr_types
 
-    @pytest.mark.xfail(reason="Parser treats multiple constructors as single constructor with args")
     def test_list_type(self):
         """Full pipeline with list type."""
         source = """
         data List a =
           Nil
-          Cons a (List a)
+          | Cons a (List a)
         """
 
         tokens = lex(source)
@@ -71,7 +69,7 @@ class TestFullPipeline:
         source = r"""
         data Bool =
           True
-          False
+          | False
 
         not : Bool -> Bool = \b:Bool -> case b of
           True -> False
@@ -140,13 +138,12 @@ class TestPolymorphism:
 class TestPatternMatching:
     """Tests for pattern matching."""
 
-    @pytest.mark.xfail(reason="Parser treats multiple constructors as single constructor with args")
     def test_simple_case(self):
         """Test simple case expression."""
         source = r"""
         data Bool =
           True
-          False
+          | False
 
         const : Bool -> Bool -> Bool = \x:Bool -> \y:Bool -> case x of
           True -> y
@@ -162,16 +159,15 @@ class TestPatternMatching:
 
         assert "const" in types
 
-    @pytest.mark.xfail(reason="Parser treats multiple constructors as single constructor with args")
     def test_nested_pattern(self):
         """Test nested constructor pattern."""
         source = r"""
         data Bool =
           True
-          False
+          | False
         data Nat =
           Zero
-          Succ Nat
+          | Succ Nat
 
         isZero : Nat -> Bool = \n:Nat -> case n of
           Zero -> True

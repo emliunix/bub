@@ -8,6 +8,7 @@ from systemf.core.ast import (
     Constructor,
     DataDeclaration,
     Declaration,
+    Global,
     Let,
     Pattern,
     TAbs,
@@ -39,6 +40,7 @@ __all__ = [
     # AST
     "Term",
     "Var",
+    "Global",
     "Abs",
     "App",
     "TAbs",

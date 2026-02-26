@@ -142,7 +142,7 @@ This skill includes executable Python scripts in `scripts/` for managing tasks a
 Creates task files with validated YAML headers. Only Manager and users can create tasks.
 ```bash
 .agents/skills/workflow/scripts/create-task.py \
-    --role Architect \
+    --assignee Architect \
     --expertise "System Design" \
     --kanban tasks/0-kanban.md \
     --creator-role manager \
@@ -194,12 +194,16 @@ See `scripts/README.md` for full documentation.
 
 | Pattern | Trigger | Structure |
 |---------|---------|-----------|
-| **Simple** | Small changes, no core types | Single Implementor task |
-| **Design-First** | New features, core types, architecture | Design → [Review] → Implement |
-| **Validate-Before-Continue** | Must gate downstream work | Review task as dependency |
-| **Escalation Recovery** | Work log has `ESCALATE`/`BLOCKED` | Redesign → Re-implement |
 | **Discovery** | Missing information for planning | Exploration → Manager decides |
-| **Integration** | Multiple parallel streams converge | Parallel → Integration task |
+| **Design-First** | New features, core types, architecture | Design → Implementation-With-Review |
+| **Implementation-With-Review** | **ALL implementation work** (universal) | Implement → Review (same file) → Done |
+| **Escalation Recovery** | Review finds issues | Review (escalate) → Prerequisites → Retry |
+| **Integration** | Multiple parallel streams converge | Parallel tasks → Integration task |
+
+**Universal Constraints (ALL patterns):**
+- State transitions: `todo → review → done` (no direct `todo → done`)
+- Single-file continuity: Review uses same task file
+- Mandatory review: ALL work must be reviewed
 
 **See `patterns.md` for:
 - Detailed task structures (role, type, dependencies, skills)

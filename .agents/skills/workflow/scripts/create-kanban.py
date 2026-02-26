@@ -48,12 +48,11 @@ def get_next_id(tasks_dir: Path) -> int:
     return max_id + 1
 
 
-def generate_kanban_header(title: str, request: str, tasks: list[str]) -> str:
+def generate_kanban_header(title: str, tasks: list[str]) -> str:
     """Generate the YAML header for a kanban file."""
     header = "---\n"
     header += f"type: kanban\n"
     header += f"title: {title}\n"
-    header += f"request: {request}\n"
     header += f"created: {datetime.now().isoformat()}\n"
     header += f"phase: exploration\n"
     header += f"current: null\n"
@@ -62,9 +61,11 @@ def generate_kanban_header(title: str, request: str, tasks: list[str]) -> str:
     return header
 
 
-def generate_kanban_content() -> str:
+def generate_kanban_content(title: str, request: str) -> str:
     """Generate the kanban body content."""
-    content = "\n# Kanban: Workflow Tracking\n\n"
+    content = f"\n# Kanban: {title}\n\n"
+    content += "## Request\n"
+    content += f"{request}\n\n"
     content += "## Plan Adjustment Log\n"
     content += "<!-- Manager logs plan adjustments here -->\n\n"
     return content
@@ -154,8 +155,8 @@ Examples:
     tasks = [exploration_task] if exploration_task else []
 
     # Generate file content
-    header = generate_kanban_header(title=args.title, request=args.request, tasks=tasks)
-    body = generate_kanban_content()
+    header = generate_kanban_header(title=args.title, tasks=tasks)
+    body = generate_kanban_content(title=args.title, request=args.request)
 
     # Write file
     filepath.write_text(header + body, encoding="utf-8")

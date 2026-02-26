@@ -29,6 +29,20 @@ class Var(Term):
 
 
 @dataclass(frozen=True)
+class Global(Term):
+    """Global variable reference by name.
+
+    Used in REPL for references to previously defined terms.
+    Resolved to actual values by the evaluator.
+    """
+
+    name: str
+
+    def __str__(self) -> str:
+        return f"@{self.name}"
+
+
+@dataclass(frozen=True)
 class Abs(Term):
     """Lambda abstraction: λ(x:σ).t
 
@@ -141,6 +155,24 @@ class Let(Term):
 
 
 @dataclass(frozen=True)
+class ToolCall(Term):
+    """Tool invocation for FFI operations.
+
+    Represents a call to an external tool (like LLM APIs, file operations).
+    The tool is resolved by name at runtime from the tool registry.
+    """
+
+    tool_name: str
+    args: list[Term]
+
+    def __str__(self) -> str:
+        if not self.args:
+            return f"@{self.tool_name}"
+        args_str = " ".join(str(arg) for arg in self.args)
+        return f"(@{self.tool_name} {args_str})"
+
+
+@dataclass(frozen=True)
 class DataDeclaration:
     """data T a = K₁ τ₁ | ... | Kₙ τₙ"""
 
@@ -162,4 +194,4 @@ Declaration = DataDeclaration | TermDeclaration
 
 
 # Export the term union for type checking
-TermRepr = Union[Var, Abs, App, TAbs, TApp, Constructor, Case, Let]
+TermRepr = Union[Var, Abs, App, TAbs, TApp, Constructor, Case, Let, ToolCall]

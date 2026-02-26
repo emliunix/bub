@@ -8,6 +8,7 @@ from systemf.surface.ast import (
     SurfaceAbs,
     SurfaceApp,
     SurfaceConstructor,
+    SurfaceConstructorInfo,
     SurfaceDataDeclaration,
     SurfaceLet,
     SurfaceTermDeclaration,
@@ -320,7 +321,15 @@ class TestElaborateDeclarations:
         """Elaborate data declaration."""
         elab = Elaborator()
 
-        decl = SurfaceDataDeclaration("Bool", [], [("True", []), ("False", [])], DUMMY_LOC)
+        decl = SurfaceDataDeclaration(
+            "Bool",
+            [],
+            [
+                SurfaceConstructorInfo("True", [], None, DUMMY_LOC),
+                SurfaceConstructorInfo("False", [], None, DUMMY_LOC),
+            ],
+            DUMMY_LOC,
+        )
         core_decl = elab._elaborate_data_decl(decl)
 
         assert isinstance(core_decl, core.DataDeclaration)

@@ -10,8 +10,8 @@ from systemf.core.ast import (
     Constructor,
     DataDeclaration,
     Declaration,
+    Global,
     Let,
-    Pattern,
     TAbs,
     TApp,
     Term,
@@ -31,14 +31,21 @@ from systemf.core.unify import Substitution, unify
 class TypeChecker:
     """Bidirectional type checker for System F with data types."""
 
-    def __init__(self, datatype_constructors: dict[str, Type] | None = None):
+    def __init__(
+        self,
+        datatype_constructors: dict[str, Type] | None = None,
+        global_types: dict[str, Type] | None = None,
+    ):
         """Initialize with data type constructor signatures.
 
         Args:
             datatype_constructors: Maps constructor names to their polymorphic types.
                 Example: {"Nil": ∀a. List a, "Cons": ∀a. a → List a → List a}
+            global_types: Maps global term names to their types.
+                Example: {"id": ∀a. a → a}
         """
-        self.constructors = datatype_constructors or {}
+        self.constructors = datatype_constructors if datatype_constructors is not None else {}
+        self.global_types = global_types if global_types is not None else {}
         self._meta_counter = itertools.count(0)
 
     def infer(self, ctx: Context, term: Term) -> Type:
@@ -63,6 +70,12 @@ class TypeChecker:
                 except IndexError as e:
                     raise UndefinedVariable(index) from e
 
+            case Global(name):
+                # Global: Look up type in global environment
+                if name not in self.global_types:
+                    raise TypeError(f"Undefined global: {name}")
+                return self.global_types[name]
+
             case App(func, arg):
                 # App: Infer function type, check argument against domain
                 func_type = self.infer(ctx, func)
@@ -75,14 +88,30 @@ class TypeChecker:
 
             case TApp(func, type_arg):
                 # TApp: Infer polymorphic type, instantiate with type arg
-                func_type = self.infer(ctx, func)
-                match func_type:
-                    case TypeForall(var, body):
-                        # Instantiate with the type argument
-                        subst = Substitution.singleton(var, type_arg)
-                        return subst.apply(body)
-                    case _:
-                        raise TypeMismatch(TypeForall("_", TypeVar("_")), func_type)
+                # Special case: if func is a Constructor, look up its type directly
+                # to avoid premature instantiation
+                from systemf.core.ast import Constructor as AstConstructor
+
+                if isinstance(func, AstConstructor):
+                    if func.name not in self.constructors:
+                        raise UndefinedConstructor(func.name)
+                    ctor_type = self.constructors[func.name]
+                    match ctor_type:
+                        case TypeForall(var, body):
+                            subst = Substitution.singleton(var, type_arg)
+                            return subst.apply(body)
+                        case _:
+                            # Constructor is not polymorphic, just return its type
+                            return ctor_type
+                else:
+                    func_type = self.infer(ctx, func)
+                    match func_type:
+                        case TypeForall(var, body):
+                            # Instantiate with the type argument
+                            subst = Substitution.singleton(var, type_arg)
+                            return subst.apply(body)
+                        case _:
+                            raise TypeMismatch(TypeForall("_", TypeVar("_")), func_type)
 
             case Constructor(name, args):
                 # Constructor: Look up constructor type, instantiate
@@ -322,12 +351,17 @@ class TypeChecker:
 
                 case TermDeclaration(name, type_annotation, body):
                     if type_annotation is not None:
+                        # Add type annotation to global_types BEFORE checking body
+                        # This allows recursive definitions to work
+                        self.global_types[name] = type_annotation
                         # Check body against annotation
                         self.check(ctx, body, type_annotation)
                         result[name] = type_annotation
                     else:
                         # Infer type
                         ty = self.infer(ctx, body)
+                        # Add inferred type to global_types for subsequent declarations
+                        self.global_types[name] = ty
                         result[name] = ty
 
         return result

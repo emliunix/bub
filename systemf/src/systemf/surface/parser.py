@@ -16,12 +16,15 @@ from systemf.surface.ast import (
     SurfaceBranch,
     SurfaceCase,
     SurfaceConstructor,
+    SurfaceConstructorInfo,
     SurfaceDataDeclaration,
     SurfaceDeclaration,
     SurfaceLet,
     SurfacePattern,
+    SurfacePragma,
     SurfaceTerm,
     SurfaceTermDeclaration,
+    SurfaceToolCall,
     SurfaceType,
     SurfaceTypeAbs,
     SurfaceTypeApp,
@@ -31,7 +34,8 @@ from systemf.surface.ast import (
     SurfaceTypeVar,
     SurfaceVar,
 )
-from systemf.surface.lexer import Lexer, Token
+from systemf.surface.lexer import Lexer
+from systemf.surface.types import Token
 from systemf.utils.location import Location
 
 
@@ -88,6 +92,10 @@ FORALL = match_token("FORALL")
 LAMBDA = match_token("LAMBDA")
 TYPELAMBDA = match_token("TYPELAMBDA")
 
+# Docstrings
+DOCSTRING_PRECEDING = match_token("DOCSTRING_PRECEDING").map(lambda t: t.value)
+DOCSTRING_INLINE = match_token("DOCSTRING_INLINE").map(lambda t: t.value)
+
 # Operators
 ARROW = match_token("ARROW")
 EQUALS = match_token("EQUALS")
@@ -113,6 +121,13 @@ IDENT = match_token("IDENT").map(lambda t: t.value)
 CONSTRUCTOR = match_token("CONSTRUCTOR").map(lambda t: t.value)
 NUMBER = match_token("NUMBER").map(lambda t: t.value)
 EOF = match_token("EOF")
+
+# Pragma tokens
+PRAGMA_START = match_token("PRAGMA_START")
+PRAGMA_END = match_token("PRAGMA_END")
+PRAGMA_CONTENT = match_token("PRAGMA_CONTENT").map(lambda t: t.value)
+LLM = match_token("LLM").map(lambda t: t.value)
+TOOL = match_token("TOOL").map(lambda t: t.value)
 
 
 # =============================================================================
@@ -225,12 +240,13 @@ def app_type():
     # Build left-associative application chain
     result = atoms[0]
     for next_atom in atoms[1:]:
-        if isinstance(result, SurfaceTypeConstructor):
-            # Add to existing constructor args
-            result = SurfaceTypeConstructor(result.name, result.args + [next_atom], result.location)
-        else:
-            # Start new constructor
-            result = SurfaceTypeConstructor(str(result), [next_atom], loc)
+        match result:
+            case SurfaceTypeConstructor(name, args, location):
+                # Add to existing constructor args
+                result = SurfaceTypeConstructor(name, args + [next_atom], location)
+            case _:
+                # Start new constructor
+                result = SurfaceTypeConstructor(str(result), [next_atom], loc)
     return result
 
 
@@ -271,11 +287,39 @@ type_parser.become(forall_type | arrow_type)
 
 @generate
 def atom_base():
-    """Parse base atom: paren | ident | con | number."""
+    """Parse base atom: paren | tool_call | ident | con | number."""
     # Parenthesized term
     paren = yield (LPAREN >> term_parser << RPAREN).optional()
     if paren is not None:
         return paren
+
+    # Tool call: @tool_name arg1 arg2 ...
+    at_tok = yield match_token("AT").optional()
+    if at_tok is not None:
+        tool_name_tok = yield match_token("IDENT")
+        tool_name = tool_name_tok.value
+        tool_loc = at_tok.location
+
+        # Parse tool arguments (atoms), stopping at boundaries
+        args = []
+        while True:
+            # Check for declaration boundary
+            is_boundary = yield is_decl_boundary
+            if is_boundary:
+                break
+
+            # Check for indentation boundary
+            at_indent_boundary = yield is_indent_boundary
+            if at_indent_boundary:
+                break
+
+            # Try to parse next argument
+            next_atom = yield atom_base.optional()
+            if next_atom is None:
+                break
+            args.append(next_atom)
+
+        return SurfaceToolCall(tool_name, args, tool_loc)
 
     # Variable
     ident = yield match_token("IDENT").optional()
@@ -293,7 +337,7 @@ def atom_base():
         con_name = con.value
         con_loc = con.location
 
-        # Parse constructor arguments (atoms), stopping at declaration boundaries
+        # Parse constructor arguments (atoms), stopping at various boundaries
         args = []
         while True:
             # Check for declaration boundary before trying to parse next atom
@@ -304,6 +348,12 @@ def atom_base():
             # Check for indentation boundary
             at_indent_boundary = yield is_indent_boundary
             if at_indent_boundary:
+                break
+
+            # Check for pattern boundary (CONSTRUCTOR followed by IDENT or ARROW)
+            # This prevents consuming the next pattern in a case expression as an argument
+            at_pattern_boundary = yield is_pattern_boundary
+            if at_pattern_boundary:
                 break
 
             next_atom = yield atom_base.optional()
@@ -415,6 +465,24 @@ def is_indent_boundary(tokens: list[Token], index: int) -> Result:
     return Result.success(index, False)
 
 
+@P
+def is_pattern_boundary(tokens: list[Token], index: int) -> Result:
+    """Check if we're at a pattern boundary (CONSTRUCTOR followed by IDENT or ARROW).
+
+    This is used when parsing constructor applications to know when to stop,
+    as the next CONSTRUCTOR might be the start of a new pattern in a case expression.
+    """
+    if index < len(tokens):
+        current = tokens[index]
+        if current.type == "CONSTRUCTOR":
+            if index + 1 < len(tokens):
+                next_tok = tokens[index + 1]
+                # If followed by IDENT or ARROW, it's likely a pattern, not an arg
+                if next_tok.type in ("IDENT", "ARROW"):
+                    return Result.success(index, True)
+    return Result.success(index, False)
+
+
 @generate
 def decl_app_parser():
     """Parse application for declaration body, stopping at declaration boundaries."""
@@ -508,21 +576,34 @@ def let_parser():
 
 @generate
 def case_parser():
-    """Parse case expression with indentation-aware branches.
+    """Parse case expression with both syntaxes.
 
-    New syntax:
+    Syntax 1 - Indented style:
         case expr of
           Pat1 -> expr1
           Pat2 -> expr2
 
-    Instead of old:
-        case expr of { Pat1 -> expr1 | Pat2 -> expr2 }
+    Syntax 2 - Explicit style:
+        case expr of {
+          | Pat1 -> expr1
+          | Pat2 -> expr2
+        }
     """
     loc_token = yield CASE
     loc = loc_token.location
     scrutinee = yield term_parser
     yield OF
-    branches = yield indented_many(branch_parser)
+
+    # Check for explicit brace syntax
+    lbrace = yield LBRACE.optional()
+    if lbrace is not None:
+        # Explicit style: { | Pat -> expr | ... }
+        branches = yield explicit_branches_parser
+        yield RBRACE
+    else:
+        # Indented style
+        branches = yield indented_many(branch_parser)
+
     return SurfaceCase(scrutinee, branches, loc)
 
 
@@ -564,13 +645,43 @@ def decl_let_parser():
 
 
 @generate
+def decl_explicit_branch_parser():
+    """Parse a branch in explicit { | } syntax (declaration context)."""
+    loc_token = yield peek_token
+    loc = loc_token.location
+    yield BAR
+    pat = yield pattern_parser
+    yield ARROW
+    body = yield decl_simple_term_parser
+    return SurfaceBranch(pat, body, loc)
+
+
+@generate
+def decl_explicit_branches_parser():
+    """Parse branches in explicit { | } syntax (declaration context)."""
+    first = yield decl_explicit_branch_parser
+    rest = yield (decl_explicit_branch_parser).many()
+    return [first] + rest
+
+
+@generate
 def decl_case_parser():
-    """Parse case expression (declaration context) with indentation-aware branches."""
+    """Parse case expression (declaration context) with both syntaxes."""
     loc_token = yield CASE
     loc = loc_token.location
     scrutinee = yield decl_term_parser
     yield OF
-    branches = yield indented_many(decl_branch_parser)
+
+    # Check for explicit brace syntax
+    lbrace = yield LBRACE.optional()
+    if lbrace is not None:
+        # Explicit style: { | Pat -> expr | ... }
+        branches = yield decl_explicit_branches_parser
+        yield RBRACE
+    else:
+        # Indented style
+        branches = yield indented_many(decl_branch_parser)
+
     return SurfaceCase(scrutinee, branches, loc)
 
 
@@ -637,6 +748,82 @@ def decl_branch_parser():
     return SurfaceBranch(pat, body, loc)
 
 
+@generate
+def explicit_branch_parser():
+    """Parse a branch in explicit { | } syntax.
+
+    Syntax: | pattern -> term
+    The | is required for explicit syntax.
+    """
+    loc_token = yield peek_token
+    loc = loc_token.location
+    yield BAR
+    pat = yield pattern_parser
+    yield ARROW
+    body = yield simple_term_parser
+    return SurfaceBranch(pat, body, loc)
+
+
+@generate
+def branch_body_parser():
+    """Parse branch body that allows applications but stops at branch boundaries.
+
+    Uses atom_base for the first atom, then tries to apply more atoms
+    while respecting branch boundaries (BAR for next branch, RBRACE for end).
+    """
+    loc_token = yield peek_token
+    loc = loc_token.location
+
+    # Parse first atom
+    result = yield atom_base
+
+    # Continue parsing: try to apply more atoms
+    while True:
+        # Check for postfix type application with @
+        type_app = yield (AT >> type_parser).optional()
+        if type_app is not None:
+            result = SurfaceTypeApp(result, type_app, result.location)
+            continue
+
+        # Try postfix type application with brackets
+        type_bracket = yield (LBRACKET >> type_parser << RBRACKET).optional()
+        if type_bracket is not None:
+            result = SurfaceTypeApp(result, type_bracket, result.location)
+            continue
+
+        # Try postfix type annotation
+        type_ann = yield (COLON >> type_parser).optional()
+        if type_ann is not None:
+            result = SurfaceAnn(result, type_ann, result.location)
+            continue
+
+        # Check for branch boundary before trying application
+        peeked = yield peek_token
+        if peeked.type in ("BAR", "RBRACE"):
+            break
+
+        # Try next atom for application
+        next_atom = yield atom_base.optional()
+        if next_atom is not None:
+            result = SurfaceApp(result, next_atom, loc)
+            continue
+
+        break
+
+    return result
+
+
+@generate
+def explicit_branches_parser():
+    """Parse branches in explicit { | } syntax.
+
+    Syntax: | Pat1 -> expr1 | Pat2 -> expr2 ...
+    """
+    first = yield explicit_branch_parser
+    rest = yield (explicit_branch_parser).many()
+    return [first] + rest
+
+
 def sep_by(parser: P, sep: P) -> P:
     """Parse zero or more parser separated by sep."""
 
@@ -666,11 +853,92 @@ def sep_by1(parser: P, sep: P) -> P:
 # =============================================================================
 
 
+def parse_pragma_attributes(content: str) -> dict[str, str]:
+    """Parse pragma content into key-value pairs.
+
+    Format: directive key1=value1, key2=value2 ...
+    Returns: dict of attributes (excluding the directive)
+
+    Example:
+        "LLM model=gpt-4, temperature=0.7" -> {"model": "gpt-4", "temperature": "0.7"}
+    """
+    attributes: dict[str, str] = {}
+
+    # Split content but preserve quoted values
+    parts = []
+    current = ""
+    in_quotes = False
+    quote_char = None
+
+    for char in content:
+        if char in "\"'":
+            if not in_quotes:
+                in_quotes = True
+                quote_char = char
+                current += char
+            elif char == quote_char:
+                in_quotes = False
+                quote_char = None
+                current += char
+            else:
+                current += char
+        elif char == "," and not in_quotes:
+            parts.append(current.strip())
+            current = ""
+        else:
+            current += char
+
+    if current.strip():
+        parts.append(current.strip())
+
+    # Parse each part as key=value
+    for part in parts:
+        if "=" in part:
+            key, value = part.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            # Remove quotes if present
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
+                value = value[1:-1]
+            attributes[key] = value
+
+    return attributes
+
+
+@generate
+def pragma_parser():
+    """Parse pragma: {-# LLM key=value ... #-}."""
+    loc_token = yield PRAGMA_START
+    loc = loc_token.location
+
+    # The pragma content should contain the directive and attributes
+    content = yield PRAGMA_CONTENT
+
+    # Parse content to extract directive and attributes
+    content_parts = content.strip().split(None, 1)
+    if not content_parts:
+        raise ParseError("Empty pragma", loc)
+
+    directive = content_parts[0]
+    attr_string = content_parts[1] if len(content_parts) > 1 else ""
+
+    # Parse attributes
+    attributes = parse_pragma_attributes(attr_string)
+
+    # Consume PRAGMA_END
+    yield PRAGMA_END
+
+    return SurfacePragma(directive, attributes, loc)
+
+
 @generate
 def constructor_parser():
-    """Parse constructor: CON type_atom*."""
+    """Parse constructor: CON type_atom* [-- ^ docstring]."""
     con = yield match_token("CONSTRUCTOR")
     con_name = con.value
+    con_loc = con.location
 
     # Parse argument types
     arg_types = []
@@ -687,58 +955,143 @@ def constructor_parser():
         ty = yield atom_type
         arg_types.append(ty)
 
-    return (con_name, arg_types)
+    # Capture optional inline docstring (-- ^)
+    docstring = yield DOCSTRING_INLINE.optional()
+    if docstring is not None:
+        # Extract content after '-- ^' prefix
+        # The token value includes the full comment like '-- ^ docstring text'
+        # We need to find the ^ and take everything after it
+        if "^" in docstring:
+            docstring = docstring.split("^", 1)[1].strip()
 
-
-@generate
-def data_declaration():
-    """Parse data declaration with indentation-aware constructors.
-
-    New syntax:
-        data Name params =
-          Con1
-          Con2 type1 type2
-
-    Instead of old:
-        data Name params = Con1 | Con2 type1 type2
-    """
-    loc_token = yield DATA
-    loc = loc_token.location
-    name = yield CONSTRUCTOR
-    params = yield IDENT.many()
-    yield EQUALS
-    constrs = yield indented_many(constructor_parser)
-    return SurfaceDataDeclaration(name, params, constrs, loc)
-
-
-@generate
-def term_declaration():
-    """Parse term declaration."""
-    name_tok = yield match_token("IDENT")
-    name = name_tok.value
-    loc = name_tok.location
-    type_ann = yield (COLON >> type_parser).optional()
-    yield EQUALS
-    body = yield declaration_body
-    return SurfaceTermDeclaration(name, type_ann, body, loc)
+    return SurfaceConstructorInfo(con_name, arg_types, docstring, con_loc)
 
 
 @generate
 def declaration_body():
     """Parse term as declaration body."""
+    # Handle optional indentation after = (for multi-line declarations)
+    yield INDENT.optional()
     # Use decl_term_parser which stops at declaration boundaries
     return (yield decl_term_parser)
 
 
 @generate
 def declaration_parser():
-    """Parse any declaration."""
-    result = yield data_declaration | term_declaration
+    """Parse any declaration with optional preceding docstring and pragma."""
+    # Capture any preceding pragmas
+    pragma = yield pragma_parser.optional()
+
+    # Capture any preceding docstrings (-- |)
+    docstrings = yield DOCSTRING_PRECEDING.many()
+    preceding_docstring = None
+    if docstrings:
+        # Take the last docstring and extract content after '-- |'
+        last_doc = docstrings[-1]
+        if "|" in last_doc:
+            preceding_docstring = last_doc.split("|", 1)[1].strip()
+
+    # Peek at next token to determine declaration type
+    next_tok = yield peek_token
+    if next_tok.type == "DATA":
+        result = yield data_declaration_with_docstring_and_pragma_parser(
+            preceding_docstring, pragma
+        )
+    else:
+        result = yield term_declaration_with_docstring_and_pragma_parser(
+            preceding_docstring, pragma
+        )
     return result
 
 
+def data_declaration_with_docstring_and_pragma_parser(
+    preceding_docstring: str | None = None, pragma: SurfacePragma | None = None
+):
+    """Create a parser for data declaration with preceding docstring and pragma."""
+
+    @generate
+    def parser():
+        loc_token = yield DATA
+        loc = loc_token.location
+        name = yield CONSTRUCTOR
+        params = yield IDENT.many()
+
+        # Handle optional indentation before = (for = on new line)
+        yield INDENT.optional()
+        yield EQUALS
+
+        # Handle optional indentation after = (for multi-line declarations)
+        yield INDENT.optional()
+
+        # Parse constructors separated by | (with optional indentation before each |)
+        constrs = yield sep_by1(constructor_parser, (INDENT.optional() >> BAR))
+
+        # Handle optional dedent at end
+        yield DEDENT.optional()
+
+        return SurfaceDataDeclaration(name, params, constrs, loc, preceding_docstring, pragma)
+
+    return parser
+
+
+def term_declaration_with_docstring_and_pragma_parser(
+    preceding_docstring: str | None = None, pragma: SurfacePragma | None = None
+):
+    """Create a parser for term declaration with preceding docstring and pragma."""
+
+    @generate
+    def parser():
+        name_tok = yield match_token("IDENT")
+        name = name_tok.value
+        loc = name_tok.location
+        type_ann = yield (COLON >> type_parser).optional()
+        yield EQUALS
+        body = yield declaration_body
+        return SurfaceTermDeclaration(name, type_ann, body, loc, preceding_docstring, pragma)
+
+    return parser
+
+
+@generate
+def data_declaration_with_docstring(preceding_docstring: str | None = None):
+    """Parse data declaration with preceding docstring."""
+    loc_token = yield DATA
+    loc = loc_token.location
+    name = yield CONSTRUCTOR
+    params = yield IDENT.many()
+
+    # Handle optional indentation before = (for = on new line)
+    yield INDENT.optional()
+    yield EQUALS
+
+    # Handle optional indentation after = (for multi-line declarations)
+    yield INDENT.optional()
+
+    # Parse constructors separated by | (with optional indentation before each |)
+    constrs = yield sep_by1(constructor_parser, (INDENT.optional() >> BAR))
+
+    # Handle optional dedent at end
+    yield DEDENT.optional()
+
+    return SurfaceDataDeclaration(name, params, constrs, loc, preceding_docstring)
+
+
+@generate
+def term_declaration_with_docstring(preceding_docstring: str | None = None):
+    """Parse term declaration with preceding docstring."""
+    name_tok = yield match_token("IDENT")
+    name = name_tok.value
+    loc = name_tok.location
+    type_ann = yield (COLON >> type_parser).optional()
+    yield EQUALS
+    body = yield declaration_body
+    return SurfaceTermDeclaration(name, type_ann, body, loc, preceding_docstring)
+
+
 # Program parser
-program_parser = declaration_parser.many() << EOF
+program_parser = (
+    INDENT.optional() >> declaration_parser.sep_by(DEDENT.optional()) << DEDENT.optional() << EOF
+)
 
 
 # =============================================================================
@@ -797,7 +1150,7 @@ def parse_term(source: str, filename: str = "<stdin>") -> SurfaceTerm:
         >>> print(term)
         \\x -> x
     """
-    tokens = Lexer(source, filename, skip_indent=False).tokenize()
+    tokens = Lexer(source, filename).tokenize()
     try:
         return (term_parser << EOF).parse(tokens)
     except parsy.ParseError as e:
@@ -821,6 +1174,6 @@ def parse_program(source: str, filename: str = "<stdin>") -> list[SurfaceDeclara
         >>> len(decls)
         1
     """
-    tokens = Lexer(source, filename, skip_indent=False).tokenize()
+    tokens = Lexer(source, filename).tokenize()
     parser = Parser(tokens)
     return parser.parse()

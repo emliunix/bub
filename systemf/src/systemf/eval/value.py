@@ -54,8 +54,25 @@ class VNeutral:
         return f"<neutral: {self.term}>"
 
 
+@dataclass(frozen=True)
+class VToolResult:
+    """Tool execution result: represents the result of a tool call.
+
+    Contains the tool name, result data, and success/failure status.
+    """
+
+    tool_name: str
+    result: Any  # Tool-specific result data
+    success: bool = True
+
+    def __str__(self) -> str:
+        if self.success:
+            return f"<tool:{self.tool_name}={self.result}>"
+        return f"<tool:{self.tool_name}!{self.result}>"
+
+
 # Sum type for all values
-Value = VClosure | VTypeClosure | VConstructor | VNeutral
+Value = VClosure | VTypeClosure | VConstructor | VNeutral | VToolResult
 
 
 @dataclass(frozen=True)

@@ -44,7 +44,11 @@ class TypeArrow(Type):
     ret: Type
 
     def __str__(self) -> str:
-        arg_str = f"({self.arg})" if isinstance(self.arg, TypeArrow) else str(self.arg)
+        match self.arg:
+            case TypeArrow():
+                arg_str = f"({self.arg})"
+            case _:
+                arg_str = str(self.arg)
         return f"{arg_str} -> {self.ret}"
 
     def free_vars(self) -> set[str]:
@@ -85,10 +89,14 @@ class TypeConstructor(Type):
     def __str__(self) -> str:
         if not self.args:
             return self.name
-        args_str = " ".join(
-            f"({arg})" if isinstance(arg, (TypeArrow, TypeForall)) else str(arg)
-            for arg in self.args
-        )
+        args_strs = []
+        for arg in self.args:
+            match arg:
+                case TypeArrow() | TypeForall():
+                    args_strs.append(f"({arg})")
+                case _:
+                    args_strs.append(str(arg))
+        args_str = " ".join(args_strs)
         return f"{self.name} {args_str}"
 
     def free_vars(self) -> set[str]:

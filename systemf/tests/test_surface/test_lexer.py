@@ -9,7 +9,8 @@ Tests for indentation-aware lexer including:
 
 import pytest
 
-from systemf.surface.lexer import Lexer, LexerError, Token, lex
+from systemf.surface.lexer import Lexer, lex
+from systemf.surface.types import LexerError, Token
 from systemf.utils.location import Location
 
 
@@ -206,21 +207,21 @@ class TestIndentTokens:
 
     def test_no_indent_single_line(self):
         """Single line has no INDENT/DEDENT."""
-        tokens = lex("x y z", skip_indent=False)
+        tokens = lex("x y z")
         types = [t.type for t in tokens]
         assert "INDENT" not in types
         assert "DEDENT" not in types
 
     def test_simple_indent(self):
         """Simple indentation emits INDENT/DEDENT."""
-        tokens = lex("let x = 1\n  x", skip_indent=False)
+        tokens = lex("let x = 1\n  x")
         types = [t.type for t in tokens]
         assert "INDENT" in types
         assert "DEDENT" in types
 
     def test_indent_token_position(self):
         """INDENT appears after let binding, before body."""
-        tokens = lex("let x = 1\n  x", skip_indent=False)
+        tokens = lex("let x = 1\n  x")
         types = [t.type for t in tokens]
         # Should be: LET, IDENT, EQUALS, NUMBER, INDENT, IDENT, DEDENT, EOF
         assert types == ["LET", "IDENT", "EQUALS", "NUMBER", "INDENT", "IDENT", "DEDENT", "EOF"]
@@ -230,7 +231,7 @@ class TestIndentTokens:
         source = """let x = 1
   let y = 2
     y"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         indent_count = sum(1 for t in tokens if t.type == "INDENT")
         dedent_count = sum(1 for t in tokens if t.type == "DEDENT")
         assert indent_count == 2
@@ -242,7 +243,7 @@ class TestIndentTokens:
   let y = 2
     y
 x"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens]
         # After the inner body 'y', we should have two DEDENTs to get back to level 0
         dedent_indices = [i for i, t in enumerate(types) if t == "DEDENT"]
@@ -252,7 +253,7 @@ x"""
         """EOF triggers DEDENTs to close all open blocks."""
         source = """let x = 1
   x"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens]
         # Last token before EOF should be DEDENT
         assert types[-2] == "DEDENT"
@@ -263,7 +264,7 @@ x"""
         source = """let x = 1
 
   x"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens]
         # Should still have just one INDENT/DEDENT pair
         assert types.count("INDENT") == 1
@@ -274,7 +275,7 @@ x"""
         source = """let x = 1
   -- this is a comment
   x"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens]
         # Should have one INDENT/DEDENT pair
         assert types.count("INDENT") == 1
@@ -285,7 +286,7 @@ x"""
         source = """case x of
   True -> y
   False -> z"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens]
         assert "INDENT" in types
         assert "DEDENT" in types
@@ -295,7 +296,7 @@ x"""
         source = """data Bool =
   True
   False"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens]
         assert "INDENT" in types
         assert "DEDENT" in types
@@ -313,7 +314,7 @@ class TestIndentErrors:
         """Mixed tabs and spaces in same indentation raise error."""
         source = "let x = 1\n \tx"  # space then tab on same line
         with pytest.raises(LexerError) as exc_info:
-            lex(source, skip_indent=False)
+            lex(source)
         assert "Mixed tabs and spaces" in str(exc_info.value)
 
     def test_inconsistent_indent(self):
@@ -323,7 +324,7 @@ class TestIndentErrors:
       y
    x"""  # 3 spaces doesn't match any previous level (0, 2)
         with pytest.raises(LexerError) as exc_info:
-            lex(source, skip_indent=False)
+            lex(source)
         assert "Inconsistent indentation" in str(exc_info.value)
 
 
@@ -365,7 +366,7 @@ class TestComplexExamples:
 
     def test_let_binding_with_indent(self):
         """Tokenize let binding with indented body."""
-        tokens = lex("let x = 1\n  x", skip_indent=False)
+        tokens = lex("let x = 1\n  x")
         types = [t.type for t in tokens[:-1]]
         assert types == ["LET", "IDENT", "EQUALS", "NUMBER", "INDENT", "IDENT", "DEDENT"]
 
@@ -392,7 +393,7 @@ class TestComplexExamples:
         source = """data List a =
   Nil
   Cons a (List a)"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens[:-1]]
         # Should have: DATA, CONSTRUCTOR, IDENT, EQUALS, INDENT,
         #              CONSTRUCTOR, CONSTRUCTOR, IDENT, LPAREN, CONSTRUCTOR, IDENT, RPAREN,
@@ -406,7 +407,7 @@ class TestComplexExamples:
         source = """case x of
   True -> y
   False -> z"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens[:-1]]
         # Should have INDENT/DEDENT for the branches
         assert "INDENT" in types
@@ -455,36 +456,83 @@ class TestEdgeCases:
 
 
 # =============================================================================
-# Backward Compatibility Tests
+# Indent Token Tests
 # =============================================================================
 
 
-class TestBackwardCompatibility:
-    """Tests to ensure backward compatibility mode works."""
+class TestIndentTokensIncluded:
+    """Tests to ensure INDENT/DEDENT tokens are always included."""
 
-    def test_skip_indent_default(self):
-        """By default, INDENT/DEDENT tokens are skipped."""
+    def test_indent_tokens_always_included(self):
+        """By default, INDENT/DEDENT tokens are included."""
         source = """let x = 1
   x"""
-        tokens = lex(source)  # skip_indent=True by default
-        types = [t.type for t in tokens]
-        assert "INDENT" not in types
-        assert "DEDENT" not in types
-
-    def test_skip_indent_explicit(self):
-        """Explicit skip_indent=True skips INDENT/DEDENT."""
-        source = """let x = 1
-  x"""
-        tokens = lex(source, skip_indent=True)
-        types = [t.type for t in tokens]
-        assert "INDENT" not in types
-        assert "DEDENT" not in types
-
-    def test_no_skip_indent(self):
-        """skip_indent=False includes INDENT/DEDENT."""
-        source = """let x = 1
-  x"""
-        tokens = lex(source, skip_indent=False)
+        tokens = lex(source)
         types = [t.type for t in tokens]
         assert "INDENT" in types
         assert "DEDENT" in types
+
+
+# =============================================================================
+# Pragma Token Tests
+# =============================================================================
+
+
+class TestPragmaTokens:
+    """Tests for pragma tokenization."""
+
+    def test_basic_pragma(self):
+        """Tokenize basic pragma syntax."""
+        source = "{-# LLM model=gpt-4 #-}"
+        tokens = lex(source)
+        types = [t.type for t in tokens]
+        assert types == ["PRAGMA_START", "PRAGMA_CONTENT", "PRAGMA_END", "EOF"]
+
+    def test_pragma_with_multiple_attributes(self):
+        """Tokenize pragma with multiple key-value pairs."""
+        source = "{-# LLM model=gpt-4, temperature=0.7 #-}"
+        tokens = lex(source)
+        types = [t.type for t in tokens]
+        assert types == ["PRAGMA_START", "PRAGMA_CONTENT", "PRAGMA_END", "EOF"]
+        # Check that content contains the attributes
+        content = [t for t in tokens if t.type == "PRAGMA_CONTENT"][0]
+        assert "model=gpt-4" in content.value
+        assert "temperature=0.7" in content.value
+
+    def test_pragma_before_declaration(self):
+        """Pragma can appear before a declaration."""
+        source = "{-# LLM model=gpt-4 #-}\nresearch_topic :: String -> String"
+        tokens = lex(source)
+        types = [t.type for t in tokens]
+        assert "PRAGMA_START" in types
+        assert "PRAGMA_CONTENT" in types
+        assert "PRAGMA_END" in types
+        # Should have the declaration tokens too
+        assert "IDENT" in types
+
+    def test_pragma_multiline(self):
+        """Pragma can span multiple lines."""
+        source = """{-# LLM
+            model=gpt-4,
+            temperature=0.7
+        #-}"""
+        tokens = lex(source)
+        types = [t.type for t in tokens]
+        assert types == ["PRAGMA_START", "PRAGMA_CONTENT", "PRAGMA_END", "EOF"]
+        content = [t for t in tokens if t.type == "PRAGMA_CONTENT"][0]
+        assert "model=gpt-4" in content.value
+        assert "temperature=0.7" in content.value
+
+    def test_pragma_with_quoted_values(self):
+        """Pragma can have quoted string values."""
+        source = '{-# LLM model="gpt-4", tag="code_review" #-}'
+        tokens = lex(source)
+        content = [t for t in tokens if t.type == "PRAGMA_CONTENT"][0]
+        assert 'model="gpt-4"' in content.value
+        assert 'tag="code_review"' in content.value
+
+    def test_unclosed_pragma_error(self):
+        """Unclosed pragma should raise error."""
+        source = "{-# LLM model=gpt-4"
+        with pytest.raises(LexerError):
+            lex(source)

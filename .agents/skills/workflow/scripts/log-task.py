@@ -19,8 +19,14 @@ Usage:
     # Commit log (Phase 2)
     .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" ./tmp-abc12345-log-content.md
 
+    # Update state while committing
+    .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Done" ./tmp-abc12345-log-content.md --new-state done
+
 Single-phase mode for quick logs:
     .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Log" "Fixed the bug"
+
+    # Update state while logging
+    .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Done" "Fixed the bug" --new-state done
 """
 
 import argparse
@@ -56,6 +62,79 @@ Status: <!-- ok / blocked / escalate -->
 
 <!-- Additional notes -->
 """
+
+
+def get_current_state(task_content: str) -> str | None:
+    """Extract the current state from YAML frontmatter."""
+    if not task_content.startswith("---"):
+        return None
+
+    frontmatter_end = task_content.find("\n---", 3)
+    if frontmatter_end == -1:
+        return None
+
+    frontmatter = task_content[:frontmatter_end]
+    match = re.search(r"^state:\s*(\w+)", frontmatter, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def validate_state_transition(current_state: str | None, new_state: str) -> tuple[bool, str]:
+    """Validate state transition follows workflow rules.
+
+    Allowed transitions:
+    - todo → review: Implementation complete, ready for review (MANDATORY)
+    - review → done: Review passed (Only path to done)
+    - review → escalated: Review found issues
+    - escalated → todo: Prerequisites complete, retry
+    - escalated → done: Escalation resolved
+    - Any → cancelled: Task cancelled
+
+    Forbidden:
+    - todo → done: Direct completion without review
+    """
+    if current_state is None:
+        return True, ""
+
+    # Forbidden: todo → done (direct completion)
+    if current_state == "todo" and new_state == "done":
+        return False, "Forbidden transition: todo → done. All work MUST be reviewed. Use 'review' state instead."
+
+    # Allowed transitions
+    allowed = {
+        "todo": ["review", "cancelled"],
+        "review": ["done", "escalated", "cancelled"],
+        "escalated": ["todo", "done", "cancelled"],
+        "done": ["cancelled"],  # Can cancel even completed tasks
+        "cancelled": [],  # Terminal state
+    }
+
+    valid_next = allowed.get(current_state, [])
+    if new_state in valid_next:
+        return True, ""
+
+    return (
+        False,
+        f"Invalid transition: {current_state} → {new_state}. Allowed from {current_state}: {', '.join(valid_next)}",
+    )
+
+
+def update_task_state(task_content: str, new_state: str) -> str:
+    """Update the state field in the YAML frontmatter."""
+    # Pattern to match state: value in YAML frontmatter
+    pattern = r"^(state:\s*)\w+"
+
+    # Check if there's a YAML frontmatter
+    if not task_content.startswith("---"):
+        return task_content
+
+    # Find the end of frontmatter
+    frontmatter_end = task_content.find("\n---", 3)
+    if frontmatter_end == -1:
+        return task_content
+
+    # Update state within the frontmatter
+    updated = re.sub(pattern, f"\\g<1>{new_state}", task_content, count=1, flags=re.MULTILINE)
+    return updated
 
 
 def format_work_log(title: str, content: str) -> str:
@@ -104,7 +183,7 @@ def cmd_generate(task_file: Path, title: str) -> None:
     print(temp_path)
 
 
-def cmd_commit(task_file: Path, title: str, temp_file: Path) -> None:
+def cmd_commit(task_file: Path, title: str, temp_file: Path, new_state: str | None = None) -> None:
     """Commit subcommand: Read temp file and append formatted log to task."""
     if not task_file.exists():
         print(f"Error: Task file not found: {task_file}", file=sys.stderr)
@@ -126,6 +205,15 @@ def cmd_commit(task_file: Path, title: str, temp_file: Path) -> None:
     # Read task file
     task_content = task_file.read_text(encoding="utf-8")
 
+    # Update state if requested
+    if new_state:
+        current_state = get_current_state(task_content)
+        is_valid, error_msg = validate_state_transition(current_state, new_state)
+        if not is_valid:
+            print(f"Error: {error_msg}", file=sys.stderr)
+            sys.exit(1)
+        task_content = update_task_state(task_content, new_state)
+
     # Check if Work Log section exists
     if "## Work Log" not in task_content:
         task_content += "\n\n## Work Log\n\n"
@@ -139,10 +227,13 @@ def cmd_commit(task_file: Path, title: str, temp_file: Path) -> None:
     # Clean up temp file
     temp_file.unlink()
 
-    print(f"Work log committed to: {task_file}")
+    if new_state:
+        print(f"Work log committed to: {task_file} (state: {new_state})")
+    else:
+        print(f"Work log committed to: {task_file}")
 
 
-def cmd_quick(task_file: Path, title: str, content: str) -> None:
+def cmd_quick(task_file: Path, title: str, content: str, new_state: str | None = None) -> None:
     """Quick subcommand: Directly log content without temp file."""
     if not task_file.exists():
         print(f"Error: Task file not found: {task_file}", file=sys.stderr)
@@ -155,13 +246,21 @@ def cmd_quick(task_file: Path, title: str, content: str) -> None:
     log_entry = format_work_log(title, temp_content)
 
     task_content = task_file.read_text(encoding="utf-8")
+
+    # Update state if requested
+    if new_state:
+        task_content = update_task_state(task_content, new_state)
+
     if "## Work Log" not in task_content:
         task_content += "\n\n## Work Log\n\n"
 
     task_content = task_content.rstrip() + "\n\n" + log_entry
     task_file.write_text(task_content, encoding="utf-8")
 
-    print(f"Work log committed to: {task_file}")
+    if new_state:
+        print(f"Work log committed to: {task_file} (state: {new_state})")
+    else:
+        print(f"Work log committed to: {task_file}")
 
 
 def main():
@@ -179,18 +278,25 @@ SUBCOMMANDS:
     Example:
       .agents/skills/workflow/scripts/log-task.py generate ./tasks/0-explore.md "Analysis"
 
-  commit TASK TITLE TEMP_FILE
+  commit TASK TITLE TEMP_FILE [--new-state STATE]
     Reads the temp file, formats with timestamp, appends to task, deletes temp.
     This is Phase 2 - call after editing the temp file.
-    
+    Optionally updates task state (todo, review, done, escalated, cancelled).
+    NOTE: Direct todo→done is forbidden. Must go through review state.
+
     Example:
       .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Analysis" ./tmp-abc12345-log-content.md
+      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Ready for Review" ./tmp-abc12345-log-content.md --new-state review
+      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Review Passed" ./tmp-abc12345-log-content.md --new-state done
 
-  quick TASK TITLE CONTENT
+  quick TASK TITLE CONTENT [--new-state STATE]
     For simple logs, bypass temp file and commit directly.
-    
+    Optionally updates task state (todo, review, done, escalated, cancelled).
+    NOTE: Direct todo→done is forbidden. Must go through review state.
+
     Example:
       .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Fix" "Fixed the auth bug"
+      .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-impl.md "Ready" "Implementation complete" --new-state review
 
 WORK LOG FORMAT:
   Each log entry includes:
@@ -221,6 +327,11 @@ WORK LOG FORMAT:
     commit_parser.add_argument("task", help="Path to the task file")
     commit_parser.add_argument("title", help="Title for this work log entry")
     commit_parser.add_argument("temp_file", help="Path to temp file from generate command")
+    commit_parser.add_argument(
+        "--new-state",
+        choices=["todo", "review", "done", "escalated", "cancelled"],
+        help="Update task state (todo → review → done). Direct todo→done is forbidden.",
+    )
 
     # quick subcommand
     quick_parser = subparsers.add_parser(
@@ -231,15 +342,20 @@ WORK LOG FORMAT:
     quick_parser.add_argument("task", help="Path to the task file")
     quick_parser.add_argument("title", help="Title for this work log entry")
     quick_parser.add_argument("content", help="Content for Facts section")
+    quick_parser.add_argument(
+        "--new-state",
+        choices=["todo", "review", "done", "escalated", "cancelled"],
+        help="Update task state (todo → review → done). Direct todo→done is forbidden.",
+    )
 
     args = parser.parse_args()
 
     if args.command == "generate":
         cmd_generate(Path(args.task), args.title)
     elif args.command == "commit":
-        cmd_commit(Path(args.task), args.title, Path(args.temp_file))
+        cmd_commit(Path(args.task), args.title, Path(args.temp_file), args.new_state)
     elif args.command == "quick":
-        cmd_quick(Path(args.task), args.title, args.content)
+        cmd_quick(Path(args.task), args.title, args.content, args.new_state)
     else:
         parser.print_help()
         sys.exit(1)

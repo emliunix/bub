@@ -6,25 +6,119 @@ Task orchestration patterns for Manager. These patterns define how to decompose 
 
 ---
 
-## Pattern: Simple
+## Table of Contents
 
-**Use when:** Small, isolated changes with no core type impact.
+1. [Universal Constraints](#universal-constraints) - Rules that apply to ALL patterns
+2. [Quick Reference](#quick-reference) - Pattern selection at a glance
+3. [Detailed Patterns](#detailed-patterns)
+   - [Discovery](#pattern-discovery) - When information is inadequate
+   - [Design-First](#pattern-design-first) - New features and architecture
+   - [Implementation-With-Review](#pattern-implementation-with-review) - Universal implementation pattern
+   - [Escalation Recovery](#pattern-escalation-recovery) - When review fails
+   - [Integration](#pattern-integration) - Multiple parallel streams
+4. [Pattern Selection Guide](#pattern-selection-guide)
+5. [Pattern Constraints](#pattern-constraints)
+6. [Pattern Composition](#pattern-composition)
+
+---
+
+## Universal Constraints
+
+**These rules apply to ALL patterns without exception:**
+
+### State Transitions (Mandatory)
+- **Allowed:** `todo → review → done`
+- **Forbidden:** Direct `todo → done` transition
+- Scripts MUST reject commits that attempt direct `todo → done`
+
+### Single-File Continuity (Mandatory)
+- Review uses the **SAME task file** as implementation
+- Review work is appended to the existing work log
+- No new task file is created for review phases
+- Task file tracks complete history: design → implementation → review
+
+### Assignee Field (Mandatory)
+- Use `assignee` field (not fixed `role`)
+- Same agent can work in different modes on same file
+- Current assignee reflects who is actively working
+
+### Review is Universal (Mandatory)
+- **ALL implementation work** MUST be reviewed
+- No "simple" exceptions that skip review
+- Review is a quality gate, not an optional add-on
+
+---
+
+## Quick Reference
+
+| Pattern | Trigger | Structure |
+|---------|---------|-----------|
+| **Discovery** | Missing information for planning | Exploration → Manager decides |
+| **Design-First** | New features, core types, architecture | Design → Implementation-With-Review |
+| **Implementation-With-Review** | ALL implementation work | Implement → Review (same file) → Done |
+| **Escalation Recovery** | Review finds issues | Review (escalate) → Prerequisites → Retry |
+| **Integration** | Multiple parallel work streams | Parallel tasks → Integration task |
+
+**Pattern Selection Decision Tree:**
+```
+Missing information? → Discovery
+    ↓
+New feature/architecture? → Design-First
+    ↓
+ALL cases → Implementation-With-Review
+    ↓
+Review found issues? → Escalation Recovery
+    ↓
+Multiple streams? → Integration
+```
+
+---
+
+## Detailed Patterns
+
+---
+
+## Pattern: Discovery
+
+**Use when:** Information inadequate for planning.
+
+**Trigger:** Manager cannot determine task structure due to missing context.
 
 **Characteristics:**
-- Single Implementor task
-- No Architect involvement
-- No dependencies on design tasks
+- Architect explores and reports findings
+- Manager waits before creating implementation tasks
+- Findings logged as suggested work items
 
 **Task Structure:**
 ```yaml
-role: Implementor
-type: implement
+# Single exploration task
+---
+assignee: Architect
+type: exploration
 dependencies: []
-skills: [from work item]
-expertise: [from work item]
+skills: [code-reading]
+expertise: ["Problem Analysis", "Code Exploration"]
+state: todo
+---
 ```
 
-**Use cases:** Bug fixes, documentation updates, config changes, simple refactoring
+**Flow:**
+```
+Manager detects missing info → Create Discovery task
+    ↓
+Architect explores → Appends work items to same file
+    ↓
+Manager reads work items → Selects appropriate pattern
+```
+
+**Manager Actions:**
+1. Create exploration task
+2. Log plan adjustment: `inadequate_information`
+3. Wait for Architect's suggested work items
+4. After completion, select appropriate pattern based on findings
+
+**State Transitions:**
+- `todo → review → done` (Architect reviews own exploration)
 
 ---
 
@@ -34,228 +128,183 @@ expertise: [from work item]
 
 **Characteristics:**
 - Architect creates specification first
-- Implementor executes against spec
-- May include review gate
+- Implementation follows established contracts
+- Review validates against design
 
 **Task Structure:**
 ```yaml
 # Task 1: Design
-role: Architect
-type: design  # Determines Architect enters DESIGN mode
+---
+assignee: Architect
+type: design
 title: "<Component> Design"
 dependencies: []
 skills: [code-reading, domain-specific]
+expertise: ["System Design"]
+state: todo
+---
 
 # Task 2: Implementation (depends on design)
-role: Implementor
-type: implement
-dependencies: [design_task]
-skills: [from work item]
-```
-
-**When to add Review task:**
-- Work item contains "core types" or "architecture"
-- Complexity is high
-- Risk of deviation from spec is significant
-
 ---
-
-## Pattern: Design-With-Review
-
-**Use when:** Creating complex designs that need validation before implementation begins.
-
-**Characteristics:**
-- Initial design by Architect
-- Peer review (or self-review) of design before implementation
-- Catches design flaws early, prevents implementation rework
-- Design review validates types, contracts, and test coverage
-
-**Task Structure:**
-```yaml
-# Task 1: Initial Design
-role: Architect
-type: design  # Architect enters DESIGN mode
-title: "<Component> Design"
-dependencies: []
-skills: [code-reading, domain-specific]
-
-# Task 2: Design Review (gate before implementation)
-role: Architect
-type: review  # Architect enters REVIEW mode
-title: "<Component> Design Review"
+assignee: Implementor
+type: implement
 dependencies: [design_task]
-skills: [code-reading]
-expertise: ["Design Review", "Architecture Validation"]
-
-# Task 3: Implementation (only after design review passes)
-role: Implementor
-type: implement
-dependencies: [design_review_task]
-skills: [from work item]
-```
-
-**When to use this pattern:**
-- Design affects multiple components
-- Design introduces new architectural patterns
-- High cost of design errors (hard to change later)
-- Team wants design consensus before implementation
-- Core types design for foundational systems
-
-**Manager Actions:**
-1. Create initial design task
-2. After design completes, create design review task
-3. Only after review passes (work log shows "PASS"), create implementation task
-4. If review escalates:
-   - Assign SAME task file to Architect for review (no new task file created)
-   - Architect appends work log with `additional_work_items` to same file
-   - Manager creates prerequisite tasks from work items
-   - Update original task dependencies to include new prerequisite tasks
-   - Original task will be retried after prerequisites complete
-
----
-
-## Pattern: Implementation-With-Quality-Gates
-
-**Use when:** Implementation touches core types, public APIs, or critical system components. Ensures type safety and conformance testing.
-
-**Characteristics:**
-- Pre-implementation: Core types reviewed and conformance tests defined
-- Implementation follows established contracts
-- Post-implementation: Review validates against original design
-- Prevents type drift and integration issues
-
-**Task Structure:**
-```yaml
-# Task 1: Core Types Review (Architect validates types)
-role: Architect
-type: review
-title: "Review - Core Types for <Component>"
-dependencies: [design_task]
-skills: [code-reading]
-expertise: ["Type System Design", "API Contract Review"]
-
-# Task 2: Conformance Tests (Define test contracts)
-role: Implementor
-type: implement
-title: "Tests - Conformance for <Component>"
-dependencies: [core_types_review_task]
-skills: [testing]
-expertise: ["Test-Driven Development", "Contract Testing"]
-
-# Task 3: Implementation (Build to spec)
-role: Implementor
-type: implement
-title: "Implement - <Component>"
-dependencies: [conformance_tests_task]
 skills: [from work item]
 expertise: [from work item]
-
-# Task 4: Post-Implementation Review (Validate against design)
-role: Architect
-type: review
-title: "Review - <Component> Implementation"
-dependencies: [implementation_task]
-skills: [code-reading]
-expertise: ["Code Review", "Architecture Validation"]
+state: todo
+---
 ```
 
-**Apply this pattern when:**
-- Work item mentions "core types", "public API", or "protocol"
-- Changes affect multiple components or external interfaces
-- High risk of type mismatches or API drift
-- Need to ensure tests validate contracts, not just behavior
+**Flow:**
+```
+Discovery (optional) → Design task
+    ↓
+Architect creates types.py, contracts → State: review → done
+    ↓
+Manager creates Implementation-With-Review task
+    ↓
+Implementor builds to spec → Review validates → Done
+```
+
+**When to use:**
+- New architectural components
+- Core type definitions
+- Public API design
+- Protocol specifications
 
 ---
 
-## Pattern: Validate-Before-Continue
+## Pattern: Implementation-With-Review
 
-**Use when:** Implementation must be validated before downstream work proceeds.
+**Use when:** ANY implementation work (universal pattern).
 
 **Characteristics:**
-- Review task acts as gate
-- Downstream tasks depend on Review, not directly on Implementation
-- Can be inserted between any two phases
+- Pre-implementation: Design review (if design task exists)
+- Implementation: Build to specification
+- Post-implementation: **MANDATORY review on same file**
+- Prevents skipping review for "simple" changes
 
 **Task Structure:**
 ```yaml
-# Task N: Implementation
-role: Implementor
+# Single task file - reused for review
+---
+assignee: Implementor
 type: implement
-dependencies: [previous_task]
+title: "Implement - <Component>"
+dependencies: [design_task]  # If design-first used
+skills: [from work item, testing]
+expertise: [from work item]
+state: todo
+---
 
-# Task N+1: Review (the gate)
-role: Architect
-type: review
-title: "Review - <Component>"
-dependencies: [implementation_task]
-skills: [code-reading]
+# Task: Implement <Component>
 
-# Task N+2: Downstream work
-role: [Architect|Implementor]
-type: [design|implement]
-dependencies: [review_task]  # Depends on review, not implementation
+## Context
+Specification from design task.
+
+## Files
+- src/component.py
+- tests/test_component.py
+
+## Description
+Implementation details...
+
+## Work Log
+
+### [timestamp] Implementation | ok
+**F:** Implemented component per spec...
+**A:** Decisions made...
+**C:** Ready for review. State: review
+
+### [timestamp] Review | ok
+**F:** Reviewed implementation against design...
+**A:** Validation results...
+**C:** Review passed. State: done
 ```
 
-**Use cases:** Core system validation, API contract verification, security review
+**Flow:**
+```
+Task created (state: todo)
+    ↓
+Implementor works → Appends work log → State: review
+    ↓
+Review assignee (Architect) validates same file
+    ↓
+IF review passes → State: done
+IF review fails → Escalation Recovery
+```
+
+**State Enforcement:**
+- Script rejects `todo → done` commits
+- Implementor MUST transition to `review`, not `done`
+- Reviewer updates state to `done` after validation
 
 ---
 
 ## Pattern: Escalation Recovery
 
-**Use when:** Any task escalates (Implementor blocked, design issues, implementation doesn't meet spec, etc.).
+**Use when:** Review finds implementation doesn't meet specification.
 
-**Trigger:** Work log contains `ESCALATE` or `BLOCKED` status
+**Trigger:** Review work log contains `ESCALATE` or critical issues.
 
 **Characteristics:**
-- Task escalates for review by Architect
-- SAME task file continues (no new task created)
-- Architect reviews and adds `additional_work_items` to same file
-- Manager creates prerequisite tasks and updates dependencies
-- May iterate multiple times
+- **SAME task file continues** (no new task created)
+- Reviewer appends `additional_work_items` to same file
+- Manager creates prerequisite tasks
+- Original task retries after prerequisites complete
+- State: `review → escalated → todo` (after prerequisites)
 
 **Flow:**
 ```
-Task (e.g., implementation) → ESCALATE → Architect reviews SAME file → 
-Adds work items → Manager creates prerequisites → Task retries after prereqs
+Implementation task (state: review)
+    ↓
+Architect reviews, finds issues → State: escalated
+    ↓
+Architect appends to same file:
+  - Review findings
+  - additional_work_items section
+    ↓
+Manager detects escalation:
+  - Creates prerequisite tasks from work items
+  - Updates original task dependencies
+  - Original task back to queue
+    ↓
+Prerequisites complete → Original task retries
+    ↓
+Implementor addresses issues → State: review → done
 ```
 
 **Manager Actions:**
 1. Detect escalation from work log status (`| escalate` or `| blocked`)
-2. Assign SAME task file to Architect for review
-3. Wait for Architect to append review with `additional_work_items`
-4. Create prerequisite tasks from work items
-5. Update original task dependencies to include new prerequisite tasks
-6. Put original task back in queue (retries after prerequisites complete)
-7. Log plan adjustment: `escalation_for_review` or `escalation_prerequisites_created`
+2. Check for `additional_work_items` in task file
+3. If work items exist:
+   - Create prerequisite tasks
+   - Update original task dependencies
+   - Keep original task in queue (will retry)
+4. Log plan adjustment: `escalation_prerequisites_created`
 
----
+**Work Log Structure (Escalation):**
+```markdown
+### [timestamp] Review | escalate
 
-## Pattern: Discovery
+**F:** Reviewed implementation. Found issues:
+- Issue 1: Description
+- Issue 2: Description
 
-**Use when:** Information inadequate for planning.
+**A:** Root cause analysis...
 
-**Trigger:** `has_adequate_information()` returns false for work item
+**C:** ESCALATE - Prerequisites needed before completion
 
-**Characteristics:**
-- Architect explores and reports findings
-- Manager waits before creating implementation tasks
-- Findings logged as suggested work items
+## Additional Work Items
 
-**Task Structure:**
 ```yaml
-# Exploration task
-role: Architect
-type: exploration
-dependencies: []
-skills: [code-reading]
-expertise: ["Problem Analysis", "Code Exploration"]
+additional_work_items:
+  - description: Fix issue 1
+    files: [src/file.py]
+    expertise_required: ["Skill"]
+    priority: high
 ```
-
-**Manager Actions:**
-1. Create exploration task
-2. Log plan adjustment: `inadequate_information`
-3. Wait for Architect's suggested work items
-4. After completion, select appropriate pattern based on findings
+```
 
 ---
 
@@ -266,82 +315,133 @@ expertise: ["Problem Analysis", "Code Exploration"]
 **Characteristics:**
 - Parallel implementation tasks
 - Integration task depends on all parallel tasks
+- Each parallel task follows Implementation-With-Review
 - Final validation step
 
 **Task Structure:**
 ```yaml
 # Parallel tasks (no dependencies between them)
-role: Implementor
+---
+assignee: Implementor
 type: implement
 dependencies: [shared_parent_task]
-# ... multiple parallel tasks
+skills: [from work item]
+state: todo
+---
+# ... multiple parallel tasks, each with own review
 
 # Integration task (convergence point)
-role: Implementor
+---
+assignee: Implementor
 type: implement
-dependencies: [parallel_task_1, parallel_task_2, ...]
+title: "Integrate <Feature>"
+dependencies: [parallel_task_1, parallel_task_2]
+skills: [testing]
 expertise: ["System Integration", "Testing"]
+state: todo
+---
 ```
 
-**Use cases:** Multi-component features, modular system assembly, cross-module changes
+**Flow:**
+```
+Design task
+    ↓
+Parallel Task A → Review → Done
+Parallel Task B → Review → Done
+    ↓
+Integration Task → Review → Done
+```
+
+**Use cases:**
+- Multi-component features
+- Modular system assembly
+- Cross-module changes
+
+**Note:** Each parallel task AND the integration task each follow Implementation-With-Review pattern (separate review phases).
 
 ---
 
 ## Pattern Selection Guide
 
 **Step 1: Check for triggers**
-- Work log has `ESCALATE`/`BLOCKED`? → **Escalation Recovery**
 - Missing information? → **Discovery**
 - Multiple parallel streams converging? → **Integration**
 
-**Step 2: Evaluate complexity and risk**
-- Small, isolated? → **Simple**
-- Core types/architecture involved? → **Design-First**
-- Complex design needing peer review? → **Design-With-Review**
-- Core types + needs conformance testing? → **Implementation-With-Quality-Gates**
-- Must validate before continuing? → **Validate-Before-Continue**
+**Step 2: Evaluate work type**
+- New feature/architecture? → **Design-First** → **Implementation-With-Review**
+- Any implementation work? → **Implementation-With-Review** (universal)
 
-**Step 3: Consider sequence**
-- Can tasks run in parallel? → **Integration** pattern for coordination
-- Must validate quality? → Insert **Validate-Before-Continue** gate
-- High-risk implementation? → Use **Implementation-With-Quality-Gates**
-- Previous attempt failed? → **Escalation Recovery** loop
+**Step 3: Handle outcomes**
+- Review passed? → Mark `done`, create next tasks
+- Review escalated? → **Escalation Recovery**
+
+**Common Compositions:**
+
+**New feature with core types:**
+```
+Discovery (optional) → Design-First → Implementation-With-Review
+```
+
+**API changes:**
+```
+Design-First → Implementation-With-Review
+```
+
+**Bug fix:**
+```
+Discovery (if needed) → Implementation-With-Review
+```
+
+**Multi-component feature:**
+```
+Design-First → Integration pattern with parallel Implementation-With-Review tasks
+```
+
+---
 
 ## Pattern Constraints
 
 **Manager MUST:**
 - Read this file before creating tasks
-- Select pattern based on work item characteristics and context
-- Set correct `type`, `role`, and `dependencies`
-- Use `type` field to route Architect tasks: `design` or `review`
+- Enforce universal constraints (no `todo → done`)
+- Use single-file continuity for review phases
 - Set `state: todo` when creating tasks
 - Log pattern choice in kanban plan adjustment log
 
+**Script Enforcement (Required):**
+- `log-task.py` MUST reject commits with `todo → done` transition
+- MUST allow `todo → review` and `review → done`
+- MUST allow `review → escalated` for Escalation Recovery
+
 **Anti-Patterns:**
-- Creating Implementor task before Design for core changes → Use **Design-First**
-- Complex design without peer review → Use **Design-With-Review**
-- Skipping Review for architecture-critical work → Add **Validate-Before-Continue**
-- Skipping type review and conformance tests for core types → Use **Implementation-With-Quality-Gates**
+- Creating direct `todo → done` transition → **VIOLATION**
+- Creating new task file for review → Use **single-file continuity**
+- Skipping review for "simple" changes → **NO EXCEPTIONS**
+- Complex design without design phase → Use **Design-First**
 - Creating all tasks upfront → Use **Discovery** to inform planning
 - Ignoring escalation status → Trigger **Escalation Recovery**
 
+---
+
 ## Pattern Composition
 
-Patterns can be composed:
+Patterns compose by chaining outputs to inputs:
 
 ```
-Discovery → Design-First → Implementation-With-Quality-Gates
-    ↓
-Escalation Recovery (if validation fails)
-    ↓
-Validate-Before-Continue (retry)
-    ↓
-Integration (merge with other work)
+Discovery → Design-First → Implementation-With-Review
+                ↓
+      Escalation Recovery (if review fails)
+                ↓
+      Validate-Before-Continue (retry)
+                ↓
+      Integration (merge with other work)
 ```
 
-Common compositions:
-- **New feature with core types**: Discovery → Design-First → Implementation-With-Quality-Gates
-- **API changes**: Implementation-With-Quality-Gates (types → tests → impl → review)
-- **Bug fix in core**: Escalation Recovery → Implementation-With-Quality-Gates
+**Composition Rules:**
+1. **Discovery** can lead to any pattern based on findings
+2. **Design-First** MUST be followed by Implementation-With-Review
+3. **Implementation-With-Review** can trigger Escalation Recovery
+4. **Escalation Recovery** loops back to Implementation-With-Review
+5. **Integration** coordinates multiple parallel Implementation-With-Review tasks
 
 Manager handles composition by treating pattern output as input to next pattern selection.

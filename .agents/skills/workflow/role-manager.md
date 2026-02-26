@@ -117,72 +117,73 @@ def reconcile_tasks(kanban_file, done_task, tasks):
     """Process completed task and plan next steps."""
     kb = read(kanban_file)
     done_content = read(done_task)
-    
+
     # 0. Validate work log structure (REQUIRED)
     is_valid, errors = validate_work_log(done_content)
     if not is_valid:
         raise Error("Invalid work log structure")
-    
+
     # 1. Keep completed task in dependency arrays for context
     # Dependencies serve as context trail for implementers/architects
     remaining = [t for t in tasks if t != done_task]
-    
+
     # 2. Extract information from completed task
     task_meta = read(done_task)
+    current_state = task_meta.get("state", "todo")
     work_items = extract_work_items(done_content)
     escalations = extract_escalations(done_content)
     blockers = extract_blockers(done_content)
-    
+
     # 3. Process based on task outcome
     new_tasks = []
-    
+
     if blockers:
         # Task blocked - need more information
         # Update task state to escalated
         task_meta["state"] = "escalated"
         write(done_task, task_meta)
-        
+
         # Create exploration task to resolve blocker
         exploration_task = create_exploration_task(kanban_file, done_task, blockers)
         new_tasks.append(exploration_task)
-        
+
         log_plan_adjustment(kanban_file, "blocker_detected", {
             "blocked_task": done_task,
             "blocker": blockers,
             "action": "Created exploration task to resolve blocker",
             "exploration_task": exploration_task
         })
-    
+
     elif escalations:
         # Escalation: Task needs review before continuing
         # Update task state to escalated
         task_meta["state"] = "escalated"
         write(done_task, task_meta)
-        
+
         # Manager assigns SAME task file to Architect for review (no new task created)
         # Architect will append review results to same file
         # Then Manager creates prerequisite tasks and updates dependencies
-        
+
         # Check if escalation contains work items (review already done)
         additional_items = extract_additional_work_items(done_content)
-        
+
         if additional_items:
             # Review has been completed, work items extracted
             # Create prerequisite tasks from the work items
             prereq_tasks = []
             for item in additional_items:
                 prereq_tasks.extend(create_tasks_from_work_item(item, done_task))
-            
+
             new_tasks.extend(prereq_tasks)
-            
+
             # Update original task dependencies to include new prerequisite tasks
             current_deps = task_meta.get("dependencies", [])
             task_meta["dependencies"] = current_deps + prereq_tasks
             write(done_task, task_meta)
-            
+
             # Keep original task in remaining (will be retried after prereqs complete)
             remaining.append(done_task)
-            
+
             log_plan_adjustment(kanban_file, "escalation_prerequisites_created", {
                 "original_task": done_task,
                 "issues": escalations,
@@ -194,30 +195,46 @@ def reconcile_tasks(kanban_file, done_task, tasks):
             # Don't create new task - same task file continues
             # Architect will be assigned to review this same file
             # After review, work items will be added, then this branch will trigger
-            
+
             log_plan_adjustment(kanban_file, "escalation_for_review", {
                 "task": done_task,
                 "issues": escalations,
                 "action": "Task assigned to Architect for review using same task file",
                 "next_step": "Architect will review and add work items to same file"
             })
-            
+
             # Put task back in queue for Architect to review
             remaining.append(done_task)
-    
+
+    elif current_state == "review":
+        # Implementation complete, ready for review
+        # Assign SAME task file to Architect for review
+        task_meta["assignee"] = "Architect"
+        task_meta["type"] = "review"
+        write(done_task, task_meta)
+
+        # Put task back in queue for Architect to review
+        remaining.append(done_task)
+
+        log_plan_adjustment(kanban_file, "ready_for_review", {
+            "task": done_task,
+            "action": "Implementation complete. Task assigned to Architect for review (same file)",
+            "next_step": "Architect will review and either approve (state: done) or escalate"
+        })
+
     elif work_items:
-        # Normal completion with work items
+        # Normal completion with work items (design/exploration tasks)
         # Mark task as done
         task_meta["state"] = "done"
         write(done_task, task_meta)
-        
+
         for item in work_items:
             # Determine if we have enough info to create tasks
             if not has_adequate_information(item):
                 # Need exploration first
                 exploration_task = create_exploration_for_item(kanban_file, done_task, item)
                 new_tasks.append(exploration_task)
-                
+
                 log_plan_adjustment(kanban_file, "inadequate_information", {
                     "work_item": item.get("description", "unknown"),
                     "reason": "Missing information for planning",
@@ -228,18 +245,18 @@ def reconcile_tasks(kanban_file, done_task, tasks):
                 # Create tasks from work item
                 item_tasks = create_tasks_from_work_item(item, done_task)
                 new_tasks.extend(item_tasks)
-                
+
                 log_plan_adjustment(kanban_file, "tasks_created", {
                     "from_work_item": item.get("description", "unknown"),
                     "tasks_created": item_tasks
                 })
-    
+
     else:
         # Task completed but no work items
         # Mark task as done
         task_meta["state"] = "done"
         write(done_task, task_meta)
-        
+
         # Check if this was the final task
         if not remaining and not new_tasks:
             log_plan_adjustment(kanban_file, "workflow_complete", {
@@ -319,7 +336,7 @@ def format_details(details):
 def create_exploration_task(kanban_file, blocked_task, blockers):
     """Create exploration task to resolve blockers."""
     return execute_script("scripts/create-task.py", {
-        "role": "Architect",
+        "assignee": "Architect",
         "type": "exploration",
         "kanban": kanban_file,
         "refers": blocked_task
@@ -329,8 +346,8 @@ def create_exploration_task(kanban_file, blocked_task, blockers):
 def create_exploration_for_item(kanban_file, parent_task, work_item):
     """Create exploration task for work item with missing info."""
     return execute_script("scripts/create-task.py", {
-        "role": "Architect",
-        "type": "exploration", 
+        "assignee": "Architect",
+        "type": "exploration",
         "kanban": kanban_file,
         "refers": parent_task
     })
@@ -339,7 +356,7 @@ def create_exploration_for_item(kanban_file, parent_task, work_item):
 def create_redesign_task(kanban_file, escalated_task, issues):
     """Create redesign task for escalated implementation."""
     return execute_script("scripts/create-task.py", {
-        "role": "Architect",
+        "assignee": "Architect",
         "type": "redesign",
         "kanban": kanban_file,
         "refers": escalated_task
@@ -348,34 +365,40 @@ def create_redesign_task(kanban_file, escalated_task, issues):
 
 ## Task Creation from Work Items
 
+**Universal Review Pattern:** ALL implementation tasks follow the same pattern:
+1. Implementor works on task
+2. Task transitions to `review` state
+3. Architect reviews same file
+4. Architect transitions to `done` state
+
 ```python
 def create_tasks_from_work_item(item, parent_task):
-    """Create tasks from work item."""
+    """Create tasks from work item following universal review pattern."""
     tasks = []
     
-    # Check if review needed (core types or architecture involved)
-    needs_review = is_architecture_related(item)
+    # Check if design phase needed (core types or architecture)
+    needs_design = is_architecture_related(item)
     
-    if needs_review:
-        # Create review task first
-        review = execute_script("scripts/create-task.py", {
-            "role": "Architect",
-            "type": "review",
+    if needs_design:
+        # Create design task first
+        design = execute_script("scripts/create-task.py", {
+            "assignee": "Architect",
+            "type": "design",
             "dependencies": parent_task
         })
-        tasks.append(review)
+        tasks.append(design)
         
-        # Create implementation task (depends on review)
+        # Create implementation task (depends on design)
         impl = execute_script("scripts/create-task.py", {
-            "role": "Implementor",
+            "assignee": "Implementor",
             "type": "implement",
-            "dependencies": review
+            "dependencies": design
         })
         tasks.append(impl)
     else:
-        # Direct implementation
+        # Direct implementation (still requires review)
         impl = execute_script("scripts/create-task.py", {
-            "role": "Implementor",
+            "assignee": "Implementor",
             "type": "implement",
             "dependencies": parent_task
         })

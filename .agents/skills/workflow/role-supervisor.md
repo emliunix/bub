@@ -9,13 +9,19 @@ Supervisor maintains minimal state and operates in a loop:
 Act like a code executor that strictly follows the following pseudo code `supervisor_loop`.
 
 ```python
-def supervisor_loop(initial_task: str):
-    """Main entry point for workflow execution."""
-    # Initialize workflow by creating kanban with user request
-    kanban_file = execute_script(f"{skill_path}/scripts/create-kanban.py", {
-        "title": "Workflow",
-        "request": initial_task
-    })
+def supervisor_loop(initial_task: str, kanban_file: str | None = None):
+    """Main entry point for workflow execution.
+    
+    Args:
+        initial_task: The user's initial request
+        kanban_file: Optional path to pre-created kanban. If not provided, creates new kanban.
+    """
+    # Initialize workflow - use provided kanban or create new one
+    if kanban_file is None:
+        kanban_file = execute_script(f"{skill_path}/scripts/create-kanban.py", {
+            "title": "Workflow",
+            "request": initial_task
+        })
     
     # Spawn Manager to populate kanban with initial tasks (done_task=None for initial)
     manager_data = spawn_manager_with_retry(kanban_file, done_task=None)

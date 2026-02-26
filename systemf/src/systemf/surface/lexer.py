@@ -7,33 +7,23 @@ Uses stack-based indentation tracking to emit INDENT/DEDENT tokens.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import Optional
 
+from systemf.surface.types import (
+    ConstructorToken,
+    DelimiterToken,
+    DocstringToken,
+    EOFToken,
+    IdentifierToken,
+    IndentationToken,
+    KeywordToken,
+    LexerError,
+    NumberToken,
+    OperatorToken,
+    PragmaToken,
+    Token,
+    TokenType,
+)
 from systemf.utils.location import Location
-
-
-@dataclass(frozen=True)
-class Token:
-    """A lexical token with type, value, and location."""
-
-    type: str
-    value: str
-    location: Location
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"Token({self.type!r}, {self.value!r}, {self.location})"
-
-
-class LexerError(Exception):
-    """Error during lexical analysis."""
-
-    def __init__(self, message: str, location: Location):
-        super().__init__(f"{location}: {message}")
-        self.location = location
 
 
 class Lexer:
@@ -53,9 +43,19 @@ class Lexer:
 
     # Token specifications as regex patterns
     TOKEN_PATTERNS = [
+        # Pragma syntax (must come before other patterns to catch {-# before comments)
+        # Match pragma start: {-#
+        ("PRAGMA_START", r"\{-#"),
+        # Match pragma end: #-}
+        ("PRAGMA_END", r"#-\}"),
         # Whitespace (no newlines - handled separately for indentation tracking)
         ("WHITESPACE", r"[ \t]+"),
         ("NEWLINE", r"\n|\r\n?"),
+        # Docstrings (must come before regular comments)
+        # Preceding docstrings (-- |) capture until end of line
+        ("DOCSTRING_PRECEDING", r"--\s*\|[^\n]*"),
+        # Inline docstrings (-- ^) capture until | or end of line (don't cross constructor boundaries)
+        ("DOCSTRING_INLINE", r"--\s*\^[^|\n]*"),
         ("COMMENT", r"--[^\n]*"),
         # Keywords
         ("DATA", r"\bdata\b"),
@@ -63,13 +63,15 @@ class Lexer:
         ("IN", r"\bin\b"),
         ("CASE", r"\bcase\b"),
         ("OF", r"\bof\b"),
-        ("FORALL", r"\bforall\b"),
+        ("FORALL", r"\bforall\b|∀"),  # forall or ∀ (U+2200)
         ("TYPE", r"\btype\b"),
-        # Multi-character operators
-        ("ARROW", r"-\u003e"),
+        ("LLM", r"\bLLM\b"),
+        ("TOOL", r"\bTOOL\b"),
+        # Multi-character operators (ASCII and Unicode)
+        ("ARROW", r"-\u003e|\u2192"),  # -> or → (U+2192)
         ("DARROW", r"=>"),
-        ("LAMBDA", r"\\"),  # Backslash for lambda
-        ("TYPELAMBDA", r"/\\"),  # /\ for type lambda (Λ)
+        ("LAMBDA", r"\\|\u03bb"),  # \ or λ (U+03bb)
+        ("TYPELAMBDA", r"/\\|\u039b"),  # /\ or Λ (U+039b)
         # Single-character operators
         ("EQUALS", r"="),
         ("COLON", r":"),
@@ -85,19 +87,18 @@ class Lexer:
         ("RBRACE", r"\}"),
         ("COMMA", r","),
         # Identifiers and constructors
-        ("CONSTRUCTOR", r"[A-Z][a-zA-Z0-9_]*"),  # Type/constructor names start with uppercase
-        ("IDENT", r"[a-z_][a-zA-Z0-9_]*"),  # Variables start with lowercase
+        ("CONSTRUCTOR", r"[A-Z][a-zA-Z0-9_']*"),  # Type/constructor names start with uppercase
+        ("IDENT", r"[a-z_][a-zA-Z0-9_']*"),  # Variables start with lowercase
         # Numbers (for convenience in tests)
         ("NUMBER", r"[0-9]+"),
     ]
 
-    def __init__(self, source: str, filename: str = "<stdin>", skip_indent: bool = True):
+    def __init__(self, source: str, filename: str = "<stdin>"):
         """Initialize lexer with source code.
 
         Args:
             source: The source code to tokenize
             filename: Name of the source file (for error messages)
-            skip_indent: If True, skip INDENT/DEDENT tokens for backward compatibility
         """
         self.source = source
         self.filename = filename
@@ -105,7 +106,6 @@ class Lexer:
         self.line = 1
         self.column = 1
         self.tokens: list[Token] = []
-        self._skip_indent = skip_indent
 
         # Indentation tracking
         self._indent_stack: list[int] = [0]  # Stack of indentation levels, starts at column 0
@@ -158,6 +158,19 @@ class Lexer:
             value = match.group()
             start_loc = Location(self.line, self.column, self.filename)
 
+            # Handle pragma start specially
+            if token_type == "PRAGMA_START":
+                # Emit PRAGMA_START token
+                self.tokens.append(
+                    PragmaToken(
+                        pragma_type=TokenType.PRAGMA_START, content=value, location=start_loc
+                    )
+                )
+                self._advance(value)
+                # Parse pragma content
+                self._parse_pragma_content(start_loc)
+                continue
+
             # Update position
             self._advance(value)
 
@@ -173,17 +186,58 @@ class Lexer:
 
             # We found a non-whitespace, non-comment token
             self._at_line_start = False
-            self.tokens.append(Token(token_type, value, start_loc))
+            self.tokens.append(self._create_typed_token(token_type, value, start_loc))
 
         # End of file: emit DEDENTs to close all open blocks, then EOF
         self._emit_dedents_to_level(0)
-        self.tokens.append(Token("EOF", "", Location(self.line, self.column, self.filename)))
-
-        # Filter out INDENT/DEDENT tokens if backward compatibility mode is enabled
-        if self._skip_indent:
-            self.tokens = [t for t in self.tokens if t.type not in ("INDENT", "DEDENT")]
+        self.tokens.append(EOFToken(location=Location(self.line, self.column, self.filename)))
 
         return self.tokens
+
+    def _parse_pragma_content(self, start_loc: Location) -> None:
+        """Parse pragma content and emit PRAGMA_CONTENT token with key-value pairs.
+
+        Pragma format: {-# KEY key=value ... #-}
+        We capture everything between PRAGMA_START and PRAGMA_END as raw content.
+
+        Args:
+            start_loc: Location of the pragma start
+        """
+        content_lines = []
+
+        while self.pos < len(self.source):
+            # Check for pragma end
+            if self.source[self.pos :].startswith("#-}"):
+                # Join content lines (removing trailing whitespace)
+                raw_content = "".join(content_lines).strip()
+                self.tokens.append(
+                    PragmaToken(
+                        pragma_type=TokenType.PRAGMA_CONTENT,
+                        content=raw_content,
+                        location=start_loc,
+                    )
+                )
+                # Emit PRAGMA_END
+                end_loc = Location(self.line, self.column, self.filename)
+                self._advance("#-}")
+                self.tokens.append(
+                    PragmaToken(pragma_type=TokenType.PRAGMA_END, content="#-}", location=end_loc)
+                )
+                return
+
+            # Collect character
+            char = self.source[self.pos]
+            content_lines.append(char)
+
+            if char == "\n":
+                self.line += 1
+                self.column = 1
+            else:
+                self.column += 1
+            self.pos += 1
+
+        # Reached end of file without finding pragma end
+        raise LexerError("Unclosed pragma: expected #-}", start_loc)
 
     def _process_indentation(self) -> bool:
         """Process indentation at the start of a logical line.
@@ -223,7 +277,11 @@ class Lexer:
         if current_indent > last_indent:
             # Indentation increased - emit INDENT
             indent_loc = Location(self.line, current_column, self.filename)
-            self.tokens.append(Token("INDENT", str(current_indent), indent_loc))
+            self.tokens.append(
+                IndentationToken(
+                    indent_type=TokenType.INDENT, level=str(current_indent), location=indent_loc
+                )
+            )
             self._indent_stack.append(current_indent)
         elif current_indent < last_indent:
             # Indentation decreased - emit DEDENTs
@@ -261,7 +319,11 @@ class Lexer:
 
         while self._indent_stack[-1] > target_level:
             self._indent_stack.pop()
-            self.tokens.append(Token("DEDENT", str(self._indent_stack[-1]), loc))
+            self.tokens.append(
+                IndentationToken(
+                    indent_type=TokenType.DEDENT, level=str(self._indent_stack[-1]), location=loc
+                )
+            )
 
         # Check for inconsistent indentation
         if self._indent_stack[-1] != target_level:
@@ -289,7 +351,7 @@ class Lexer:
             start_pos: Position to start checking from
 
         Returns:
-            True if line is blank or contains only comments
+            True if line is blank or contains only regular comments (not docstrings)
         """
         pos = start_pos
         while pos < len(self.source):
@@ -299,8 +361,18 @@ class Lexer:
             if char == "\n":
                 return True
 
-            # Comment = rest of line is comment (treated as blank)
+            # Check for comment start
             if char == "-" and pos + 1 < len(self.source) and self.source[pos + 1] == "-":
+                # Check if this is a docstring (-- | or -- ^)
+                # Skip the "--"
+                comment_start = pos + 2
+                # Skip whitespace after "--"
+                while comment_start < len(self.source) and self.source[comment_start] in " \t":
+                    comment_start += 1
+                # If followed by | or ^, it's a docstring (not blank)
+                if comment_start < len(self.source) and self.source[comment_start] in "|^":
+                    return False
+                # Regular comment = rest of line is blank
                 return True
 
             # Non-whitespace = not blank
@@ -322,19 +394,99 @@ class Lexer:
                 self.column += 1
         self.pos += len(text)
 
+    def _create_typed_token(self, token_type: str, value: str, location: Location) -> Token:
+        """Create a typed token based on the token type string.
+
+        Args:
+            token_type: The type of token (e.g., "IDENT", "NUMBER")
+            value: The token value as a string
+            location: The source location
+
+        Returns:
+            A specific Token subclass instance
+        """
+        match token_type:
+            case TokenType.IDENT:
+                return IdentifierToken(name=value, location=location)
+            case TokenType.CONSTRUCTOR:
+                return ConstructorToken(name=value, location=location)
+            case TokenType.NUMBER:
+                return NumberToken(number=value, location=location)
+            case TokenType.ARROW:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.ARROW)
+            case TokenType.DARROW:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.DARROW)
+            case TokenType.LAMBDA:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.LAMBDA)
+            case TokenType.TYPELAMBDA:
+                return OperatorToken(
+                    operator=value, location=location, op_type=TokenType.TYPELAMBDA
+                )
+            case TokenType.EQUALS:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.EQUALS)
+            case TokenType.COLON:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.COLON)
+            case TokenType.BAR:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.BAR)
+            case TokenType.AT:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.AT)
+            case TokenType.DOT:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.DOT)
+            case TokenType.LPAREN:
+                return DelimiterToken(
+                    delimiter=value, location=location, delim_type=TokenType.LPAREN
+                )
+            case TokenType.RPAREN:
+                return DelimiterToken(
+                    delimiter=value, location=location, delim_type=TokenType.RPAREN
+                )
+            case TokenType.LBRACKET:
+                return DelimiterToken(
+                    delimiter=value, location=location, delim_type=TokenType.LBRACKET
+                )
+            case TokenType.RBRACKET:
+                return DelimiterToken(
+                    delimiter=value, location=location, delim_type=TokenType.RBRACKET
+                )
+            case TokenType.LBRACE:
+                return DelimiterToken(
+                    delimiter=value, location=location, delim_type=TokenType.LBRACE
+                )
+            case TokenType.RBRACE:
+                return DelimiterToken(
+                    delimiter=value, location=location, delim_type=TokenType.RBRACE
+                )
+            case TokenType.COMMA:
+                return DelimiterToken(
+                    delimiter=value, location=location, delim_type=TokenType.COMMA
+                )
+            case TokenType.DOCSTRING_PRECEDING:
+                return DocstringToken(
+                    docstring_type=TokenType.DOCSTRING_PRECEDING, content=value, location=location
+                )
+            case TokenType.DOCSTRING_INLINE:
+                return DocstringToken(
+                    docstring_type=TokenType.DOCSTRING_INLINE, content=value, location=location
+                )
+            case _ if token_type in TokenType.KEYWORDS:
+                # Normalize Unicode forall to ASCII for consistent token type
+                normalized = "forall" if value == "∀" else value
+                return KeywordToken(keyword=normalized, location=location)
+            case _:
+                raise LexerError(f"Unknown token type: {token_type}", location)
+
 
 # =============================================================================
 # Convenience Functions
 # =============================================================================
 
 
-def lex(source: str, filename: str = "<stdin>", skip_indent: bool = True) -> list[Token]:
+def lex(source: str, filename: str = "<stdin>") -> list[Token]:
     """Tokenize source code.
 
     Args:
         source: Source code string
         filename: Source filename for error messages
-        skip_indent: If True (default), skip INDENT/DEDENT tokens for backward compatibility
 
     Returns:
         List of tokens
@@ -344,4 +496,4 @@ def lex(source: str, filename: str = "<stdin>", skip_indent: bool = True) -> lis
         >>> [t.type for t in tokens]
         ['LET', 'IDENT', 'EQUALS', 'NUMBER', 'EOF']
     """
-    return Lexer(source, filename, skip_indent=skip_indent).tokenize()
+    return Lexer(source, filename).tokenize()

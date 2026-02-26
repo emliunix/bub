@@ -1,0 +1,101 @@
+-- System F Prelude - Minimal Standard Library
+-- Essential types and functions for the REPL
+--
+-- NOTE: Primitive types like Int, String, and Float are not yet supported.
+-- All numeric examples use Nat (Peano naturals) instead.
+-- ============================================================================
+
+-- ============================================================================
+-- Core Types
+-- ============================================================================
+
+-- Booleans
+data Bool = True | False
+
+-- Optional values (Maybe)
+data Maybe a = Nothing | Just a
+
+-- Choice type (Either)
+data Either a b = Left a | Right b
+
+-- Linked lists
+data List a = Nil | Cons a (List a)
+
+-- Natural numbers (Peano)
+data Nat = Zero | Succ Nat
+
+-- Pairs
+data Pair a b = MkPair a b
+
+-- ============================================================================
+-- Boolean Operations
+-- ============================================================================
+
+not : Bool → Bool = λb →
+  case b of { | True → False | False → True }
+
+and : Bool → Bool → Bool = λa → λb →
+  case a of { | True → b | False → False }
+
+or : Bool → Bool → Bool = λa → λb →
+  case a of { | True → True | False → b }
+
+-- ============================================================================
+-- Polymorphic Combinators
+-- ============================================================================
+
+id : ∀a. a → a = Λa. λx → x
+
+const : ∀a. ∀b. a → b → a = Λa. Λb. λx → λy → x
+
+-- ============================================================================
+-- Maybe Operations
+-- ============================================================================
+
+fromMaybe : ∀a. a → Maybe a → a =
+  Λa. λdef → λm →
+    case m of { | Nothing → def | Just x → x }
+
+isJust : ∀a. Maybe a → Bool =
+  Λa. λm →
+    case m of { | Nothing → False | Just _ → True }
+
+-- ============================================================================
+-- Either Operations
+-- ============================================================================
+
+isLeft : ∀a. ∀b. Either a b → Bool =
+  Λa. Λb. λe →
+    case e of { | Left _ → True | Right _ → False }
+
+isRight : ∀a. ∀b. Either a b → Bool =
+  Λa. Λb. λe →
+    case e of { | Left _ → False | Right _ → True }
+
+-- ============================================================================
+-- Pair Operations
+-- ============================================================================
+
+fst : ∀a. ∀b. Pair a b → a =
+  Λa. Λb. λp → case p of { | MkPair x _ → x }
+
+snd : ∀a. ∀b. Pair a b → b =
+  Λa. Λb. λp → case p of { | MkPair _ y → y }
+
+-- ============================================================================
+-- Demo Values
+-- ============================================================================
+
+zero : Nat = Zero
+one : Nat = Succ Zero
+two : Nat = Succ (Succ Zero)
+three : Nat = Succ two
+
+tt : Bool = True
+ff : Bool = False
+
+justTwo : Maybe Nat = Just [Nat] two
+nothingNat : Maybe Nat = Nothing [Nat]
+
+leftBool : Either Bool Nat = Left [Bool] [Nat] True
+rightNat : Either Bool Nat = Right [Bool] [Nat] two

@@ -43,7 +43,11 @@ class SurfaceTypeArrow(SurfaceType):
     location: Location
 
     def __str__(self) -> str:
-        arg_str = f"({self.arg})" if isinstance(self.arg, SurfaceTypeArrow) else str(self.arg)
+        match self.arg:
+            case SurfaceTypeArrow():
+                arg_str = f"({self.arg})"
+            case _:
+                arg_str = str(self.arg)
         return f"{arg_str} -> {self.ret}"
 
 
@@ -70,10 +74,14 @@ class SurfaceTypeConstructor(SurfaceType):
     def __str__(self) -> str:
         if not self.args:
             return self.name
-        args_str = " ".join(
-            f"({arg})" if isinstance(arg, (SurfaceTypeArrow, SurfaceTypeForall)) else str(arg)
-            for arg in self.args
-        )
+        args_strs = []
+        for arg in self.args:
+            match arg:
+                case SurfaceTypeArrow() | SurfaceTypeForall():
+                    args_strs.append(f"({arg})")
+                case _:
+                    args_strs.append(str(arg))
+        args_str = " ".join(args_strs)
         return f"{self.name} {args_str}"
 
 
@@ -232,6 +240,25 @@ class SurfaceCase(SurfaceTerm):
         return f"case {self.scrutinee} of {{ {branches_str} }}"
 
 
+@dataclass(frozen=True)
+class SurfaceToolCall(SurfaceTerm):
+    """Tool invocation: @tool_name arg1 arg2 ...
+
+    Tool calls allow SystemF code to invoke external operations.
+    The tool name is resolved at runtime from the tool registry.
+    """
+
+    tool_name: str
+    args: list[SurfaceTerm]
+    location: Location
+
+    def __str__(self) -> str:
+        if not self.args:
+            return f"@{self.tool_name}"
+        args_str = " ".join(str(arg) for arg in self.args)
+        return f"(@{self.tool_name} {args_str})"
+
+
 SurfaceTermRepr = Union[
     SurfaceVar,
     SurfaceAbs,
@@ -242,7 +269,26 @@ SurfaceTermRepr = Union[
     SurfaceAnn,
     SurfaceConstructor,
     SurfaceCase,
+    SurfaceToolCall,
 ]
+
+
+# =============================================================================
+# Surface Pragmas
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class SurfacePragma:
+    """Pragma annotation: {-# key=value, ... #-}."""
+
+    directive: str  # e.g., "LLM"
+    attributes: dict[str, str]  # key-value pairs
+    location: Location
+
+    def __str__(self) -> str:
+        attrs = ", ".join(f"{k}={v}" for k, v in self.attributes.items())
+        return "{-# " + self.directive + " " + attrs + " #-}"
 
 
 # =============================================================================
@@ -257,18 +303,30 @@ class SurfaceDeclaration:
 
 
 @dataclass(frozen=True)
+class SurfaceConstructorInfo:
+    """Data constructor with optional docstring."""
+
+    name: str
+    args: list[SurfaceType]
+    docstring: str | None = None
+    location: Location = None  # type: ignore[assignment]
+
+
+@dataclass(frozen=True)
 class SurfaceDataDeclaration(SurfaceDeclaration):
     """Data type declaration: data Name params = Con1 args1 | Con2 args2 | ..."""
 
     name: str
     params: list[str]
-    constructors: list[tuple[str, list[SurfaceType]]]
+    constructors: list[SurfaceConstructorInfo]
     location: Location
+    docstring: str | None = None
+    pragma: SurfacePragma | None = None
 
     def __str__(self) -> str:
         params_str = " ".join(self.params) if self.params else ""
         constrs_str = " | ".join(
-            f"{name} {' '.join(str(t) for t in types)}" for name, types in self.constructors
+            f"{c.name} {' '.join(str(t) for t in c.args)}" for c in self.constructors
         )
         return f"data {self.name} {params_str} = {constrs_str}"
 
@@ -281,6 +339,8 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
     type_annotation: Optional[SurfaceType]
     body: SurfaceTerm
     location: Location
+    docstring: str | None = None
+    pragma: SurfacePragma | None = None
 
     def __str__(self) -> str:
         if self.type_annotation:

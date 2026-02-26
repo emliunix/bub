@@ -3,36 +3,36 @@
 from systemf.core.ast import (
     Abs,
     App,
-    Branch,
     Case,
     Constructor,
     DataDeclaration,
     Declaration,
+    Global,
     Let,
-    Pattern,
     TAbs,
     TApp,
     Term,
     TermDeclaration,
+    ToolCall,
     Var,
 )
-from systemf.core.types import Type
 from systemf.eval.value import (
     Environment,
     VClosure,
     VConstructor,
-    VNeutral,
     VTypeClosure,
     Value,
 )
 from systemf.eval.pattern import PatternMatcher
+from systemf.eval.tools import get_tool_registry
 
 
 class Evaluator:
     """Call-by-value evaluator for System F core language."""
 
-    def __init__(self) -> None:
+    def __init__(self, global_env: dict[str, Value] | None = None) -> None:
         self.pattern_matcher = PatternMatcher()
+        self.global_env = global_env if global_env is not None else {}
 
     def evaluate(self, term: Term, env: Environment | None = None) -> Value:
         """Evaluate term to a value.
@@ -47,6 +47,12 @@ class Evaluator:
             case Var(index):
                 # Variable lookup
                 return env.lookup(index)
+
+            case Global(name):
+                # Global variable lookup
+                if name not in self.global_env:
+                    raise RuntimeError(f"Undefined global: {name}")
+                return self.global_env[name]
 
             case Abs(var_type, body):
                 # Create closure capturing current environment
@@ -96,6 +102,13 @@ class Evaluator:
                 # Evaluate body
                 return self.evaluate(body, new_env)
 
+            case ToolCall(tool_name, args):
+                # Evaluate all arguments (call-by-value)
+                arg_vals = [self.evaluate(arg, env) for arg in args]
+                # Execute tool through registry
+                registry = get_tool_registry()
+                return registry.execute(tool_name, arg_vals)
+
             case _:
                 raise RuntimeError(f"Unknown term type: {type(term)}")
 
@@ -133,6 +146,10 @@ class Evaluator:
                     # But we might want to register them
                     pass
                 case TermDeclaration(name, type_annotation, body):
+                    # Add placeholder to global_env BEFORE evaluation
+                    # This allows recursive definitions to work
+                    self.global_env[name] = VConstructor("<recursive>", [])
                     value = self.evaluate(body)
+                    self.global_env[name] = value
                     results[name] = value
         return results

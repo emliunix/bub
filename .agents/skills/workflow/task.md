@@ -13,14 +13,14 @@ Task files are the primary unit of work in the workflow system. They contain:
 
 ```yaml
 ---
-role: Architect                    # Agent role (Architect, Implementor, Manager)
+assignee: Architect                # Current assignee (Architect or Implementor)
 skills: [code-reading]             # Skills to load (auto-loaded by agent tool)
 expertise: ["System Design"]       # Required expertise domains
 dependencies: []                   # Prerequisite task file paths
 refers: []                         # Related task file paths for reference
 type: design                       # Task type (see Type field below)
 priority: high                     # critical | high | medium | low
-state: todo                        # todo | done | escalated | cancelled
+state: todo                        # todo | review | done | escalated | cancelled
 kanban: tasks/0-kanban.md          # Associated kanban file
 created: 2026-02-25T11:38:30      # ISO timestamp
 ---
@@ -63,10 +63,10 @@ Detailed description of what needs to be done.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `role` | string | Agent role: `Architect`, `Implementor`, or `Manager` |
+| `assignee` | string | Current assignee: `Architect` or `Implementor` |
 | `type` | string | Task type (see Type field below) |
 | `priority` | string | `critical`, `high`, `medium`, or `low` |
-| `state` | string | `todo`, `done`, `escalated`, or `cancelled` |
+| `state` | string | `todo`, `review`, `done`, `escalated`, or `cancelled` |
 
 ### Optional Fields
 
@@ -98,15 +98,20 @@ The `state` field tracks task lifecycle:
 | State | Description |
 |-------|-------------|
 | `todo` | Ready to be worked on (default when created) |
-| `done` | Completed successfully |
-| `escalated` | Escalated for review or blocked |
+| `review` | Ready for review (MANDATORY before done) |
+| `done` | Completed successfully (only via review) |
+| `escalated` | Review found issues, prerequisites needed |
 | `cancelled` | Cancelled (no longer needed) |
 
 **State Transitions:**
-- `todo` → `done`: Task completed with work items
-- `todo` → `escalated`: Task escalated for review
-- `escalated` → `done`: Escalation resolved, task completed
+- `todo` → `review`: Implementation complete, ready for review (**MANDATORY**)
+- `review` → `done`: Review passed (**Only path to done**)
+- `review` → `escalated`: Review found issues, needs rework
+- `escalated` → `todo`: Prerequisites complete, retry implementation
+- `escalated` → `done`: Escalation resolved after fixes
 - Any → `cancelled`: Task cancelled by Manager
+
+**Universal Constraint:** Direct `todo → done` is **FORBIDDEN**. All work MUST be reviewed.
 
 ## Work Log Specification
 
@@ -246,7 +251,7 @@ additional_work_items:
 
 ```bash
 .agents/skills/workflow/scripts/create-task.py \
-    --role Architect \
+    --assignee Architect \
     --expertise "System Design,Python" \
     --skills "code-reading" \
     --title "Design API Layer" \
@@ -271,6 +276,7 @@ The script automatically:
 TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
 
 # Edit temp file, then commit
+# NOTE: The temporary file is merged into the task file and removed on successful commit
 .agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" "$TEMP"
 
 # Or quick log for simple updates

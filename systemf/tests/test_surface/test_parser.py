@@ -327,6 +327,51 @@ class TestCaseExpressions:
         assert term.branches[0].pattern.constructor == "Nil"
         assert term.branches[1].pattern.constructor == "Cons"
 
+    # ==========================================================================
+    # Explicit { | } Syntax Tests
+    # ==========================================================================
+
+    def test_explicit_syntax_single_branch(self):
+        """Parse case with explicit { | } syntax - single branch."""
+        term = parse_term("case x of { | True -> y }")
+        assert isinstance(term, SurfaceCase)
+        assert len(term.branches) == 1
+        assert term.branches[0].pattern.constructor == "True"
+
+    def test_explicit_syntax_multiple_branches(self):
+        """Parse case with explicit { | } syntax - multiple branches."""
+        term = parse_term("case b of { | True -> x | False -> y }")
+        assert isinstance(term, SurfaceCase)
+        assert len(term.branches) == 2
+        assert term.branches[0].pattern.constructor == "True"
+        assert term.branches[1].pattern.constructor == "False"
+
+    def test_explicit_syntax_with_pattern_args(self):
+        """Parse case with explicit syntax and pattern arguments."""
+        term = parse_term("case xs of { | Cons x xs -> x | Nil -> 0 }")
+        assert isinstance(term, SurfaceCase)
+        assert len(term.branches) == 2
+        assert term.branches[0].pattern.constructor == "Cons"
+        assert term.branches[0].pattern.vars == ["x", "xs"]
+        assert term.branches[1].pattern.constructor == "Nil"
+
+    def test_explicit_and_indented_syntax_equivalent(self):
+        """Both syntaxes should produce equivalent AST."""
+        explicit_term = parse_term("case b of { | True -> x | False -> y }")
+        indented_term = parse_term("case b of\n  True -> x\n  False -> y")
+
+        # Both should be SurfaceCase
+        assert isinstance(explicit_term, SurfaceCase)
+        assert isinstance(indented_term, SurfaceCase)
+
+        # Should have same number of branches
+        assert len(explicit_term.branches) == len(indented_term.branches)
+
+        # Branch constructors should match
+        for exp_branch, ind_branch in zip(explicit_term.branches, indented_term.branches):
+            assert exp_branch.pattern.constructor == ind_branch.pattern.constructor
+            assert exp_branch.pattern.vars == ind_branch.pattern.vars
+
 
 # =============================================================================
 # Type Parsing Tests
@@ -400,32 +445,26 @@ class TestDeclarations:
         assert decls[0].name == "x"
         assert decls[0].type_annotation is not None
 
-    @pytest.mark.xfail(reason="Parser treats multiple constructors as single constructor with args")
     def test_data_declaration_indentation(self):
-        """Parse data declaration with indented constructors.
-
-        Note: Parser currently treats multiple constructors as single constructor
-        with arguments. This is a known limitation to be fixed.
-        """
-        decls = parse_program("data Bool =\n  True\n  False")
+        """Parse data declaration with indented constructors using | syntax."""
+        decls = parse_program("data Bool =\n  True\n  | False")
         assert len(decls) == 1
         assert isinstance(decls[0], SurfaceDataDeclaration)
         assert decls[0].name == "Bool"
         assert len(decls[0].constructors) == 2
+        assert decls[0].constructors[0].name == "True"
+        assert decls[0].constructors[1].name == "False"
 
-    @pytest.mark.xfail(reason="Parser treats multiple constructors as single constructor with args")
     def test_data_declaration_with_params(self):
-        """Parse data declaration with type parameters.
-
-        Note: Parser currently treats multiple constructors as single constructor
-        with arguments. This is a known limitation to be fixed.
-        """
-        decls = parse_program("data List a =\n  Nil\n  Cons a (List a)")
+        """Parse data declaration with type parameters."""
+        decls = parse_program("data List a =\n  Nil\n  | Cons a (List a)")
         assert len(decls) == 1
         assert isinstance(decls[0], SurfaceDataDeclaration)
         assert decls[0].name == "List"
         assert decls[0].params == ["a"]
         assert len(decls[0].constructors) == 2
+        assert decls[0].constructors[0].name == "Nil"
+        assert decls[0].constructors[1].name == "Cons"
 
     def test_multiple_declarations(self):
         """Parse multiple declarations."""
@@ -620,21 +659,176 @@ class TestOldSyntaxRemoved:
         with pytest.raises(ParseError):
             parse_term("let x = 1 in x")
 
-    def test_case_braces_not_supported(self):
-        """Old 'case x of { ... }' syntax is no longer supported."""
-        # This should raise a parse error because braces are no longer expected
+    def test_case_braces_without_bar_fails(self):
+        """Explicit syntax requires | before each branch."""
+        # This should raise a parse error because | is required before each branch
         with pytest.raises(ParseError):
             parse_term("case x of { True -> y }")
 
-    def test_case_bar_not_supported(self):
-        """Old 'case x of { A | B }' syntax is no longer supported."""
-        # This should raise a parse error because bar is no longer expected
-        with pytest.raises(ParseError):
-            parse_term("case x of { True -> y | False -> z }")
+    def test_case_explicit_syntax_supported(self):
+        """Explicit 'case x of { | A | B }' syntax is now supported."""
+        # The { | } syntax should now work for case expressions
+        term = parse_term("case x of { | True -> y | False -> z }")
+        assert isinstance(term, SurfaceCase)
+        assert len(term.branches) == 2
+        assert term.branches[0].pattern.constructor == "True"
+        assert term.branches[1].pattern.constructor == "False"
 
-    def test_data_bar_not_supported(self):
-        """Old 'data T = A | B' syntax is no longer supported."""
-        # This should treat the whole thing as constructors
-        # Actually it will parse but bar will be unexpected
-        with pytest.raises(ParseError):
-            parse_program("data Bool = True | False")
+    def test_data_bar_supported(self):
+        """Old 'data T = A | B' syntax is now supported."""
+        # The | syntax should now work for data declarations
+        decls = parse_program("data Bool = True | False")
+        assert len(decls) == 1
+        assert isinstance(decls[0], SurfaceDataDeclaration)
+        assert decls[0].name == "Bool"
+        assert len(decls[0].constructors) == 2
+        assert decls[0].constructors[0].name == "True"
+        assert decls[0].constructors[1].name == "False"
+
+
+# =============================================================================
+# Docstring Tests
+# =============================================================================
+
+
+class TestDocstrings:
+    """Tests for docstring parsing."""
+
+    def test_preceding_docstring_data_declaration(self):
+        """Parse data declaration with preceding docstring (-- |)."""
+        decls = parse_program("-- | Natural numbers\ndata Nat = Zero | Succ Nat")
+        assert len(decls) == 1
+        assert isinstance(decls[0], SurfaceDataDeclaration)
+        assert decls[0].name == "Nat"
+        assert decls[0].docstring == "Natural numbers"
+
+    def test_preceding_docstring_term_declaration(self):
+        """Parse term declaration with preceding docstring (-- |)."""
+        decls = parse_program("-- | Identity function\nid = \\x -> x")
+        assert len(decls) == 1
+        assert isinstance(decls[0], SurfaceTermDeclaration)
+        assert decls[0].name == "id"
+        assert decls[0].docstring == "Identity function"
+
+    def test_inline_docstring_constructor(self):
+        """Parse constructor with inline docstring (-- ^)."""
+        decls = parse_program("data Nat = Zero -- ^ zero value | Succ Nat -- ^ successor")
+        assert len(decls) == 1
+        assert isinstance(decls[0], SurfaceDataDeclaration)
+        assert len(decls[0].constructors) == 2
+        assert decls[0].constructors[0].name == "Zero"
+        assert decls[0].constructors[0].docstring == "zero value"
+        assert decls[0].constructors[1].name == "Succ"
+        assert decls[0].constructors[1].docstring == "successor"
+
+    def test_mixed_docstrings(self):
+        """Parse data declaration with both preceding and inline docstrings."""
+        source = """-- | Natural numbers
+data Nat
+  = Zero    -- ^ zero value
+  | Succ Nat  -- ^ successor"""
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert isinstance(decls[0], SurfaceDataDeclaration)
+        assert decls[0].docstring == "Natural numbers"
+        assert decls[0].constructors[0].docstring == "zero value"
+        assert decls[0].constructors[1].docstring == "successor"
+
+    def test_docstring_multiline(self):
+        """Parse multi-line docstrings."""
+        source = """-- | This is a data type
+-- | that spans multiple lines
+data Foo = Bar"""
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert decls[0].docstring == "that spans multiple lines"
+
+    def test_no_docstring(self):
+        """Declarations without docstrings have None."""
+        decls = parse_program("data Nat = Zero | Succ")
+        assert len(decls) == 1
+        assert decls[0].docstring is None
+        assert decls[0].constructors[0].docstring is None
+        assert decls[0].constructors[1].docstring is None
+
+
+# =============================================================================
+# Pragma Parsing Tests
+# =============================================================================
+
+
+class TestPragmaParsing:
+    """Tests for pragma parsing."""
+
+    def test_basic_pragma_term_declaration(self):
+        """Parse term declaration with basic pragma."""
+        source = "{-# LLM model=gpt-4 #-}\nresearch_topic : String -> String = \\x -> x"
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert isinstance(decls[0], SurfaceTermDeclaration)
+        assert decls[0].name == "research_topic"
+        assert decls[0].pragma is not None
+        assert decls[0].pragma.directive == "LLM"
+        assert decls[0].pragma.attributes == {"model": "gpt-4"}
+
+    def test_pragma_with_multiple_attributes(self):
+        """Parse pragma with multiple key-value pairs."""
+        source = "{-# LLM model=claude-3-opus, tag=code_review, temperature=0.7 #-}\nreview_code : String -> String = \\x -> x"
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert decls[0].pragma is not None
+        assert decls[0].pragma.directive == "LLM"
+        assert decls[0].pragma.attributes["model"] == "claude-3-opus"
+        assert decls[0].pragma.attributes["tag"] == "code_review"
+        assert decls[0].pragma.attributes["temperature"] == "0.7"
+
+    def test_pragma_with_quoted_values(self):
+        """Parse pragma with quoted string values."""
+        source = '{-# LLM model="gpt-4", tag="code_review" #-}\nfoo : String -> String = \\x -> x'
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert decls[0].pragma is not None
+        assert decls[0].pragma.attributes["model"] == "gpt-4"
+        assert decls[0].pragma.attributes["tag"] == "code_review"
+
+    def test_pragma_with_data_declaration(self):
+        """Pragma can be attached to data declarations."""
+        source = "{-# LLM model=gpt-4 #-}\ndata Result = Ok | Error"
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert isinstance(decls[0], SurfaceDataDeclaration)
+        assert decls[0].pragma is not None
+        assert decls[0].pragma.directive == "LLM"
+        assert decls[0].pragma.attributes["model"] == "gpt-4"
+
+    def test_declaration_without_pragma(self):
+        """Declarations without pragmas have None."""
+        decls = parse_program("x = 1")
+        assert len(decls) == 1
+        assert decls[0].pragma is None
+
+    def test_pragma_multiline(self):
+        """Parse multi-line pragma."""
+        source = """{-# LLM
+            model=gpt-4,
+            temperature=0.7,
+            max_tokens=100
+        #-}
+research_topic : String -> String = \\x -> x"""
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert decls[0].pragma is not None
+        assert decls[0].pragma.attributes["model"] == "gpt-4"
+        assert decls[0].pragma.attributes["temperature"] == "0.7"
+        assert decls[0].pragma.attributes["max_tokens"] == "100"
+
+    def test_pragma_with_docstring(self):
+        """Pragma and docstring can coexist."""
+        source = """{-# LLM model=gpt-4 #-}
+-- | A research function
+research_topic : String -> String = \\x -> x"""
+        decls = parse_program(source)
+        assert len(decls) == 1
+        assert decls[0].docstring == "A research function"
+        assert decls[0].pragma is not None
+        assert decls[0].pragma.attributes["model"] == "gpt-4"

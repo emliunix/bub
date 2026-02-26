@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 # Valid values for validation
-VALID_ROLES = ["Manager", "Architect", "Implementor"]
+VALID_ASSIGNEES = ["Architect", "Implementor"]
 VALID_TYPES = ["exploration", "design", "review", "implement", "redesign"]
 VALID_PRIORITIES = ["critical", "high", "medium", "low"]
 VALID_CREATOR_ROLES = ["manager", "user", "architect", "implementor"]
@@ -54,12 +54,12 @@ def get_next_id(tasks_dir: Path) -> int:
     return max_id + 1
 
 
-def validate_role(role: str) -> str:
-    """Validate role is one of the allowed values."""
-    if role not in VALID_ROLES:
-        print(f"Error: Invalid role '{role}'. Must be one of: {', '.join(VALID_ROLES)}", file=sys.stderr)
+def validate_assignee(assignee: str) -> str:
+    """Validate assignee is one of the allowed values."""
+    if assignee not in VALID_ASSIGNEES:
+        print(f"Error: Invalid assignee '{assignee}'. Must be one of: {', '.join(VALID_ASSIGNEES)}", file=sys.stderr)
         sys.exit(1)
-    return role
+    return assignee
 
 
 def validate_creator_role(creator_role: str) -> str:
@@ -77,8 +77,8 @@ def parse_list(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def infer_task_type(role: str, title: str) -> str:
-    """Infer task type from role and title."""
+def infer_task_type(assignee: str, title: str) -> str:
+    """Infer task type from assignee and title."""
     title_lower = title.lower()
 
     if "explor" in title_lower:
@@ -89,14 +89,14 @@ def infer_task_type(role: str, title: str) -> str:
         return "review"
     elif "redesign" in title_lower:
         return "redesign"
-    elif role == "Architect":
+    elif assignee == "Architect":
         return "design"
     else:
         return "implement"
 
 
 def generate_task_header(
-    role: str,
+    assignee: str,
     expertise: list[str],
     skills: list[str],
     task_type: str,
@@ -107,7 +107,7 @@ def generate_task_header(
 ) -> str:
     """Generate the YAML header for a task file."""
     header = "---\n"
-    header += f"role: {role}\n"
+    header += f"assignee: {assignee}\n"
     header += f"expertise: {expertise}\n"
     header += f"skills: {skills}\n"
     header += f"type: {task_type}\n"
@@ -160,13 +160,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  .agents/skills/workflow/scripts/create-task.py --role Architect --expertise "System Design,Python" --kanban tasks/0-kanban.md --creator-role manager --title "Design API"
-  .agents/skills/workflow/scripts/create-task.py -r Implementor -e "Software Engineering" -k tasks/0-kanban.md -cr user -t "Fix bug"
+  .agents/skills/workflow/scripts/create-task.py --assignee Architect --expertise "System Design,Python" --kanban tasks/0-kanban.md --creator-role manager --title "Design API"
+  .agents/skills/workflow/scripts/create-task.py -a Implementor -e "Software Engineering" -k tasks/0-kanban.md -cr user -t "Fix bug"
         """,
     )
 
     parser.add_argument(
-        "--role", "-r", required=True, choices=VALID_ROLES, help=f"Agent role. Must be one of: {', '.join(VALID_ROLES)}"
+        "--assignee",
+        "-a",
+        required=True,
+        choices=VALID_ASSIGNEES,
+        help=f"Task assignee. Must be one of: {', '.join(VALID_ASSIGNEES)}",
     )
     parser.add_argument(
         "--expertise",
@@ -200,13 +204,13 @@ Examples:
     args = parser.parse_args()
 
     # Validate inputs
-    role = validate_role(args.role)
+    assignee = validate_assignee(args.assignee)
     creator_role = validate_creator_role(args.creator_role)
     expertise = parse_list(args.expertise)
     skills = parse_list(args.skills)
     dependencies = parse_list(args.dependencies)
     refers = parse_list(args.refers)
-    task_type = args.type or infer_task_type(role, args.title)
+    task_type = args.type or infer_task_type(assignee, args.title)
 
     # Ensure tasks directory exists
     tasks_dir = Path(args.tasks_dir)
@@ -220,7 +224,7 @@ Examples:
 
     # Generate file content
     header = generate_task_header(
-        role=role,
+        assignee=assignee,
         expertise=expertise,
         skills=skills,
         task_type=task_type,

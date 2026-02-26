@@ -6,6 +6,7 @@ from systemf.surface.ast import (
     SurfaceBranch,
     SurfaceCase,
     SurfaceConstructor,
+    SurfaceConstructorInfo,
     SurfaceDataDeclaration,
     SurfaceDeclaration,
     SurfaceLet,
@@ -35,7 +36,8 @@ from systemf.surface.elaborator import (
     elaborate,
     elaborate_term,
 )
-from systemf.surface.lexer import Lexer, Token, lex
+from systemf.surface.lexer import Lexer, lex
+from systemf.surface.types import Token
 from systemf.surface.parser import (
     ParseError,
     Parser,
@@ -60,6 +62,7 @@ __all__ = [
     "SurfaceDeclaration",
     "SurfaceDataDeclaration",
     "SurfaceTermDeclaration",
+    "SurfaceConstructorInfo",
     # Types
     "SurfaceTypeVar",
     "SurfaceTypeArrow",

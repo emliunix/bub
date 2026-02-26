@@ -12,6 +12,7 @@ from systemf.core.types import Type as CoreType
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
 from systemf.surface.ast import (
     SurfaceAbs,
+    SurfaceAnn,
     SurfaceApp,
     SurfaceBranch,
     SurfaceCase,
@@ -22,13 +23,13 @@ from systemf.surface.ast import (
     SurfacePattern,
     SurfaceTerm,
     SurfaceTermDeclaration,
+    SurfaceToolCall,
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceTypeArrow,
     SurfaceTypeConstructor,
     SurfaceTypeForall,
     SurfaceTypeVar,
-    SurfaceAnn,
     SurfaceVar,
 )
 from systemf.utils.location import Location
@@ -69,9 +70,13 @@ class Elaborator:
 
     def __init__(self):
         """Initialize elaborator with empty environments."""
-        # Term environment: name -> de Bruijn index
-        # Index 0 is the most recently bound variable
+        # Local term environment: name -> de Bruijn index
+        # Index 0 is the most recently bound variable (lambda params, etc.)
         self.term_env: dict[str, int] = {}
+
+        # Global term definitions: names of top-level declarations
+        # These are tracked separately from local variables
+        self.global_terms: set[str] = set()
 
         # Type environment: set of bound type variable names
         self.type_env: set[str] = set()
@@ -103,11 +108,20 @@ class Elaborator:
             del self.term_env[name]
             self.term_env = {k: v - 1 for k, v in self.term_env.items()}
 
-    def _lookup_term(self, name: str, location: Location) -> int:
-        """Look up a term variable, returning its de Bruijn index."""
-        if name not in self.term_env:
-            raise UndefinedVariable(name, location)
-        return self.term_env[name]
+    def _add_global_term(self, name: str) -> None:
+        """Add a global term definition."""
+        self.global_terms.add(name)
+
+    def _lookup_term(self, name: str, location: Location) -> core.Term:
+        """Look up a term variable.
+
+        Returns Var for local bindings, Global for top-level definitions.
+        """
+        if name in self.term_env:
+            return core.Var(self.term_env[name])
+        if name in self.global_terms:
+            return core.Global(name)
+        raise UndefinedVariable(name, location)
 
     def _add_type_binding(self, name: str) -> None:
         """Add a type variable binding."""
@@ -144,12 +158,13 @@ class Elaborator:
 
     def elaborate_declaration(self, decl: SurfaceDeclaration) -> core.Declaration:
         """Elaborate a single declaration."""
-        if isinstance(decl, SurfaceDataDeclaration):
-            return self._elaborate_data_decl(decl)
-        elif isinstance(decl, SurfaceTermDeclaration):
-            return self._elaborate_term_decl(decl)
-        else:
-            raise ElaborationError(f"Unknown declaration type: {type(decl)}")
+        match decl:
+            case SurfaceDataDeclaration():
+                return self._elaborate_data_decl(decl)
+            case SurfaceTermDeclaration():
+                return self._elaborate_term_decl(decl)
+            case _:
+                raise ElaborationError(f"Unknown declaration type: {type(decl)}")
 
     def _elaborate_data_decl(self, decl: SurfaceDataDeclaration) -> core.DataDeclaration:
         """Elaborate a data type declaration."""
@@ -157,20 +172,20 @@ class Elaborator:
         self.data_decls[decl.name] = decl
 
         # Build constructor types
-        for con_name, arg_types in decl.constructors:
+        for con_info in decl.constructors:
             # Constructor type: forall params. arg_types -> T params
-            con_type = self._build_constructor_type(decl, arg_types)
-            self.constructor_types[con_name] = con_type
+            con_type = self._build_constructor_type(decl, con_info.args)
+            self.constructor_types[con_info.name] = con_type
 
         # Convert surface types to core types
         core_constructors = []
-        for con_name, arg_types in decl.constructors:
+        for con_info in decl.constructors:
             # Extend type environment with data type parameters
             for param in decl.params:
                 self._add_type_binding(param)
 
-            core_arg_types = [self._elaborate_type(at) for at in arg_types]
-            core_constructors.append((con_name, core_arg_types))
+            core_arg_types = [self._elaborate_type(at) for at in con_info.args]
+            core_constructors.append((con_info.name, core_arg_types))
 
             # Remove type bindings
             for param in reversed(decl.params):
@@ -200,16 +215,17 @@ class Elaborator:
 
     def _elaborate_term_decl(self, decl: SurfaceTermDeclaration) -> core.TermDeclaration:
         """Elaborate a term declaration."""
-        # Elaborate the body
-        core_body = self.elaborate_term(decl.body)
-
         # Elaborate type annotation if present
         core_type = None
         if decl.type_annotation:
             core_type = self._elaborate_type(decl.type_annotation)
 
-        # Add the declared name to environment for subsequent declarations
-        self._add_term_binding(decl.name)
+        # Add the declared name to global_terms BEFORE elaborating the body
+        # This allows recursive definitions to work by making them Global references
+        self._add_global_term(decl.name)
+
+        # Elaborate the body (now recursive calls will find the name)
+        core_body = self.elaborate_term(decl.body)
 
         return core.TermDeclaration(
             name=decl.name,
@@ -232,8 +248,7 @@ class Elaborator:
         """
         match term:
             case SurfaceVar(name, location):
-                index = self._lookup_term(name, location)
-                return core.Var(index)
+                return self._lookup_term(name, location)
 
             case SurfaceAbs(var, var_type, body, location):
                 # Elaborate the type annotation if present
@@ -254,6 +269,9 @@ class Elaborator:
             case SurfaceApp(func, arg, location):
                 core_func = self.elaborate_term(func)
                 core_arg = self.elaborate_term(arg)
+                # If func is a constructor, convert App to Constructor with args
+                if isinstance(core_func, core.Constructor):
+                    return core.Constructor(core_func.name, core_func.args + [core_arg])
                 return core.App(core_func, core_arg)
 
             case SurfaceTypeAbs(var, body, location):
@@ -267,6 +285,10 @@ class Elaborator:
             case SurfaceTypeApp(func, type_arg, location):
                 core_func = self.elaborate_term(func)
                 core_type_arg = self._elaborate_type(type_arg)
+                # If func is a constructor, don't create TApp - constructors don't need
+                # type applications at runtime. The type checker will handle the type.
+                if isinstance(core_func, core.Constructor):
+                    return core_func
                 return core.TApp(core_func, core_type_arg)
 
             case SurfaceLet(name, value, body, location):
@@ -310,6 +332,11 @@ class Elaborator:
                     )
 
                 return core.Case(core_scrut, core_branches)
+
+            case SurfaceToolCall(tool_name, args, location):
+                # Elaborate tool call arguments
+                core_args = [self.elaborate_term(arg) for arg in args]
+                return core.ToolCall(tool_name, core_args)
 
             case _:
                 raise ElaborationError(f"Unknown term type: {type(term)}")
