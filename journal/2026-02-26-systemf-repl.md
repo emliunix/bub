@@ -113,3 +113,107 @@ All 336 tests passing.
 ```bash
 cd systemf && uv run python -m systemf.eval.repl
 ```
+
+---
+
+## Update: Prelude and Constructor Fixes
+
+### Prelude Standard Library
+
+Created `prelude.sf` with 21 definitions:
+
+**Types Defined:**
+- `Bool` (True, False)
+- `Maybe a` (Nothing, Just a)
+- `Either a b` (Left a, Right b)
+- `List a` (Nil, Cons a (List a))
+- `Nat` (Zero, Succ Nat)
+- `Pair a b` (MkPair a b)
+
+**Functions:**
+- `not`, `and`, `or` - Boolean operations
+- `id`, `const` - Polymorphic combinators
+- `fromMaybe`, `isJust` - Maybe operations
+- `isLeft`, `isRight` - Either operations
+- `fst`, `snd` - Pair projections
+
+**Demo Values:**
+- `zero`, `one`, `two`, `three` - Natural numbers
+- `justTwo`, `nothingNat` - Maybe examples
+- `leftBool`, `rightNat` - Either examples
+
+### Constructor Application Bug Fix
+
+**Problem:** Parser treated `Succ Zero` as `App(Constructor("Succ", []), Constructor("Zero", []))` instead of `Constructor("Succ", [Constructor("Zero", [])])`.
+
+**Root Cause:** In the full prelude, constructor names like `Zero` and `Succ` are added to `global_terms`, causing the elaborator to look them up as `Global` references instead of treating them as constructors.
+
+**Fix in elaborator.py:**
+```python
+case SurfaceApp(func, arg, location):
+    core_func = self.elaborate_term(func)
+    core_arg = self.elaborate_term(arg)
+    # If func is a constructor, convert App to Constructor with args
+    if isinstance(core_func, core.Constructor):
+        return core.Constructor(core_func.name, core_func.args + [core_arg])
+    return core.App(core_func, core_arg)
+```
+
+### Type Application Bug Fix
+
+**Problem:** Type applications like `Just [Nat]` were creating `TApp(Constructor("Just"), Nat)` which the evaluator couldn't handle (constructors aren't type abstractions).
+
+**Fix:** Skip TApp for constructors - the type checker handles the typing:
+```python
+case SurfaceTypeApp(func, type_arg, location):
+    core_func = self.elaborate_term(func)
+    core_type_arg = self._elaborate_type(type_arg)
+    if isinstance(core_func, core.Constructor):
+        return core_func  # Constructors don't need type applications at runtime
+    return core.TApp(core_func, core_type_arg)
+```
+
+### Type Checker Fix for Constructor Type Applications
+
+**Problem:** When type-checking `Just [Nat]`, the checker was instantiating the constructor type twice.
+
+**Fix in checker.py:** Special case for TApp with Constructor func to look up constructor type directly:
+```python
+case TApp(func, type_arg):
+    from systemf.core.ast import Constructor as AstConstructor
+    if isinstance(func, AstConstructor):
+        # Look up constructor type directly to avoid premature instantiation
+        ctor_type = self.constructors[func.name]
+        # ... instantiate with type_arg
+```
+
+### Readline Integration
+
+Added to REPL:
+- History persistence in `~/.systemf_history`
+- Tab completion for commands (`:quit`, `:help`) and global identifiers
+- Cross-platform support (GNU readline / macOS libedit)
+
+### Test Results
+
+All 336 tests passing. Prelude loads successfully with all 21 definitions.
+
+### Example Session
+
+```systemf
+$ cd systemf && uv run python -m systemf.eval.repl
+System F REPL v0.1.0
+Loaded prelude: 21 definitions
+
+> id [Bool] True
+it : Bool = True
+
+> not True
+it : Bool = False
+
+> justTwo
+it : Maybe Nat = (Just (Succ (Succ Zero)))
+
+> :quit
+Goodbye!
+```
