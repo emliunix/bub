@@ -1,0 +1,23 @@
+-- Complex LLM example with types
+
+-- Define a Maybe type for results
+data Maybe a = Nothing | Just a
+
+-- Simple extraction function (no LLM)
+extract : forall a. Maybe a -> a -> a
+extract = \ma -> \default -> 
+  case ma of
+    Nothing -> default
+    Just x -> x
+
+-- LLM function with Maybe type
+{-# LLM model=gpt-4 temperature=0.2 #-}
+-- | Extract structured data from unstructured text
+extractName : String -> Maybe String
+extractName = \text -- ^ Text containing a person's name -> extern
+
+-- Another example with multiple steps
+{-# LLM model=gpt-4 #-}
+-- | Chain multiple LLM operations
+process : String -> String
+process = \input -- ^ Raw input text -> extern

@@ -1,0 +1,17 @@
+-- Multi-parameter LLM function examples
+
+{-# LLM model=gpt-4 temperature=0.5 #-}
+-- | Classify text into categories
+classify : String -> String -> String
+classify = \categories -- ^ Comma-separated list of categories -> \text -- ^ The text to classify -> extern
+
+{-# LLM model=claude-sonnet temperature=0.9 #-}
+-- | Generate code in a specific language
+codegen : String -> String -> String
+codegen = \language -- ^ Programming language (e.g., Python, Haskell) -> \task -- ^ Description of what the code should do -> extern
+
+-- Example: Simple sentiment analysis
+{-# LLM #-}
+-- | Analyze sentiment of text
+sentiment : String -> String
+sentiment = \text -- ^ Text to analyze -> extern
