@@ -8,6 +8,7 @@ import pytest
 from systemf.core.checker import TypeChecker
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
 from systemf.surface.elaborator import elaborate
+from systemf.core.module import Module
 from systemf.surface.lexer import lex
 from systemf.surface.parser import Parser
 
@@ -26,10 +27,10 @@ class TestFullPipeline:
         surface_decls = Parser(tokens).parse()
 
         # Elaborate
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        assert len(core_decls) == 1
-        assert core_decls[0].name == "id"
+        assert len(module.declarations) == 1
+        assert module.declarations[0].name == "id"
 
     def test_bool_type(self):
         """Full pipeline with boolean type."""
@@ -41,11 +42,11 @@ class TestFullPipeline:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        assert len(core_decls) == 1
-        assert "True" in constr_types
-        assert "False" in constr_types
+        assert len(module.declarations) == 1
+        assert "True" in module.constructor_types
+        assert "False" in module.constructor_types
 
     def test_list_type(self):
         """Full pipeline with list type."""
@@ -57,11 +58,11 @@ class TestFullPipeline:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        assert len(core_decls) == 1
-        assert "Nil" in constr_types
-        assert "Cons" in constr_types
+        assert len(module.declarations) == 1
+        assert "Nil" in module.constructor_types
+        assert "Cons" in module.constructor_types
 
     @pytest.mark.xfail(reason="Parser treats multiple constructors as single constructor with args")
     def test_type_checking_integration(self):
@@ -81,11 +82,11 @@ class TestFullPipeline:
         surface_decls = Parser(tokens).parse()
 
         # Elaborate
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
         # Type check
-        checker = TypeChecker(constr_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         assert "not" in types
         assert types["not"] == TypeArrow(TypeConstructor("Bool", []), TypeConstructor("Bool", []))
@@ -102,10 +103,10 @@ class TestPolymorphism:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        checker = TypeChecker(constr_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         assert "id" in types
         assert isinstance(types["id"], TypeForall)
@@ -126,10 +127,10 @@ class TestPolymorphism:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        checker = TypeChecker(constr_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         assert "trueVal" in types
         assert "intVal" in types
@@ -152,10 +153,10 @@ class TestPatternMatching:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        checker = TypeChecker(constr_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         assert "const" in types
 
@@ -176,10 +177,10 @@ class TestPatternMatching:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        checker = TypeChecker(constr_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         assert "isZero" in types
 
@@ -195,10 +196,10 @@ class TestComplexExamples:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        checker = TypeChecker(constr_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         assert "compose" in types
 
@@ -220,9 +221,9 @@ class TestComplexExamples:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, constr_types = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        checker = TypeChecker(constr_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         assert "isEmpty" in types

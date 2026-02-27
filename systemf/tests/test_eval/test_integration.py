@@ -119,15 +119,15 @@ def test_full_pipeline_simple():
 
     # Elaborate
     elab = Elaborator()
-    core = elab.elaborate(surface)
+    module = elab.elaborate(surface)
 
     # Type check
-    checker = TypeChecker(elab.constructor_types)
-    types = checker.check_program(core)
+    checker = TypeChecker(module.constructor_types)
+    types = checker.check_program(module.declarations)
 
     # Evaluate
     evalr = Evaluator()
-    values = evalr.evaluate_program(core)
+    values = evalr.evaluate_program(module.declarations)
 
     assert "x" in values
     assert values["x"] == VConstructor("True", [])

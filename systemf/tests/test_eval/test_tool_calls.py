@@ -321,10 +321,10 @@ class TestToolCallIntegration:
 
         source = """result = @identity 42"""
         decls = parse_program(source)
-        core_decls, _ = elaborate(decls)
+        module = elaborate(decls)
 
         evaluator = Evaluator()
-        results = evaluator.evaluate_program(core_decls)
+        results = evaluator.evaluate_program(module.declarations)
 
         assert "result" in results
         assert isinstance(results["result"], VToolResult)

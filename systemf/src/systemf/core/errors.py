@@ -80,3 +80,14 @@ class OccursCheckError(TypeError):
         self.var = var
         self.t = t
         super().__init__(f"Occurs check failed: {var} occurs in {t}", location)
+
+
+class ElaborationError(Exception):
+    """Error during elaboration."""
+
+    def __init__(self, message: str, location: Location | None = None):
+        if location:
+            super().__init__(f"{location}: {message}")
+        else:
+            super().__init__(message)
+        self.location = location

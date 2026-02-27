@@ -684,6 +684,7 @@ def lambda_parser():
 
     Syntax:
         \x -> expr                    (single-line)
+        \x -- ^ docstring -> expr     (with param docstring)
         \x ->
           expr                        (multi-line with indentation)
     """
@@ -693,10 +694,19 @@ def lambda_parser():
     # For lambda annotations, only parse app_type (not arrow_type) to avoid
     # consuming the lambda arrow as a type arrow
     var_type = yield (COLON >> app_type).optional()
+    # Capture optional param docstring (-- ^ style)
+    param_doc = yield DOCSTRING_INLINE.optional()
+    param_docstrings: list[str | None] = []
+    if param_doc is not None:
+        # Extract content after '-- ^' prefix
+        if "^" in param_doc:
+            param_docstrings.append(param_doc.split("^", 1)[1].strip())
+        else:
+            param_docstrings.append("")
     yield ARROW
     # Check for optional indented block or single-line body
     body = yield indented_block(term_parser) | term_parser
-    return SurfaceAbs(var, var_type, body, loc)
+    return SurfaceAbs(var, var_type, body, loc, param_docstrings)
 
 
 @generate
@@ -771,10 +781,19 @@ def decl_lambda_parser():
     loc = loc_token.location
     var = yield IDENT
     var_type = yield (COLON >> app_type).optional()
+    # Capture optional param docstring (-- ^ style)
+    param_doc = yield DOCSTRING_INLINE.optional()
+    param_docstrings: list[str | None] = []
+    if param_doc is not None:
+        # Extract content after '-- ^' prefix
+        if "^" in param_doc:
+            param_docstrings.append(param_doc.split("^", 1)[1].strip())
+        else:
+            param_docstrings.append("")
     yield ARROW
     # Check for optional indented block or single-line body
     body = yield indented_block(decl_term_parser) | decl_term_parser
-    return SurfaceAbs(var, var_type, body, loc)
+    return SurfaceAbs(var, var_type, body, loc, param_docstrings)
 
 
 @generate
@@ -1013,81 +1032,61 @@ def sep_by1(parser: P, sep: P) -> P:
 def parse_pragma_attributes(content: str) -> dict[str, str]:
     """Parse pragma content into key-value pairs.
 
-    Format: directive key1=value1, key2=value2 ...
+    Format: directive key1=value1 key2=value2 ...
     Returns: dict of attributes (excluding the directive)
 
     Example:
-        "LLM model=gpt-4, temperature=0.7" -> {"model": "gpt-4", "temperature": "0.7"}
+        "LLM model=gpt-4 temperature=0.7" -> {"model": "gpt-4", "temperature": "0.7"}
     """
     attributes: dict[str, str] = {}
 
-    # Split content but preserve quoted values
-    parts = []
-    current = ""
-    in_quotes = False
-    quote_char = None
+    # Parse key=value pairs, splitting on space (but not inside quotes)
+    # Pattern matches: key=value where value may be quoted
+    import re
 
-    for char in content:
-        if char in "\"'":
-            if not in_quotes:
-                in_quotes = True
-                quote_char = char
-                current += char
-            elif char == quote_char:
-                in_quotes = False
-                quote_char = None
-                current += char
-            else:
-                current += char
-        elif char == "," and not in_quotes:
-            parts.append(current.strip())
-            current = ""
-        else:
-            current += char
+    # Regex to match key=value pairs, handling quoted values
+    # Matches: key=value or key="value with spaces" or key='value with spaces'
+    # Note: [^\s,]+ stops at whitespace or comma (for multiline pragmas)
+    pattern = r'(\w+)=((?:"[^"]*"|\'[^\']*\'|[^\s,]+))'
 
-    if current.strip():
-        parts.append(current.strip())
-
-    # Parse each part as key=value
-    for part in parts:
-        if "=" in part:
-            key, value = part.split("=", 1)
-            key = key.strip()
-            value = value.strip()
-            # Remove quotes if present
-            if (value.startswith('"') and value.endswith('"')) or (
-                value.startswith("'") and value.endswith("'")
-            ):
-                value = value[1:-1]
-            attributes[key] = value
+    for match in re.finditer(pattern, content):
+        key = match.group(1)
+        value = match.group(2).strip()
+        # Remove quotes if present
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            value = value[1:-1]
+        attributes[key] = value
 
     return attributes
 
 
 @generate
 def pragma_parser():
-    """Parse pragma: {-# LLM key=value ... #-}."""
+    """Parse pragma: {-# LLM raw_content #-}.
+
+    Stores raw_content as string - parsing happens in later passes.
+    """
     loc_token = yield PRAGMA_START
     loc = loc_token.location
 
-    # The pragma content should contain the directive and attributes
+    # The pragma content should contain the directive and raw content
     content = yield PRAGMA_CONTENT
 
-    # Parse content to extract directive and attributes
+    # Parse content to extract directive and raw_content
     content_parts = content.strip().split(None, 1)
     if not content_parts:
         raise ParseError("Empty pragma", loc)
 
     directive = content_parts[0]
-    attr_string = content_parts[1] if len(content_parts) > 1 else ""
-
-    # Parse attributes
-    attributes = parse_pragma_attributes(attr_string)
+    raw_content = content_parts[1] if len(content_parts) > 1 else ""
 
     # Consume PRAGMA_END
     yield PRAGMA_END
 
-    return SurfacePragma(directive, attributes, loc)
+    # Return as dict: {directive: raw_content}
+    return {directive: raw_content}
 
 
 @generate
@@ -1190,7 +1189,7 @@ def data_declaration_with_docstring_and_pragma_parser(
         # Handle optional dedent at end
         yield DEDENT.optional()
 
-        return SurfaceDataDeclaration(name, params, constrs, loc, preceding_docstring, pragma)
+        return SurfaceDataDeclaration(name, params, constrs, loc, preceding_docstring)
 
     return parser
 
@@ -1208,7 +1207,9 @@ def term_declaration_with_docstring_and_pragma_parser(
         type_ann = yield (COLON >> type_parser).optional()
         yield EQUALS
         body = yield declaration_body
-        return SurfaceTermDeclaration(name, type_ann, body, loc, preceding_docstring, pragma)
+        return SurfaceTermDeclaration(
+            name, type_ann, body, loc, preceding_docstring, pragma=pragma
+        )
 
     return parser
 

@@ -55,8 +55,9 @@ class Lexer:
         # Docstrings (must come before regular comments)
         # Preceding docstrings (-- |) capture until end of line
         ("DOCSTRING_PRECEDING", r"--\s*\|[^\n]*"),
-        # Inline docstrings (-- ^) capture until | or end of line (don't cross constructor boundaries)
-        ("DOCSTRING_INLINE", r"--\s*\^[^|\n]*"),
+        # Inline docstrings (-- ^) capture until -> or end of line
+        # Must come before COMMENT pattern to be recognized
+        ("DOCSTRING_INLINE", r"--\s*\^\s*(.*?)(?=\s*-\u003e|\s*\||\n|$)"),
         ("COMMENT", r"--[^\n]*"),
         # Keywords
         ("DATA", r"\bdata\b"),

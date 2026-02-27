@@ -28,8 +28,8 @@ from systemf.surface.desugar import (
     desugar,
     desugar_lets,
 )
+from systemf.core.errors import ElaborationError
 from systemf.surface.elaborator import (
-    ElaborationError,
     Elaborator,
     UndefinedTypeVariable,
     UndefinedVariable,

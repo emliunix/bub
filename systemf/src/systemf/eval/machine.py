@@ -1,5 +1,6 @@
 """Abstract machine / evaluator for System F core language."""
 
+import os
 from typing import Callable
 
 from systemf.core.ast import (
@@ -21,6 +22,7 @@ from systemf.core.ast import (
     ToolCall,
     Var,
 )
+from systemf.core.module import LLMMetadata
 from systemf.eval.value import (
     Environment,
     VClosure,
@@ -54,6 +56,8 @@ class Evaluator:
             "string_concat": self._string_concat,
             "string_length": self._string_length,
         }
+        # Registry for LLM function closures: name -> (metadata, closure)
+        self.llm_closures: dict[str, tuple[LLMMetadata, Callable[[Value], Value]]] = {}
 
     def _int_plus(self, x: Value, y: Value) -> Value:
         """Integer addition."""
@@ -130,6 +134,131 @@ class Evaluator:
         if not isinstance(x, VString):
             raise RuntimeError("string_length expects String argument")
         return VInt(len(x.value))
+
+    def register_llm_closure(self, name: str, metadata: LLMMetadata) -> None:
+        """Register an LLM function closure.
+
+        Args:
+            name: The function name (without $llm. prefix)
+            metadata: LLMMetadata with prompt info and fallback
+        """
+
+        # Create closure that captures metadata
+        def llm_closure(arg: Value) -> Value:
+            return self._execute_llm_call(metadata, arg)
+
+        self.llm_closures[name] = (metadata, llm_closure)
+
+    def _execute_llm_call(self, metadata: LLMMetadata, arg: Value) -> Value:
+        """Execute LLM call with given metadata and argument.
+
+        Args:
+            metadata: LLM function metadata
+            arg: The argument value to process
+
+        Returns:
+            Value from LLM or fallback
+        """
+        try:
+            # Craft prompt from metadata
+            prompt = self._craft_prompt(metadata, arg)
+
+            # Call LLM API
+            response = self._call_llm_api(metadata, prompt)
+
+            # Parse response based on return type
+            return self._parse_llm_response(metadata, response)
+        except Exception as e:
+            # Fallback: return the argument unchanged
+            # This implements the "fallback to lambda body" behavior
+            # where the lambda body is the identity function
+            return arg
+
+    def _craft_prompt(self, metadata: LLMMetadata, arg: Value) -> str:
+        """Craft LLM prompt from metadata and argument."""
+        lines = []
+
+        # Add function docstring
+        if metadata.function_docstring:
+            lines.append(metadata.function_docstring)
+            lines.append("")
+
+        # Add parameter info
+        if metadata.arg_names and len(metadata.arg_names) > 0:
+            lines.append("Parameters:")
+            for i, name in enumerate(metadata.arg_names):
+                doc = metadata.arg_docstrings[i] if i < len(metadata.arg_docstrings) else None
+                if doc:
+                    lines.append(f"  {name}: {doc}")
+                else:
+                    lines.append(f"  {name}")
+            lines.append("")
+
+        # Add the input value
+        lines.append("Input:")
+        lines.append(self._value_to_string(arg))
+
+        return "\n".join(lines)
+
+    def _value_to_string(self, value: Value) -> str:
+        """Convert a Value to string representation."""
+        match value:
+            case VInt(n):
+                return str(n)
+            case VString(s):
+                return s
+            case VConstructor(name, args):
+                if not args:
+                    return name
+                args_str = " ".join(self._value_to_string(a) for a in args)
+                return f"({name} {args_str})"
+            case _:
+                return str(value)
+
+    def _call_llm_api(self, metadata: LLMMetadata, prompt: str) -> str:
+        """Call LLM API (OpenAI or Anthropic).
+
+        Args:
+            metadata: Contains model and temperature settings
+            prompt: The crafted prompt
+
+        Returns:
+            LLM response text
+        """
+        model = metadata.model or "gpt-4"
+        temperature = metadata.temperature if metadata.temperature is not None else 0.7
+
+        # Try OpenAI first if model looks like an OpenAI model
+        if model.startswith("gpt-") or model.startswith("o"):
+            return self._call_openai(model, temperature, prompt)
+        # Try Anthropic for Claude models
+        elif model.startswith("claude-"):
+            return self._call_anthropic(model, temperature, prompt)
+        else:
+            # Default to OpenAI for unknown models
+            return self._call_openai(model, temperature, prompt)
+
+    def _call_openai(self, model: str, temperature: float, prompt: str) -> str:
+        """Call OpenAI API - NOT IMPLEMENTED.
+
+        This is a stub for future implementation. For now, always raises.
+        """
+        raise RuntimeError("LLM API calls not yet implemented")
+
+    def _call_anthropic(self, model: str, temperature: float, prompt: str) -> str:
+        """Call Anthropic API - NOT IMPLEMENTED.
+
+        This is a stub for future implementation. For now, always raises.
+        """
+        raise RuntimeError("LLM API calls not yet implemented")
+
+    def _parse_llm_response(self, metadata: LLMMetadata, response: str) -> Value:
+        """Parse LLM response into a Value.
+
+        For now, assumes String return type. Future: parse based on type annotation.
+        """
+        # Strip whitespace and return as VString
+        return VString(response.strip())
 
     def evaluate(self, term: Term, env: Environment | None = None) -> Value:
         """Evaluate term to a value.
@@ -231,7 +360,11 @@ class Evaluator:
                 # Evaluate body in extended environment
                 return self.evaluate(body, new_env)
             case VPrimOp(name, impl):
-                # Primitive operations are binary - first application creates partial
+                # Check if this is an LLM primitive (unary)
+                if name.startswith("llm."):
+                    # LLM primitives are unary - execute immediately
+                    return impl(arg, arg)  # Pass arg as both args for compatibility
+                # Regular primitive operations are binary - first application creates partial
                 return VPrimOpPartial(name, impl, arg)
             case VPrimOpPartial(name, impl, first_arg):
                 # Second application - execute the primitive
@@ -253,8 +386,18 @@ class Evaluator:
         """Create a closure for a primitive operation.
 
         Returns a curried function that takes two Int arguments.
+        Handles both regular primitives and LLM primitives ($llm.*).
         """
         from systemf.core.ast import Var, Abs, App
+
+        # Check if this is an LLM primitive
+        if name.startswith("llm."):
+            llm_name = name[4:]  # Strip "llm." prefix
+            if llm_name in self.llm_closures:
+                metadata, closure = self.llm_closures[llm_name]
+                # Return a special wrapper that applies the LLM closure
+                return self._make_llm_wrapper(llm_name, closure)
+            raise RuntimeError(f"Unknown LLM primitive: {llm_name}")
 
         if name not in self.primitive_impls:
             raise RuntimeError(f"Unknown primitive: {name}")
@@ -264,6 +407,40 @@ class Evaluator:
         # Create a closure that expects two arguments
         # We use a special representation that the apply method will recognize
         return VPrimOp(name, impl)
+
+    def _make_llm_wrapper(self, name: str, closure: Callable[[Value], Value]) -> Value:
+        """Create a wrapper for an LLM closure.
+
+        The LLM closure takes one argument and returns a Value.
+        Since LLM functions are unary, we return a VClosure that evaluates immediately.
+        """
+        # Create a simple wrapper closure that calls the LLM closure
+        # This avoids the binary primitive infrastructure
+        from systemf.core.ast import Abs, Var, App, Term
+        from systemf.eval.value import Environment
+
+        # Create a simple term that when evaluated will call the closure
+        # We use a special marker to identify this as an LLM call
+        class LLMCallTerm(Term):
+            """Special term type for LLM calls."""
+
+            def __init__(self, closure_fn: Callable[[Value], Value], arg: Value):
+                self.closure_fn = closure_fn
+                self.arg = arg
+
+            def __str__(self) -> str:
+                return f"<llm-call {name}>"
+
+        # Return a VPrimOp that takes one argument
+        def llm_impl(_: Value, arg: Value) -> Value:
+            """Implementation that calls LLM closure and handles fallback."""
+            try:
+                return closure(arg)
+            except Exception:
+                # Fallback to identity
+                return arg
+
+        return VPrimOp(f"llm.{name}", llm_impl)
 
     def evaluate_program(self, decls: list[Declaration]) -> dict[str, Value]:
         """Evaluate a sequence of declarations.

@@ -51,15 +51,15 @@ def run_demo(source, description):
 
         # Elaborate
         elab = Elaborator()
-        core_decls = elab.elaborate(surface_decls)
+        module = elab.elaborate(surface_decls)
 
         # Type Check
-        checker = TypeChecker(elab.constructor_types)
-        types = checker.check_program(core_decls)
+        checker = TypeChecker(module.constructor_types)
+        types = checker.check_program(module.declarations)
 
         # Evaluate
         evalr = Evaluator()
-        values = evalr.evaluate_program(core_decls)
+        values = evalr.evaluate_program(module.declarations)
 
         print("   ✅ Success!")
         for name in types:

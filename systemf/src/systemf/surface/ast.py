@@ -6,7 +6,7 @@ omitting type annotations where they can be inferred.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from systemf.utils.location import Location
@@ -112,12 +112,18 @@ class SurfaceVar(SurfaceTerm):
 
 @dataclass(frozen=True)
 class SurfaceAbs(SurfaceTerm):
-    """Lambda abstraction: \\x -> body or \\x:T -> body."""
+    """Lambda abstraction: \\x -> body or \\x:T -> body.
+
+    Supports Haddock-style parameter docstrings: \\x -- ^ docstring -> body
+    """
 
     var: str
     var_type: Optional[SurfaceType]
     body: SurfaceTerm
     location: Location
+    param_docstrings: list[str | None] = field(
+        default_factory=list
+    )  # Docstrings for each parameter
 
     def __str__(self) -> str:
         if self.var_type:
@@ -322,15 +328,18 @@ SurfaceTermRepr = Union[
 
 @dataclass(frozen=True)
 class SurfacePragma:
-    """Pragma annotation: {-# key=value, ... #-}."""
+    """Pragma annotation: {-# LLM raw_content #-}.
+
+    Simplified storage - just keeps the raw string after the directive.
+    Key=value parsing happens in later passes if needed.
+    """
 
     directive: str  # e.g., "LLM"
-    attributes: dict[str, str]  # key-value pairs
+    raw_content: str  # Raw string content after directive (e.g., "model=gpt-4 temperature=0.7")
     location: Location
 
     def __str__(self) -> str:
-        attrs = ", ".join(f"{k}={v}" for k, v in self.attributes.items())
-        return "{-# " + self.directive + " " + attrs + " #-}"
+        return "{-# " + self.directive + " " + self.raw_content + " #-}"
 
 
 # =============================================================================
@@ -363,7 +372,6 @@ class SurfaceDataDeclaration(SurfaceDeclaration):
     constructors: list[SurfaceConstructorInfo]
     location: Location
     docstring: str | None = None
-    pragma: SurfacePragma | None = None
 
     def __str__(self) -> str:
         params_str = " ".join(self.params) if self.params else ""
@@ -382,7 +390,7 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
     body: SurfaceTerm
     location: Location
     docstring: str | None = None
-    pragma: SurfacePragma | None = None
+    pragma: dict[str, str] | None = None  # e.g., {"LLM": "model=gpt-4 temperature=0.7"}
 
     def __str__(self) -> str:
         if self.type_annotation:

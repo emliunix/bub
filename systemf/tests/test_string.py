@@ -73,10 +73,10 @@ class TestStringElaboration:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, _ = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        assert len(core_decls) == 1
-        decl = core_decls[0]
+        assert len(module.declarations) == 1
+        decl = module.declarations[0]
         assert isinstance(decl.body, StringLit)
         assert decl.body.value == "hello"
 
@@ -88,12 +88,12 @@ class TestStringElaboration:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, _ = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
-        assert len(core_decls) == 1
-        assert core_decls[0].name == "msg"
-        assert isinstance(core_decls[0].body, StringLit)
-        assert core_decls[0].body.value == "hello"
+        assert len(module.declarations) == 1
+        assert module.declarations[0].name == "msg"
+        assert isinstance(module.declarations[0].body, StringLit)
+        assert module.declarations[0].body.value == "hello"
 
 
 class TestStringTypeChecking:
@@ -123,10 +123,10 @@ class TestStringTypeChecking:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, _ = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
         checker = TypeChecker(primitive_types={"String": PrimitiveType("String")})
-        types = checker.check_program(core_decls)
+        types = checker.check_program(module.declarations)
 
         assert "msg" in types
         assert isinstance(types["msg"], PrimitiveType)
@@ -249,15 +249,15 @@ class TestStringFullPipeline:
         surface_decls = Parser(tokens).parse()
 
         # Elaborate
-        core_decls, _ = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
         # Type check
         checker = TypeChecker(primitive_types={"String": PrimitiveType("String")})
-        types = checker.check_program(core_decls)
+        types = checker.check_program(module.declarations)
 
         # Evaluate
         evaluator = Evaluator()
-        values = evaluator.evaluate_program(core_decls)
+        values = evaluator.evaluate_program(module.declarations)
 
         # Verify
         assert "greeting" in types
@@ -318,13 +318,13 @@ class TestStringFullPipeline:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, _ = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
         checker = TypeChecker(primitive_types={"String": PrimitiveType("String")})
-        types = checker.check_program(core_decls)
+        types = checker.check_program(module.declarations)
 
         evaluator = Evaluator()
-        values = evaluator.evaluate_program(core_decls)
+        values = evaluator.evaluate_program(module.declarations)
 
         assert len(values) == 3
         assert values["first"].value == "first"
@@ -340,10 +340,10 @@ class TestStringFullPipeline:
 
         tokens = lex(source)
         surface_decls = Parser(tokens).parse()
-        core_decls, _ = elaborate(surface_decls)
+        module = elaborate(surface_decls)
 
         evaluator = Evaluator()
-        values = evaluator.evaluate_program(core_decls)
+        values = evaluator.evaluate_program(module.declarations)
 
         assert "msg" in values
         assert isinstance(values["msg"], VString)

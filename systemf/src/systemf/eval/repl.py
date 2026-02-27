@@ -116,9 +116,9 @@ class REPL:
 
             tokens = Lexer(source, filename=str(self.PRELUDE_FILE)).tokenize()
             surface_decls = Parser(tokens).parse()
-            core_decls = self.elaborator.elaborate(surface_decls)
-            types = self.checker.check_program(core_decls)
-            values = self.evaluator.evaluate_program(core_decls)
+            module = self.elaborator.elaborate(surface_decls)
+            types = self.checker.check_program(module.declarations)
+            values = self.evaluator.evaluate_program(module.declarations)
 
             # Update environments with prelude definitions
             for name, value in values.items():
@@ -240,9 +240,9 @@ class REPL:
             # Try parsing as declarations first
             try:
                 surface_decls = Parser(tokens).parse()
-                core_decls = self.elaborator.elaborate(surface_decls)
-                types = self.checker.check_program(core_decls)
-                values = self.evaluator.evaluate_program(core_decls)
+                module = self.elaborator.elaborate(surface_decls)
+                types = self.checker.check_program(module.declarations)
+                values = self.evaluator.evaluate_program(module.declarations)
 
                 for name, value in values.items():
                     ty = types[name]

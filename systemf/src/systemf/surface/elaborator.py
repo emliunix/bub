@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import Optional
 
 from systemf.core import ast as core
+from systemf.core.errors import ElaborationError
+from systemf.core.module import LLMMetadata, Module
 from systemf.core.types import PrimitiveType, Type as CoreType
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
 from systemf.surface.ast import (
@@ -41,17 +43,6 @@ from systemf.surface.ast import (
 from systemf.utils.location import Location
 
 
-class ElaborationError(Exception):
-    """Error during elaboration."""
-
-    def __init__(self, message: str, location: Location | None = None):
-        if location:
-            super().__init__(f"{location}: {message}")
-        else:
-            super().__init__(message)
-        self.location = location
-
-
 class UndefinedVariable(ElaborationError):
     """Variable not found in scope."""
 
@@ -74,7 +65,7 @@ class Elaborator:
     Performs scope resolution (names -> de Bruijn indices) and type translation.
     """
 
-    def __init__(self):
+    def __init__(self, evaluator=None):
         """Initialize elaborator with empty environments."""
         # Local term environment: name -> de Bruijn index
         # Index 0 is the most recently bound variable (lambda params, etc.)
@@ -98,6 +89,12 @@ class Elaborator:
 
         # Global types: name -> CoreType (for primitive operations)
         self.global_types: dict[str, CoreType] = {}
+
+        # Optional evaluator for registering LLM closures
+        self.evaluator = evaluator
+
+        # LLM function metadata registry
+        self.llm_functions: dict[str, LLMMetadata] = {}
 
     # =====================================================================
     # Environment Management
@@ -157,20 +154,31 @@ class Elaborator:
     # Declaration Elaboration
     # =====================================================================
 
-    def elaborate(self, decls: list[SurfaceDeclaration]) -> list[core.Declaration]:
-        """Elaborate surface declarations to core declarations.
+    def elaborate(self, decls: list[SurfaceDeclaration]) -> Module:
+        """Elaborate surface declarations to a Module.
 
         Args:
             decls: List of surface declarations
 
         Returns:
-            List of core declarations
+            Module containing elaborated declarations and type information
         """
-        result = []
+        declarations: list[core.Declaration] = []
         for decl in decls:
             core_decl = self.elaborate_declaration(decl)
-            result.append(core_decl)
-        return result
+            declarations.append(core_decl)
+
+        return Module(
+            name="main",
+            declarations=declarations,
+            constructor_types=self.constructor_types,
+            global_types=self.global_types,
+            primitive_types=self.primitive_types,
+            docstrings={},
+            llm_functions=self.llm_functions,
+            errors=[],
+            warnings=[],
+        )
 
     def elaborate_declaration(self, decl: SurfaceDeclaration) -> core.Declaration:
         """Elaborate a single declaration."""
@@ -240,6 +248,13 @@ class Elaborator:
         if decl.type_annotation:
             core_type = self._elaborate_type(decl.type_annotation)
 
+        # Check for LLM pragma (stored as dict {"LLM": "raw_content"})
+        is_llm = decl.pragma is not None and "LLM" in decl.pragma
+
+        if is_llm and isinstance(decl.body, SurfaceAbs):
+            # This is an LLM function declaration
+            return self._elaborate_llm_term_decl(decl, core_type)
+
         # Add the declared name to global_terms BEFORE elaborating the body
         # This allows recursive definitions to work by making them Global references
         self._add_global_term(decl.name)
@@ -251,6 +266,89 @@ class Elaborator:
             name=decl.name,
             type_annotation=core_type,
             body=core_body,
+        )
+
+    def _elaborate_llm_term_decl(
+        self, decl: SurfaceTermDeclaration, core_type: Optional[CoreType]
+    ) -> core.TermDeclaration:
+        """Elaborate an LLM function declaration.
+
+        Extracts metadata from the declaration and creates an LLM closure.
+        The body is replaced with a PrimOp that calls the LLM.
+        """
+        # Extract function docstring
+        func_docstring = decl.docstring
+
+        # Extract parameter info from lambda
+        lambda_body = decl.body
+        assert isinstance(lambda_body, SurfaceAbs)
+
+        arg_names = [lambda_body.var]
+        arg_docstrings: list[str | None] = (
+            list(lambda_body.param_docstrings) if lambda_body.param_docstrings else [None]
+        )  # type: ignore[assignment]
+
+        # Extract types from type annotation
+        arg_types: list[CoreType] = []
+        if core_type:
+            # The type should be an arrow type: arg_type -> return_type
+            # We extract the argument type
+            match core_type:
+                case TypeArrow(arg_t, _):
+                    arg_types = [arg_t]
+                case _:
+                    arg_types = []
+        else:
+            arg_types = []
+
+        # Ensure arg_types has the same length as arg_names
+        while len(arg_types) < len(arg_names):
+            arg_types.append(TypeVar("_"))
+
+        # Extract model and temperature from pragma dict
+        model = None
+        temperature = None
+        if decl.pragma and "LLM" in decl.pragma:
+            # Parse key=value pairs from pragma content
+            import re
+
+            content = decl.pragma["LLM"]
+            model_match = re.search(r"model=([^\s,]+)", content)
+            if model_match:
+                model = model_match.group(1)
+            temp_match = re.search(r"temperature=([^\s,]+)", content)
+            if temp_match:
+                try:
+                    temperature = float(temp_match.group(1))
+                except ValueError:
+                    temperature = None
+
+        # Build LLMMetadata
+        metadata = LLMMetadata(
+            function_name=decl.name,
+            function_docstring=func_docstring,
+            arg_names=arg_names,
+            arg_types=arg_types,
+            arg_docstrings=arg_docstrings,
+            model=model,
+            temperature=temperature,
+        )
+
+        # Register in llm_functions
+        self.llm_functions[decl.name] = metadata
+
+        # Register in evaluator if available
+        if self.evaluator is not None:
+            self.evaluator.register_llm_closure(decl.name, metadata)
+
+        # Elaborate to PrimOp("$llm.{name}")
+        # Add to global_terms
+        self._add_global_term(decl.name)
+
+        return core.TermDeclaration(
+            name=decl.name,
+            type_annotation=core_type,
+            body=core.PrimOp(f"llm.{decl.name}"),
         )
 
     def _elaborate_prim_type_decl(self, name: str, location: Location) -> core.DataDeclaration:
@@ -446,7 +544,7 @@ class Elaborator:
     # =====================================================================
 
     def elaborate_term_with_context(
-        self, term: SurfaceTerm, term_vars: list[str], type_vars: list[str] = None
+        self, term: SurfaceTerm, term_vars: list[str], type_vars: Optional[list[str]] = None
     ) -> core.Term:
         """Elaborate a term with a pre-populated context.
 
@@ -467,21 +565,20 @@ class Elaborator:
 
 def elaborate(
     decls: list[SurfaceDeclaration],
-) -> tuple[list[core.Declaration], dict[str, CoreType]]:
-    """Elaborate surface declarations and return constructor types.
+) -> Module:
+    """Elaborate surface declarations and return a Module.
 
     Args:
         decls: List of surface declarations
 
     Returns:
-        Tuple of (core declarations, constructor types dictionary)
+        Module containing elaborated declarations and type information
     """
     elab = Elaborator()
-    core_decls = elab.elaborate(decls)
-    return core_decls, elab.constructor_types
+    return elab.elaborate(decls)
 
 
-def elaborate_term(term: SurfaceTerm, context: list[str] = None) -> core.Term:
+def elaborate_term(term: SurfaceTerm, context: Optional[list[str]] = None) -> core.Term:
     """Elaborate a single surface term.
 
     Args:
