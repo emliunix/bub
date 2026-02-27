@@ -55,6 +55,39 @@ class TestBasicTokens:
         types = [t.type for t in tokens[:-1]]  # Exclude EOF
         assert types == ["ARROW", "DARROW", "EQUALS", "COLON", "BAR", "AT", "DOT"]
 
+    def test_arithmetic_operators(self):
+        """Tokenize arithmetic operators."""
+        source = "+ - * /"
+        tokens = lex(source)
+        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        assert types == ["PLUS", "MINUS", "STAR", "SLASH"]
+
+    def test_comparison_operators(self):
+        """Tokenize comparison operators."""
+        source = "== < > <= >="
+        tokens = lex(source)
+        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        assert types == ["EQ", "LT", "GT", "LE", "GE"]
+
+    def test_mixed_operators(self):
+        """Tokenize mix of all operators."""
+        source = "+ - * / == < > <= >= -> =>"
+        tokens = lex(source)
+        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        assert types == [
+            "PLUS",
+            "MINUS",
+            "STAR",
+            "SLASH",
+            "EQ",
+            "LT",
+            "GT",
+            "LE",
+            "GE",
+            "ARROW",
+            "DARROW",
+        ]
+
     def test_delimiters(self):
         """Tokenize delimiters."""
         source = "( ) [ ] { } ,"

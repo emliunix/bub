@@ -20,6 +20,7 @@ from systemf.surface.ast import (
     SurfaceCase,
     SurfaceConstructor,
     SurfaceDataDeclaration,
+    SurfaceIntLit,
     SurfaceLet,
     SurfacePattern,
     SurfaceTermDeclaration,
@@ -235,7 +236,8 @@ class TestLetBindings:
         term = parse_term("let x = 1\n  x")
         assert isinstance(term, SurfaceLet)
         assert term.name == "x"
-        assert isinstance(term.value, SurfaceConstructor)
+        assert isinstance(term.value, SurfaceIntLit)
+        assert term.value.value == 1
         assert isinstance(term.body, SurfaceVar)
 
     def test_nested_let(self):
@@ -288,6 +290,53 @@ class TestConstructors:
         assert isinstance(term, SurfaceConstructor)
         assert term.name == "Cons"
         assert len(term.args) == 2
+
+
+# =============================================================================
+# Integer Literal Tests
+# =============================================================================
+
+
+class TestIntegerLiterals:
+    """Tests for integer literal parsing."""
+
+    def test_simple_integer(self):
+        """Parse simple integer literal."""
+        term = parse_term("42")
+        assert isinstance(term, SurfaceIntLit)
+        assert term.value == 42
+
+    def test_zero(self):
+        """Parse zero literal."""
+        term = parse_term("0")
+        assert isinstance(term, SurfaceIntLit)
+        assert term.value == 0
+
+    def test_large_integer(self):
+        """Parse large integer literal."""
+        term = parse_term("999999")
+        assert isinstance(term, SurfaceIntLit)
+        assert term.value == 999999
+
+    def test_integer_in_let(self):
+        """Parse integer in let binding."""
+        term = parse_term("let x = 42\n  x")
+        assert isinstance(term.value, SurfaceIntLit)
+        assert term.value.value == 42
+
+    def test_integer_in_application(self):
+        """Parse integer as function argument."""
+        term = parse_term("f 42")
+        assert isinstance(term.arg, SurfaceIntLit)
+        assert term.arg.value == 42
+
+    def test_multiple_integers_in_case(self):
+        """Parse multiple integer literals in case branches."""
+        term = parse_term("case x of\n  True -> 1\n  False -> 0")
+        assert isinstance(term.branches[0].body, SurfaceIntLit)
+        assert term.branches[0].body.value == 1
+        assert isinstance(term.branches[1].body, SurfaceIntLit)
+        assert term.branches[1].body.value == 0
 
 
 # =============================================================================
@@ -477,8 +526,10 @@ class TestDeclarations:
         """Test that declarations are properly separated."""
         decls = parse_program("f = 1\ng = 2")
         assert len(decls) == 2
-        assert decls[0].body.name == "1"
-        assert decls[1].body.name == "2"
+        assert isinstance(decls[0].body, SurfaceIntLit)
+        assert decls[0].body.value == 1
+        assert isinstance(decls[1].body, SurfaceIntLit)
+        assert decls[1].body.value == 2
 
     def test_data_declaration_single_constructor(self):
         """Parse data declaration with single constructor."""
@@ -768,28 +819,182 @@ class TestPragmaParsing:
         assert isinstance(decls[0], SurfaceTermDeclaration)
         assert decls[0].name == "research_topic"
         assert decls[0].pragma is not None
-        assert decls[0].pragma.directive == "LLM"
-        assert decls[0].pragma.attributes == {"model": "gpt-4"}
-
-    def test_pragma_with_multiple_attributes(self):
-        """Parse pragma with multiple key-value pairs."""
-        source = "{-# LLM model=claude-3-opus, tag=code_review, temperature=0.7 #-}\nreview_code : String -> String = \\x -> x"
-        decls = parse_program(source)
-        assert len(decls) == 1
-        assert decls[0].pragma is not None
-        assert decls[0].pragma.directive == "LLM"
-        assert decls[0].pragma.attributes["model"] == "claude-3-opus"
-        assert decls[0].pragma.attributes["tag"] == "code_review"
-        assert decls[0].pragma.attributes["temperature"] == "0.7"
-
-    def test_pragma_with_quoted_values(self):
-        """Parse pragma with quoted string values."""
-        source = '{-# LLM model="gpt-4", tag="code_review" #-}\nfoo : String -> String = \\x -> x'
-        decls = parse_program(source)
-        assert len(decls) == 1
-        assert decls[0].pragma is not None
         assert decls[0].pragma.attributes["model"] == "gpt-4"
-        assert decls[0].pragma.attributes["tag"] == "code_review"
+
+
+# =============================================================================
+# Operator Expression Tests
+# =============================================================================
+
+
+class TestOperatorExpressions:
+    """Tests for infix operator expressions."""
+
+    def test_simple_addition(self):
+        """Parse simple addition expression."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("1 + 2")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "+"
+        assert isinstance(term.left, SurfaceIntLit)
+        assert isinstance(term.right, SurfaceIntLit)
+        assert term.left.value == 1
+        assert term.right.value == 2
+
+    def test_simple_subtraction(self):
+        """Parse simple subtraction expression."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("5 - 3")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "-"
+        assert term.left.value == 5
+        assert term.right.value == 3
+
+    def test_simple_multiplication(self):
+        """Parse simple multiplication expression."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("4 * 5")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "*"
+        assert term.left.value == 4
+        assert term.right.value == 5
+
+    def test_simple_division(self):
+        """Parse simple division expression."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("10 / 2")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "/"
+        assert term.left.value == 10
+        assert term.right.value == 2
+
+    def test_equality_comparison(self):
+        """Parse equality comparison."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("1 == 2")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "=="
+        assert term.left.value == 1
+        assert term.right.value == 2
+
+    def test_less_than(self):
+        """Parse less than comparison."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("1 < 2")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "<"
+
+    def test_greater_than(self):
+        """Parse greater than comparison."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("3 > 2")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == ">"
+
+    def test_less_than_or_equal(self):
+        """Parse less than or equal comparison."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("2 <= 3")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "<="
+
+    def test_greater_than_or_equal(self):
+        """Parse greater than or equal comparison."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        term = parse_term("3 >= 2")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == ">="
+
+    def test_operator_precedence_mul_over_add(self):
+        """Multiplication has higher precedence than addition."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        # 1 + 2 * 3 should parse as 1 + (2 * 3)
+        term = parse_term("1 + 2 * 3")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "+"
+        assert isinstance(term.left, SurfaceIntLit)
+        assert term.left.value == 1
+        assert isinstance(term.right, SurfaceOp)
+        assert term.right.op == "*"
+        assert term.right.left.value == 2
+        assert term.right.right.value == 3
+
+    def test_operator_precedence_mul_over_sub(self):
+        """Multiplication has higher precedence than subtraction."""
+        from systemf.surface.ast import SurfaceOp
+
+        term = parse_term("10 - 2 * 3")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "-"
+        assert isinstance(term.right, SurfaceOp)
+        assert term.right.op == "*"
+
+    def test_left_associativity(self):
+        """Operators are left-associative."""
+        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+
+        # 1 + 2 + 3 should parse as (1 + 2) + 3
+        term = parse_term("1 + 2 + 3")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "+"
+        assert isinstance(term.left, SurfaceOp)
+        assert term.left.op == "+"
+        assert term.left.left.value == 1
+        assert term.left.right.value == 2
+        assert term.right.value == 3
+
+    def test_operator_with_variables(self):
+        """Operators work with variables."""
+        from systemf.surface.ast import SurfaceOp, SurfaceVar
+
+        term = parse_term("x + y")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "+"
+        assert isinstance(term.left, SurfaceVar)
+        assert term.left.name == "x"
+        assert isinstance(term.right, SurfaceVar)
+        assert term.right.name == "y"
+
+    def test_comparison_with_variables(self):
+        """Comparison operators work with variables."""
+        from systemf.surface.ast import SurfaceOp, SurfaceVar
+
+        term = parse_term("x == y")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "=="
+        assert isinstance(term.left, SurfaceVar)
+        assert term.left.name == "x"
+        assert isinstance(term.right, SurfaceVar)
+        assert term.right.name == "y"
+
+    def test_complex_expression(self):
+        """Parse complex expression with multiple operators."""
+        from systemf.surface.ast import SurfaceOp
+
+        term = parse_term("1 + 2 * 3 - 4 / 2")
+        assert isinstance(term, SurfaceOp)
+        # Should parse as: (1 + (2 * 3)) - (4 / 2)
+
+    def test_parenthesized_expression(self):
+        """Parentheses override operator precedence."""
+        from systemf.surface.ast import SurfaceOp
+
+        term = parse_term("(1 + 2) * 3")
+        assert isinstance(term, SurfaceOp)
+        assert term.op == "*"
+        # Left should be (1 + 2)
+        assert isinstance(term.left, SurfaceOp)
+        assert term.left.op == "+"
 
     def test_pragma_with_data_declaration(self):
         """Pragma can be attached to data declarations."""

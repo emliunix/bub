@@ -5,7 +5,7 @@ Tests tool call syntax: @tool_name arg1 arg2 ...
 
 import pytest
 
-from systemf.core.ast import ToolCall as CoreToolCall
+from systemf.core.ast import IntLit as CoreIntLit, ToolCall as CoreToolCall
 from systemf.eval.machine import Evaluator
 from systemf.eval.tools import (
     EchoTool,
@@ -18,6 +18,7 @@ from systemf.eval.tools import (
 )
 from systemf.eval.value import VConstructor, VToolResult
 from systemf.surface.ast import (
+    SurfaceIntLit,
     SurfaceToolCall,
     SurfaceVar,
 )
@@ -42,8 +43,8 @@ class TestToolCallParsing:
         assert isinstance(term, SurfaceToolCall)
         assert term.tool_name == "identity"
         assert len(term.args) == 1
-        assert isinstance(term.args[0], SurfaceConstructor)
-        assert term.args[0].name == "42"
+        assert isinstance(term.args[0], SurfaceIntLit)
+        assert term.args[0].value == 42
 
     def test_parse_tool_call_with_multiple_args(self):
         """Parse tool call with multiple arguments."""
@@ -110,7 +111,8 @@ class TestToolCallElaboration:
         assert isinstance(core_term, CoreToolCall)
         assert core_term.tool_name == "identity"
         assert len(core_term.args) == 1
-        assert isinstance(core_term.args[0], core.Constructor)
+        assert isinstance(core_term.args[0], CoreIntLit)
+        assert core_term.args[0].value == 42
 
     def test_elaborate_tool_call_with_variable(self):
         """Elaborate tool call with variable argument."""

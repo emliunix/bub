@@ -10,6 +10,7 @@ from systemf.surface.ast import (
     SurfaceConstructor,
     SurfaceConstructorInfo,
     SurfaceDataDeclaration,
+    SurfaceIntLit,
     SurfaceLet,
     SurfaceTermDeclaration,
     SurfaceTypeAbs,
@@ -255,6 +256,70 @@ class TestElaborateConstructor:
 
 
 # =============================================================================
+# Integer Literal Elaboration Tests
+# =============================================================================
+
+
+class TestElaborateIntLit:
+    """Tests for integer literal elaboration."""
+
+    def test_elab_simple_int_lit(self):
+        """Elaborate simple integer literal."""
+        elab = Elaborator()
+        surface = SurfaceIntLit(42, DUMMY_LOC)
+        core_term = elab.elaborate_term(surface)
+
+        assert isinstance(core_term, core.IntLit)
+        assert core_term.value == 42
+
+    def test_elab_zero(self):
+        """Elaborate zero literal."""
+        elab = Elaborator()
+        surface = SurfaceIntLit(0, DUMMY_LOC)
+        core_term = elab.elaborate_term(surface)
+
+        assert isinstance(core_term, core.IntLit)
+        assert core_term.value == 0
+
+    def test_elab_large_int(self):
+        """Elaborate large integer literal."""
+        elab = Elaborator()
+        surface = SurfaceIntLit(999999, DUMMY_LOC)
+        core_term = elab.elaborate_term(surface)
+
+        assert isinstance(core_term, core.IntLit)
+        assert core_term.value == 999999
+
+    def test_elab_int_from_parse(self):
+        """Elaborate integer literal from parsed source."""
+        surface = parse_term("42")
+        core_term = elaborate_term(surface)
+
+        assert isinstance(core_term, core.IntLit)
+        assert core_term.value == 42
+
+    def test_elab_int_in_let(self):
+        """Elaborate integer in let binding."""
+        surface = parse_term("let x = 42\n  x")
+        core_term = elaborate_term(surface)
+
+        assert isinstance(core_term, core.Let)
+        assert isinstance(core_term.value, core.IntLit)
+        assert core_term.value.value == 42
+
+    def test_elab_int_in_application(self):
+        """Elaborate integer as function argument."""
+        elab = Elaborator()
+        elab._add_global_term("f")
+        surface = parse_term("f 42")
+        core_term = elab.elaborate_term(surface)
+
+        assert isinstance(core_term, core.App)
+        assert isinstance(core_term.arg, core.IntLit)
+        assert core_term.arg.value == 42
+
+
+# =============================================================================
 # Type Elaboration Tests
 # =============================================================================
 
@@ -400,3 +465,50 @@ class TestIntegration:
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.Let)
+
+
+# =============================================================================
+# Primitive Operation Elaboration Tests
+# =============================================================================
+
+
+class TestElaboratePrimOp:
+    """Tests for primitive operation name resolution ($prim.xxx)."""
+
+    def test_elab_prim_op_name(self):
+        """Elaborate $prim.int_plus to PrimOp core term."""
+        elab = Elaborator()
+        surface = SurfaceVar("$prim.int_plus", DUMMY_LOC)
+        core_term = elab.elaborate_term(surface)
+
+        assert isinstance(core_term, core.PrimOp)
+        assert core_term.name == "int_plus"
+
+    def test_elab_prim_op_int_minus(self):
+        """Elaborate $prim.int_minus to PrimOp."""
+        elab = Elaborator()
+        surface = SurfaceVar("$prim.int_minus", DUMMY_LOC)
+        core_term = elab.elaborate_term(surface)
+
+        assert isinstance(core_term, core.PrimOp)
+        assert core_term.name == "int_minus"
+
+    def test_elab_prim_op_with_other_prefix_raises(self):
+        """Variables starting with $prim. must be fully resolved."""
+        elab = Elaborator()
+        # $prim.unknown is not in global_terms, so it should become PrimOp
+        surface = SurfaceVar("$prim.unknown", DUMMY_LOC)
+        core_term = elab.elaborate_term(surface)
+
+        # $prim. names are always converted to PrimOp regardless of whether
+        # they exist in the primitive registry
+        assert isinstance(core_term, core.PrimOp)
+        assert core_term.name == "unknown"
+
+    def test_elab_regular_var_with_dollar_prefix_raises(self):
+        """Regular variables starting with $ should raise error."""
+        elab = Elaborator()
+        surface = SurfaceVar("$not_prim", DUMMY_LOC)
+
+        with pytest.raises(UndefinedVariable):
+            elab.elaborate_term(surface)
