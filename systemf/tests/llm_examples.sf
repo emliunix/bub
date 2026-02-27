@@ -1,16 +1,15 @@
--- Simple LLM function example
--- Translate English text to French using GPT-4
+-- Simple LLM function examples using prim_op syntax
 
 {-# LLM model=gpt-4 temperature=0.7 #-}
 -- | Translate English to French
-translate : String -> String
-translate = \text -- ^ The English text to translate -> extern
+prim_op translate : String -- ^ The English text to translate
+  -> String
 
 {-# LLM model=gpt-4 #-}
 -- | Generate a creative story summary
-summarize : String -> String
-summarize = \story -- ^ The story text to summarize -> extern
+prim_op summarize : String -- ^ The story text to summarize
+  -> String
 
--- Regular function (no LLM)
+-- Regular function (no LLM) for comparison
 identity : String -> String
 identity = \x -> x
