@@ -22,6 +22,13 @@ LLM_EXAMPLE_FILES = [
 ]
 
 
+def load_primitive_types(elaborator: Elaborator) -> None:
+    """Load minimal primitive types for testing."""
+    source = "prim_type String\nprim_type Int"
+    decls = parse_program(source)
+    elaborator.elaborate(decls)
+
+
 @pytest.fixture
 def test_data_dir() -> Path:
     """Returns the absolute path to the directory containing test data."""
@@ -51,10 +58,11 @@ def test_elaborate_llm_file(filename: str, test_data_dir: Path) -> None:
     filepath = test_data_dir / filename
     source = filepath.read_text()
 
-    # Parse and elaborate
+    # Parse and elaborate (with primitive types loaded)
     decls = parse_program(source)
     evaluator = Evaluator()
     elaborator = Elaborator(evaluator=evaluator)
+    load_primitive_types(elaborator)
     module = elaborator.elaborate(decls)
 
     # Verify no errors
@@ -78,22 +86,29 @@ def test_llm_examples_content(test_data_dir: Path) -> None:
     decls = parse_program(source)
     evaluator = Evaluator()
     elaborator = Elaborator(evaluator=evaluator)
+    load_primitive_types(elaborator)
     module = elaborator.elaborate(decls)
 
     # Check translate function
     assert "translate" in module.llm_functions
     translate = module.llm_functions["translate"]
-    assert translate.model == "gpt-4"
-    assert translate.temperature == 0.7
+    assert "model=gpt-4" in translate.pragma_params
+    assert "temperature=0.7" in translate.pragma_params
     assert translate.function_docstring == "Translate English to French"
     assert translate.arg_names == ["text"]
     assert translate.arg_docstrings == ["The English text to translate"]
 
+    # Check that String is recognized as primitive type
+    from systemf.core.types import PrimitiveType
+
+    assert len(translate.arg_types) == 1
+    assert isinstance(translate.arg_types[0], PrimitiveType)
+    assert translate.arg_types[0].name == "String"
+
     # Check summarize function
     assert "summarize" in module.llm_functions
     summarize = module.llm_functions["summarize"]
-    assert summarize.model == "gpt-4"
-    assert summarize.temperature is None
+    assert "model=gpt-4" in summarize.pragma_params
 
 
 def test_llm_multiparam_content(test_data_dir: Path) -> None:
@@ -104,19 +119,20 @@ def test_llm_multiparam_content(test_data_dir: Path) -> None:
     decls = parse_program(source)
     evaluator = Evaluator()
     elaborator = Elaborator(evaluator=evaluator)
+    load_primitive_types(elaborator)
     module = elaborator.elaborate(decls)
 
     # Check classify function
     assert "classify" in module.llm_functions
     classify = module.llm_functions["classify"]
-    assert classify.model == "gpt-4"
-    assert classify.temperature == 0.5
+    assert "model=gpt-4" in classify.pragma_params
+    assert "temperature=0.5" in classify.pragma_params
 
     # Check codegen function
     assert "codegen" in module.llm_functions
     codegen = module.llm_functions["codegen"]
-    assert codegen.model == "claude-sonnet"
-    assert codegen.temperature == 0.9
+    assert "model=claude-sonnet" in codegen.pragma_params
+    assert "temperature=0.9" in codegen.pragma_params
 
 
 if __name__ == "__main__":
@@ -136,6 +152,9 @@ if __name__ == "__main__":
             print(f"✓ {filename} parsed successfully")
         except Exception as e:
             print(f"✗ {filename} parse failed: {e}")
+            import traceback
+
+            traceback.print_exc()
             all_passed = False
 
         try:
@@ -143,6 +162,9 @@ if __name__ == "__main__":
             print(f"✓ {filename} elaborated successfully")
         except Exception as e:
             print(f"✗ {filename} elaboration failed: {e}")
+            import traceback
+
+            traceback.print_exc()
             all_passed = False
 
     print("\n" + "=" * 60)

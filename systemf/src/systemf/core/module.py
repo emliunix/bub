@@ -27,8 +27,7 @@ class LLMMetadata:
         arg_names: Ordered list of parameter names
         arg_types: Ordered list of parameter types (parallel to arg_names)
         arg_docstrings: Ordered list of parameter docstrings (parallel to arg_names)
-        model: Optional model identifier (e.g., "gpt-4", "claude-sonnet")
-        temperature: Optional sampling temperature (0.0-2.0)
+        pragma_params: Raw pragma parameters as string (e.g., "model=gpt-4 temperature=0.7")
     """
 
     function_name: str
@@ -36,8 +35,7 @@ class LLMMetadata:
     arg_names: list[str]
     arg_types: list[Type]
     arg_docstrings: list[str | None]
-    model: str | None
-    temperature: float | None
+    pragma_params: str | None
 
 
 @dataclass(frozen=True)

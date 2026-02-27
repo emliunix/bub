@@ -219,14 +219,20 @@ class Evaluator:
         """Call LLM API (OpenAI or Anthropic).
 
         Args:
-            metadata: Contains model and temperature settings
+            metadata: Contains pragma_params for model and temperature settings
             prompt: The crafted prompt
 
         Returns:
             LLM response text
         """
-        model = metadata.model or "gpt-4"
-        temperature = metadata.temperature if metadata.temperature is not None else 0.7
+        import re
+
+        # Parse model and temperature from pragma_params
+        pragma = metadata.pragma_params or ""
+        model_match = re.search(r"model=([^\s,]+)", pragma)
+        model = model_match.group(1) if model_match else "gpt-4"
+        temp_match = re.search(r"temperature=([^\s,]+)", pragma)
+        temperature = float(temp_match.group(1)) if temp_match else 0.7
 
         # Try OpenAI first if model looks like an OpenAI model
         if model.startswith("gpt-") or model.startswith("o"):

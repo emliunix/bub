@@ -69,8 +69,8 @@ translate = \text -- ^ The English text to translate -> text
         assert metadata.function_docstring == "Translate English to French"
         assert metadata.arg_names == ["text"]
         assert metadata.arg_docstrings == ["The English text to translate"]
-        assert metadata.model == "gpt-4"
-        assert metadata.temperature == 0.7
+        assert "model=gpt-4" in metadata.pragma_params
+        assert "temperature=0.7" in metadata.pragma_params
 
     def test_llm_body_is_primop(self):
         """LLM function body is elaborated to PrimOp."""
@@ -171,8 +171,7 @@ translate = \text -> text
             arg_names=["text"],
             arg_types=[TypeVar("String")],
             arg_docstrings=["The English text to translate"],
-            model="gpt-4",
-            temperature=0.7,
+            pragma_params="model=gpt-4 temperature=0.7",
         )
 
         prompt = evaluator._craft_prompt(metadata, VString("hello world"))

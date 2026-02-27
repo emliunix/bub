@@ -305,23 +305,10 @@ class Elaborator:
         while len(arg_types) < len(arg_names):
             arg_types.append(TypeVar("_"))
 
-        # Extract model and temperature from pragma dict
-        model = None
-        temperature = None
+        # Get raw pragma parameters (opaque to elaborator)
+        pragma_params = None
         if decl.pragma and "LLM" in decl.pragma:
-            # Parse key=value pairs from pragma content
-            import re
-
-            content = decl.pragma["LLM"]
-            model_match = re.search(r"model=([^\s,]+)", content)
-            if model_match:
-                model = model_match.group(1)
-            temp_match = re.search(r"temperature=([^\s,]+)", content)
-            if temp_match:
-                try:
-                    temperature = float(temp_match.group(1))
-                except ValueError:
-                    temperature = None
+            pragma_params = decl.pragma["LLM"].strip() or None
 
         # Build LLMMetadata
         metadata = LLMMetadata(
@@ -330,8 +317,7 @@ class Elaborator:
             arg_names=arg_names,
             arg_types=arg_types,
             arg_docstrings=arg_docstrings,
-            model=model,
-            temperature=temperature,
+            pragma_params=pragma_params,
         )
 
         # Register in llm_functions
