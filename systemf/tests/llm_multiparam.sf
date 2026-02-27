@@ -2,18 +2,23 @@
 
 {-# LLM model=gpt-4 temperature=0.5 #-}
 -- | Classify text into categories
-prim_op classify : String -- ^ Comma-separated list of categories
-  -> String -- ^ The text to classify
+prim_op classify : String
+  -- ^ Comma-separated list of categories
+  -> String
+  -- ^ The text to classify
   -> String
 
 {-# LLM model=claude-sonnet temperature=0.9 #-}
 -- | Generate code in a specific language
-prim_op codegen : String -- ^ Programming language (e.g., Python, Haskell)
-  -> String -- ^ Description of what the code should do
+prim_op codegen : String
+  -- ^ Programming language (e.g., Python, Haskell)
+  -> String
+  -- ^ Description of what the code should do
   -> String
 
 -- Simple sentiment analysis without model specification
 {-# LLM #-}
 -- | Analyze sentiment of text
-prim_op sentiment : String -- ^ Text to analyze
+prim_op sentiment : String
+  -- ^ Text to analyze
   -> String

@@ -2,12 +2,14 @@
 
 {-# LLM model=gpt-4 temperature=0.7 #-}
 -- | Translate English to French
-prim_op translate : String -- ^ The English text to translate
+prim_op translate : String
+  -- ^ The English text to translate
   -> String
 
 {-# LLM model=gpt-4 #-}
 -- | Generate a creative story summary
-prim_op summarize : String -- ^ The story text to summarize
+prim_op summarize : String
+  -- ^ The story text to summarize
   -> String
 
 -- Regular function (no LLM) for comparison

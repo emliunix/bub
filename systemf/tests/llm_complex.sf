@@ -13,11 +13,13 @@ extract = \ma -> \default ->
 -- LLM function with Maybe type
 {-# LLM model=gpt-4 temperature=0.2 #-}
 -- | Extract structured data from unstructured text
-prim_op extractName : String -- ^ Text containing a person's name
+prim_op extractName : String
+  -- ^ Text containing a person's name
   -> Maybe String
 
 -- Chain multiple LLM operations
 {-# LLM model=gpt-4 #-}
 -- | Process raw input through multiple LLM steps
-prim_op process : String -- ^ Raw input text
+prim_op process : String
+  -- ^ Raw input text
   -> String
