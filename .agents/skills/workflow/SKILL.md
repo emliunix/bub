@@ -15,6 +15,37 @@ Use this workflow when:
 - Multiple implementation passes with review cycles are needed
 - Clear separation of concerns between design and implementation is required
 
+## For Project Creators (Users)
+
+As a project creator, you initiate the workflow by providing the request. There are two ways to do this:
+
+### Option 1: Pass request as message (Recommended)
+Simply describe your request in natural language. The system will:
+1. Create a kanban file
+2. Initialize the workflow
+3. Route to appropriate agents
+
+**Example:**
+```
+Create a Module dataclass and update the elaborator to return Module instead of tuple.
+This is Phase 1 of refactoring to support LLM integration.
+```
+
+### Option 2: Create kanban manually and pass the file
+If you want more control over the kanban structure or need to add detailed context:
+
+```bash
+# Create the kanban using the script
+./scripts/create-kanban.py --title "My Feature" --request "Detailed request here"
+```
+
+Then pass the created kanban file path:
+```
+Please work on: tasks/0-kanban-my-feature.md
+```
+
+**Note:** You should NOT manually create task files or edit the kanban structure beyond the request content. The Manager role will create tasks based on the strategy defined in role-manager.md.
+
 ## Workflow Architecture
 
 The workflow consists of four specialized roles working in sequence:
@@ -150,12 +181,14 @@ Creates task files with validated YAML headers. Only Manager and users can creat
 ```
 
 ### create-kanban.py
-Creates kanban files with exploration task:
+Creates kanban files (empty, Manager adds tasks separately):
 ```bash
 .agents/skills/workflow/scripts/create-kanban.py \
     --title "API Refactor" \
     --request "Refactor the API layer"
 ```
+
+**Note:** Manager decides whether to start with exploration (unclear requirements) or direct work (clear requirements). See `role-manager.md` for details.
 
 ### log-task.py
 Logs work using subcommands (generate/commit/quick):

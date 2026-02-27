@@ -82,19 +82,27 @@ def execute(input):
         return reconcile_tasks(input.kanban_file, input.done_task, input.tasks)
 
 def create_kanban(user_request):
-    """Create initial kanban with exploration task."""
-    # Create kanban file
+    """Create initial kanban and decide first task based on request clarity."""
+    # Create kanban file (empty, no automatic tasks)
     kanban_file = execute_script(f"{skill_path}/scripts/create-kanban.py", {
         "title": "Workflow",
         "request": user_request
     })
     
-    # Create initial exploration task
-    initial_task = execute_script(f"{skill_path}/scripts/create-task.py", {
-        "role": "Architect",
-        "type": "exploration",
-        "kanban": kanban_file
-    })
+    # Manager decides initial task type based on request clarity
+    if has_clear_requirements(user_request):
+        # Request is clear - can start with design or implementation
+        initial_task = create_initial_task_from_request(kanban_file, user_request)
+    else:
+        # Request unclear - need exploration to understand scope
+        initial_task = execute_script(f"{skill_path}/scripts/create-task.py", {
+            "role": "Architect",
+            "type": "exploration",
+            "kanban": kanban_file,
+            "creator-role": "manager",
+            "title": "Explore Request",
+            "description": f"Explore and analyze: {user_request}"
+        })
     
     # Update kanban with initial task
     kanban = read(kanban_file)
@@ -104,7 +112,8 @@ def create_kanban(user_request):
     
     # Log plan creation
     log_plan_adjustment(kanban_file, "kanban_created", {
-        "action": "Created exploration task"
+        "action": "Created initial task",
+        "task_type": "exploration" if not has_clear_requirements(user_request) else "direct"
     })
     
     return {
@@ -112,6 +121,35 @@ def create_kanban(user_request):
         "next_task": initial_task,
         "tasks": [initial_task]
     }
+
+def has_clear_requirements(user_request):
+    """Check if request has clear scope and known files."""
+    # If request includes specific files, implementation approach, or detailed plan
+    # Then we can skip exploration and go directly to design/implement
+    # Otherwise, need Architect to explore first
+    return "file:" in user_request.lower() or "implement:" in user_request.lower()
+
+def create_initial_task_from_request(kanban_file, user_request):
+    """Create first task directly from clear request (skipping exploration)."""
+    # Parse request to determine if design or implement task needed
+    if is_architecture_related(user_request):
+        return execute_script(f"{skill_path}/scripts/create-task.py", {
+            "role": "Architect",
+            "type": "design",
+            "kanban": kanban_file,
+            "creator-role": "manager",
+            "title": "Design System",
+            "description": user_request
+        })
+    else:
+        return execute_script(f"{skill_path}/scripts/create-task.py", {
+            "role": "Implementor",
+            "type": "implement",
+            "kanban": kanban_file,
+            "creator-role": "manager",
+            "title": "Implement Feature",
+            "description": user_request
+        })
 
 def reconcile_tasks(kanban_file, done_task, tasks):
     """Process completed task and plan next steps."""
@@ -671,10 +709,46 @@ Every significant decision is logged:
 
 ## Event Types
 
-- `kanban_created` - New workflow started
+- `kanban_created` - New workflow started (with initial task: exploration or direct)
+- `initial_task_exploration` - Started with exploration (unclear requirements)
+- `initial_task_direct` - Started with design/implement (clear requirements)
 - `blocker_detected` - Task blocked, exploration created
 - `escalation_for_review` - Task escalated, assigned to Architect for review (same task file)
 - `escalation_prerequisites_created` - Review completed, prerequisite tasks created from work items, original task dependencies updated
 - `inadequate_information` - Missing info for planning, exploration created
 - `tasks_created` - New tasks created from work items
 - `workflow_complete` - All tasks finished
+
+## Initial Task Strategy
+
+**Manager decides whether to start with exploration or direct work:**
+
+**Start with EXPLORATION when:**
+- Request scope is unclear
+- Unknown which files are affected
+- Need to understand existing codebase first
+- Complex cross-cutting concerns
+- User says "explore", "analyze", "understand"
+
+**Start with DIRECT task when:**
+- Request specifies concrete files to modify
+- Clear implementation approach known
+- Detailed plan provided by user
+- Simple isolated change
+- Follow-up to completed exploration
+
+**Examples:**
+```
+"Analyze the error handling" → exploration task (Architect)
+"Implement Module class in src/module.py" → implement task (Implementor)
+"Design new API for caching" → design task (Architect)
+"Add tests for utils.py functions" → implement task (Implementor)
+```
+
+**Architect's Role in Exploration:**
+When given an exploration task, Architect:
+1. Explores relevant code
+2. Analyzes scope and complexity
+3. Documents findings in work log
+4. Suggests work items in `## Suggested Work Items` section
+5. Manager uses these work items to plan implementation tasks

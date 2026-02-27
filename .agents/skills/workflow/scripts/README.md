@@ -63,36 +63,30 @@ Creates a new task file with a validated YAML header.
 
 ### 2. create-kanban.py
 
-Creates a new kanban file with a validated YAML header and optionally an initial exploration task.
+Creates a new kanban file with a validated YAML header. Creates an **empty** kanban with no tasks - tasks are created separately by the Manager using create-task.py.
 
 **Usage:**
 ```bash
-# Create kanban with exploration task
+# Create kanban (empty, Manager will add tasks)
 .agents/skills/workflow/scripts/create-kanban.py \
     --title "API Refactor" \
     --request "Refactor the API layer for better performance"
-
-# Create kanban without exploration task
-.agents/skills/workflow/scripts/create-kanban.py \
-    --title "Bug Fix" \
-    --request "Fix critical authentication bug" \
-    --no-exploration
 ```
 
 **Options:**
 - `--title, -t` (required): Kanban title (used for filename)
 - `--request, -r` (required): Original user request/description
-- `--no-exploration`: Skip creating initial exploration task
 - `--tasks-dir`: Directory for task files (default: ./tasks)
 
 **Output:**
 - Returns the filepath of the created kanban (e.g., `tasks/2-kanban-api-refactor.md`)
 
 **What it does:**
-1. Creates an exploration task first (if not --no-exploration)
-2. Creates the kanban file with proper ID sequencing
-3. Updates the exploration task to reference the kanban
-4. Updates the kanban to point to the current task
+1. Creates the kanban file with proper ID sequencing
+2. Kanban starts with empty tasks list
+3. Manager creates initial task separately based on request clarity
+
+**Note:** The Manager decides whether to start with exploration (unclear requirements) or direct work (clear requirements). See role-manager.md for details.
 
 ### 3. log-task.py
 
