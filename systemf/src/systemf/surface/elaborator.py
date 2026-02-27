@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from systemf.core import ast as core
-from systemf.core.types import Type as CoreType
+from systemf.core.types import PrimitiveType, Type as CoreType
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
 from systemf.surface.ast import (
     SurfaceAbs,
@@ -19,11 +19,17 @@ from systemf.surface.ast import (
     SurfaceConstructor,
     SurfaceDataDeclaration,
     SurfaceDeclaration,
+    SurfaceIntLit,
     SurfaceLet,
+    SurfaceOp,
     SurfacePattern,
+    SurfacePrimOpDecl,
+    SurfacePrimTypeDecl,
+    SurfaceStringLit,
     SurfaceTerm,
     SurfaceTermDeclaration,
     SurfaceToolCall,
+    SurfaceType,
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceTypeArrow,
@@ -87,6 +93,12 @@ class Elaborator:
         # Data declarations for elaborating constructors
         self.data_decls: dict[str, SurfaceDataDeclaration] = {}
 
+        # Primitive types registry: name -> PrimitiveType
+        self.primitive_types: dict[str, PrimitiveType] = {}
+
+        # Global types: name -> CoreType (for primitive operations)
+        self.global_types: dict[str, CoreType] = {}
+
     # =====================================================================
     # Environment Management
     # =====================================================================
@@ -115,12 +127,16 @@ class Elaborator:
     def _lookup_term(self, name: str, location: Location) -> core.Term:
         """Look up a term variable.
 
-        Returns Var for local bindings, Global for top-level definitions.
+        Returns Var for local bindings, Global for top-level definitions,
+        or PrimOp for $prim.xxx names.
         """
         if name in self.term_env:
             return core.Var(self.term_env[name])
         if name in self.global_terms:
             return core.Global(name)
+        if name.startswith("$prim."):
+            op_name = name[6:]  # Strip "$prim."
+            return core.PrimOp(op_name)
         raise UndefinedVariable(name, location)
 
     def _add_type_binding(self, name: str) -> None:
@@ -163,6 +179,10 @@ class Elaborator:
                 return self._elaborate_data_decl(decl)
             case SurfaceTermDeclaration():
                 return self._elaborate_term_decl(decl)
+            case SurfacePrimTypeDecl(name, location):
+                return self._elaborate_prim_type_decl(name, location)
+            case SurfacePrimOpDecl(name, type_annotation, location):
+                return self._elaborate_prim_op_decl(name, type_annotation, location)
             case _:
                 raise ElaborationError(f"Unknown declaration type: {type(decl)}")
 
@@ -231,6 +251,39 @@ class Elaborator:
             name=decl.name,
             type_annotation=core_type,
             body=core_body,
+        )
+
+    def _elaborate_prim_type_decl(self, name: str, location: Location) -> core.DataDeclaration:
+        """Elaborate a primitive type declaration.
+
+        Registers the primitive type in the primitive_types registry
+        and returns a DataDeclaration placeholder.
+        """
+        prim_type = PrimitiveType(name)
+        self.primitive_types[name] = prim_type
+        # Return a DataDeclaration as placeholder (no constructors for primitive types)
+        return core.DataDeclaration(
+            name=name,
+            params=[],
+            constructors=[],
+        )
+
+    def _elaborate_prim_op_decl(
+        self, name: str, type_annotation: "SurfaceType", location: Location
+    ) -> core.TermDeclaration:
+        """Elaborate a primitive operation declaration.
+
+        Registers the operation with its type signature in global_types
+        as $prim.name and returns a TermDeclaration placeholder.
+        """
+        core_type = self._elaborate_type(type_annotation)
+        full_name = f"$prim.{name}"
+        self.global_types[full_name] = core_type
+        # Return a TermDeclaration as placeholder with a PrimOp body
+        return core.TermDeclaration(
+            name=name,
+            type_annotation=core_type,
+            body=core.PrimOp(name),
         )
 
     # =====================================================================
@@ -338,6 +391,21 @@ class Elaborator:
                 core_args = [self.elaborate_term(arg) for arg in args]
                 return core.ToolCall(tool_name, core_args)
 
+            case SurfaceIntLit(value, location):
+                # Convert integer literal to core IntLit
+                return core.IntLit(value)
+
+            case SurfaceStringLit(value, location):
+                # Convert string literal to core StringLit
+                return core.StringLit(value)
+
+            case SurfaceOp(left, op, right, location):
+                # Desugar operator to primitive application
+                from systemf.surface.desugar import desugar
+
+                desugared = desugar(term)
+                return self.elaborate_term(desugared)
+
             case _:
                 raise ElaborationError(f"Unknown term type: {type(term)}")
 
@@ -364,6 +432,9 @@ class Elaborator:
                 return TypeForall(var, core_body)
 
             case SurfaceTypeConstructor(name, args, location):
+                # Check if this is a primitive type (registered via prim_type)
+                if name in self.primitive_types and not args:
+                    return self.primitive_types[name]
                 core_args = [self._elaborate_type(arg) for arg in args]
                 return TypeConstructor(name, core_args)
 

@@ -9,8 +9,10 @@ from systemf.core.ast import (
     DataDeclaration,
     Declaration,
     Global,
+    IntLit,
     Let,
     Pattern,
+    PrimOp,
     TAbs,
     TApp,
     Term,
@@ -28,6 +30,7 @@ from systemf.core.errors import (
     UnificationError,
 )
 from systemf.core.types import (
+    PrimitiveType,
     Type,
     TypeArrow,
     TypeConstructor,
@@ -50,6 +53,8 @@ __all__ = [
     "Branch",
     "Pattern",
     "Let",
+    "IntLit",
+    "PrimOp",
     "Declaration",
     "DataDeclaration",
     "TermDeclaration",
@@ -59,6 +64,7 @@ __all__ = [
     "TypeArrow",
     "TypeForall",
     "TypeConstructor",
+    "PrimitiveType",
     # Context
     "Context",
     # Unification

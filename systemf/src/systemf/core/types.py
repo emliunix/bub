@@ -109,5 +109,26 @@ class TypeConstructor(Type):
         return TypeConstructor(self.name, [arg.substitute(subst) for arg in self.args])
 
 
+@dataclass(frozen=True)
+class PrimitiveType(Type):
+    """Primitive type from prelude: Int, Float, String, etc.
+
+    Primitive types are declared in the prelude using `prim_type` and
+    registered in the type checker. They have no structure - they're
+    just named types that the evaluator knows how to work with.
+    """
+
+    name: str
+
+    def __str__(self) -> str:
+        return self.name
+
+    def free_vars(self) -> set[str]:
+        return set()
+
+    def substitute(self, subst: dict[str, Type]) -> Type:
+        return self
+
+
 # Export the type union for type checking
-TypeRepr = Union[TypeVar, TypeArrow, TypeForall, TypeConstructor]
+TypeRepr = Union[TypeVar, TypeArrow, TypeForall, TypeConstructor, PrimitiveType]

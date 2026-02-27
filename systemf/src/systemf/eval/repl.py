@@ -9,6 +9,7 @@ from pathlib import Path
 from systemf.surface.lexer import Lexer
 from systemf.surface.parser import Parser, ParseError
 from systemf.surface.elaborator import Elaborator
+from systemf.surface.desugar import desugar
 from systemf.core.checker import TypeChecker
 from systemf.core.context import Context
 from systemf.core.types import Type
@@ -25,16 +26,19 @@ class REPL:
 
     def __init__(self) -> None:
         # Persistent environments across REPL inputs
-        self.global_types: dict[str, Type] = {}
         self.global_values: dict[str, Value] = {}
         self.constructor_types: dict[str, Type] = {}
         self.global_terms: set[str] = set()
 
-        # Initialize elaborator first (it creates its own constructor_types)
+        # Initialize elaborator first (it creates its own constructor_types, primitive_types, and global_types)
         self.elaborator = Elaborator()
-        # Share the elaborator's constructor_types with the checker
+        # Share the elaborator's global_types so prim_op declarations are visible to checker
+        self.global_types = self.elaborator.global_types
+        # Share the elaborator's registries with the checker
         self.checker = TypeChecker(
-            datatype_constructors=self.elaborator.constructor_types, global_types=self.global_types
+            datatype_constructors=self.elaborator.constructor_types,
+            global_types=self.global_types,
+            primitive_types=self.elaborator.primitive_types,  # type: ignore[arg-type]
         )
         self.evaluator = Evaluator(global_env=self.global_values)
 
@@ -254,6 +258,9 @@ class REPL:
                 # Re-tokenize for expression parsing
                 tokens = Lexer(source).tokenize()
                 surface_term = Parser(tokens).parse_term()
+
+                # Desugar operators before elaboration
+                surface_term = desugar(surface_term)
 
                 # Elaborate the expression
                 core_term = self.elaborator.elaborate_term(surface_term)

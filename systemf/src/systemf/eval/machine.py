@@ -1,5 +1,7 @@
 """Abstract machine / evaluator for System F core language."""
 
+from typing import Callable
+
 from systemf.core.ast import (
     Abs,
     App,
@@ -8,7 +10,10 @@ from systemf.core.ast import (
     DataDeclaration,
     Declaration,
     Global,
+    IntLit,
     Let,
+    PrimOp,
+    StringLit,
     TAbs,
     TApp,
     Term,
@@ -20,6 +25,10 @@ from systemf.eval.value import (
     Environment,
     VClosure,
     VConstructor,
+    VInt,
+    VPrimOp,
+    VPrimOpPartial,
+    VString,
     VTypeClosure,
     Value,
 )
@@ -33,6 +42,94 @@ class Evaluator:
     def __init__(self, global_env: dict[str, Value] | None = None) -> None:
         self.pattern_matcher = PatternMatcher()
         self.global_env = global_env if global_env is not None else {}
+        self.primitive_impls: dict[str, Callable[[Value, Value], Value]] = {
+            "int_plus": self._int_plus,
+            "int_minus": self._int_minus,
+            "int_multiply": self._int_multiply,
+            "int_divide": self._int_divide,
+            "int_negate": self._int_negate,
+            "int_eq": self._int_eq,
+            "int_lt": self._int_lt,
+            "int_gt": self._int_gt,
+            "string_concat": self._string_concat,
+            "string_length": self._string_length,
+        }
+
+    def _int_plus(self, x: Value, y: Value) -> Value:
+        """Integer addition."""
+        if not isinstance(x, VInt) or not isinstance(y, VInt):
+            raise RuntimeError("int_plus expects Int arguments")
+        return VInt(x.value + y.value)
+
+    def _int_minus(self, x: Value, y: Value) -> Value:
+        """Integer subtraction."""
+        if not isinstance(x, VInt) or not isinstance(y, VInt):
+            raise RuntimeError("int_minus expects Int arguments")
+        return VInt(x.value - y.value)
+
+    def _int_multiply(self, x: Value, y: Value) -> Value:
+        """Integer multiplication."""
+        if not isinstance(x, VInt) or not isinstance(y, VInt):
+            raise RuntimeError("int_multiply expects Int arguments")
+        return VInt(x.value * y.value)
+
+    def _int_divide(self, x: Value, y: Value) -> Value:
+        """Integer division."""
+        if not isinstance(x, VInt) or not isinstance(y, VInt):
+            raise RuntimeError("int_divide expects Int arguments")
+        if y.value == 0:
+            raise RuntimeError("Division by zero")
+        return VInt(x.value // y.value)
+
+    def _int_negate(self, x: Value, _y: Value) -> Value:
+        """Integer negation (unary minus).
+
+        Note: This is a unary operation (Int -> Int) but the primitive
+        infrastructure expects binary operations. The second argument is ignored.
+        """
+        if not isinstance(x, VInt):
+            raise RuntimeError("int_negate expects Int argument")
+        return VInt(-x.value)
+
+    def _int_eq(self, x: Value, y: Value) -> Value:
+        """Integer equality."""
+        from systemf.eval.value import VConstructor
+
+        if not isinstance(x, VInt) or not isinstance(y, VInt):
+            raise RuntimeError("int_eq expects Int arguments")
+        return VConstructor("True" if x.value == y.value else "False", [])
+
+    def _int_lt(self, x: Value, y: Value) -> Value:
+        """Integer less than."""
+        from systemf.eval.value import VConstructor
+
+        if not isinstance(x, VInt) or not isinstance(y, VInt):
+            raise RuntimeError("int_lt expects Int arguments")
+        return VConstructor("True" if x.value < y.value else "False", [])
+
+    def _int_gt(self, x: Value, y: Value) -> Value:
+        """Integer greater than."""
+        from systemf.eval.value import VConstructor
+
+        if not isinstance(x, VInt) or not isinstance(y, VInt):
+            raise RuntimeError("int_gt expects Int arguments")
+        return VConstructor("True" if x.value > y.value else "False", [])
+
+    def _string_concat(self, x: Value, y: Value) -> Value:
+        """String concatenation."""
+        if not isinstance(x, VString) or not isinstance(y, VString):
+            raise RuntimeError("string_concat expects String arguments")
+        return VString(x.value + y.value)
+
+    def _string_length(self, x: Value, y: Value) -> Value:
+        """String length.
+
+        Note: This is a unary operation (String -> Int) but the primitive
+        infrastructure expects binary operations. The second argument is ignored.
+        """
+        if not isinstance(x, VString):
+            raise RuntimeError("string_length expects String argument")
+        return VInt(len(x.value))
 
     def evaluate(self, term: Term, env: Environment | None = None) -> Value:
         """Evaluate term to a value.
@@ -102,6 +199,19 @@ class Evaluator:
                 # Evaluate body
                 return self.evaluate(body, new_env)
 
+            case IntLit(value):
+                # Integer literal evaluates to VInt
+                return VInt(value)
+
+            case StringLit(value):
+                # String literal evaluates to VString
+                return VString(value)
+
+            case PrimOp(name):
+                # Primitive operation creates a function that can be applied
+                # Return a closure that wraps the primitive implementation
+                return self._make_primop_closure(name)
+
             case ToolCall(tool_name, args):
                 # Evaluate all arguments (call-by-value)
                 arg_vals = [self.evaluate(arg, env) for arg in args]
@@ -120,6 +230,12 @@ class Evaluator:
                 new_env = closure_env.extend(arg)
                 # Evaluate body in extended environment
                 return self.evaluate(body, new_env)
+            case VPrimOp(name, impl):
+                # Primitive operations are binary - first application creates partial
+                return VPrimOpPartial(name, impl, arg)
+            case VPrimOpPartial(name, impl, first_arg):
+                # Second application - execute the primitive
+                return impl(first_arg, arg)
             case _:
                 raise RuntimeError(f"Cannot apply non-function: {func}")
 
@@ -132,6 +248,22 @@ class Evaluator:
                 return self.evaluate(body, closure_env)
             case _:
                 raise RuntimeError(f"Cannot type-apply non-type-abstraction: {func}")
+
+    def _make_primop_closure(self, name: str) -> Value:
+        """Create a closure for a primitive operation.
+
+        Returns a curried function that takes two Int arguments.
+        """
+        from systemf.core.ast import Var, Abs, App
+
+        if name not in self.primitive_impls:
+            raise RuntimeError(f"Unknown primitive: {name}")
+
+        impl = self.primitive_impls[name]
+
+        # Create a closure that expects two arguments
+        # We use a special representation that the apply method will recognize
+        return VPrimOp(name, impl)
 
     def evaluate_program(self, decls: list[Declaration]) -> dict[str, Value]:
         """Evaluate a sequence of declarations.

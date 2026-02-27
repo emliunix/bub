@@ -20,6 +20,7 @@ from systemf.surface.types import (
     NumberToken,
     OperatorToken,
     PragmaToken,
+    StringToken,
     Token,
     TokenType,
 )
@@ -67,11 +68,25 @@ class Lexer:
         ("TYPE", r"\btype\b"),
         ("LLM", r"\bLLM\b"),
         ("TOOL", r"\bTOOL\b"),
+        ("PRIM_TYPE", r"\bprim_type\b"),  # Primitive type declaration
+        ("PRIM_OP", r"\bprim_op\b"),  # Primitive operation declaration
         # Multi-character operators (ASCII and Unicode)
         ("ARROW", r"-\u003e|\u2192"),  # -> or → (U+2192)
         ("DARROW", r"=>"),
         ("LAMBDA", r"\\|\u03bb"),  # \ or λ (U+03bb)
         ("TYPELAMBDA", r"/\\|\u039b"),  # /\ or Λ (U+039b)
+        # Multi-character comparison operators
+        ("EQ", r"=="),  # Equality
+        ("LE", r"<="),  # Less than or equal
+        ("GE", r">="),  # Greater than or equal
+        # Arithmetic operators
+        ("PLUS", r"\+"),
+        ("MINUS", r"-"),
+        ("STAR", r"\*"),
+        ("SLASH", r"/"),
+        # Single-character comparison operators (must come after multi-char)
+        ("LT", r"<"),
+        ("GT", r">"),
         # Single-character operators
         ("EQUALS", r"="),
         ("COLON", r":"),
@@ -89,6 +104,8 @@ class Lexer:
         # Identifiers and constructors
         ("CONSTRUCTOR", r"[A-Z][a-zA-Z0-9_']*"),  # Type/constructor names start with uppercase
         ("IDENT", r"[a-z_][a-zA-Z0-9_']*"),  # Variables start with lowercase
+        # String literals (double-quoted with escape sequence support)
+        ("STRING", r'"(?:[^"\\]|\\.)*"'),
         # Numbers (for convenience in tests)
         ("NUMBER", r"[0-9]+"),
     ]
@@ -394,6 +411,45 @@ class Lexer:
                 self.column += 1
         self.pos += len(text)
 
+    def _process_escape_sequences(self, s: str) -> str:
+        """Process escape sequences in a string literal.
+
+        Handles common escape sequences: \\, \", \n, \t, \r, \b, \f.
+
+        Args:
+            s: The raw string content (without quotes)
+
+        Returns:
+            The string with escape sequences processed
+        """
+        result = []
+        i = 0
+        while i < len(s):
+            if s[i] == "\\" and i + 1 < len(s):
+                next_char = s[i + 1]
+                if next_char == "\\":
+                    result.append("\\")
+                elif next_char == '"':
+                    result.append('"')
+                elif next_char == "n":
+                    result.append("\n")
+                elif next_char == "t":
+                    result.append("\t")
+                elif next_char == "r":
+                    result.append("\r")
+                elif next_char == "b":
+                    result.append("\b")
+                elif next_char == "f":
+                    result.append("\f")
+                else:
+                    # Unknown escape sequence, keep as-is
+                    result.append(s[i : i + 2])
+                i += 2
+            else:
+                result.append(s[i])
+                i += 1
+        return "".join(result)
+
     def _create_typed_token(self, token_type: str, value: str, location: Location) -> Token:
         """Create a typed token based on the token type string.
 
@@ -412,6 +468,11 @@ class Lexer:
                 return ConstructorToken(name=value, location=location)
             case TokenType.NUMBER:
                 return NumberToken(number=value, location=location)
+            case TokenType.STRING:
+                # Strip quotes and process escape sequences
+                string_value = value[1:-1]  # Remove surrounding quotes
+                string_value = self._process_escape_sequences(string_value)
+                return StringToken(string=string_value, location=location)
             case TokenType.ARROW:
                 return OperatorToken(operator=value, location=location, op_type=TokenType.ARROW)
             case TokenType.DARROW:
@@ -422,6 +483,24 @@ class Lexer:
                 return OperatorToken(
                     operator=value, location=location, op_type=TokenType.TYPELAMBDA
                 )
+            case TokenType.EQ:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.EQ)
+            case TokenType.LE:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.LE)
+            case TokenType.GE:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.GE)
+            case TokenType.PLUS:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.PLUS)
+            case TokenType.MINUS:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.MINUS)
+            case TokenType.STAR:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.STAR)
+            case TokenType.SLASH:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.SLASH)
+            case TokenType.LT:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.LT)
+            case TokenType.GT:
+                return OperatorToken(operator=value, location=location, op_type=TokenType.GT)
             case TokenType.EQUALS:
                 return OperatorToken(operator=value, location=location, op_type=TokenType.EQUALS)
             case TokenType.COLON:

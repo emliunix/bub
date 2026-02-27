@@ -202,6 +202,45 @@ class SurfaceConstructor(SurfaceTerm):
 
 
 @dataclass(frozen=True)
+class SurfaceIntLit(SurfaceTerm):
+    """Integer literal: 42, -7, etc."""
+
+    value: int
+    location: Location
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+
+@dataclass(frozen=True)
+class SurfaceStringLit(SurfaceTerm):
+    """String literal: "hello", "world", etc."""
+
+    value: str
+    location: Location
+
+    def __str__(self) -> str:
+        return f'"{self.value}"'
+
+
+@dataclass(frozen=True)
+class SurfaceOp(SurfaceTerm):
+    """Infix operator expression: left op right.
+
+    This is a surface syntax construct that gets desugared to a primitive
+    operation application. Operators include +, -, *, /, ==, <, >, <=, >=.
+    """
+
+    left: SurfaceTerm
+    op: str  # The operator symbol: '+', '-', '*', '/', '==', '<', '>', '<=', '>='
+    right: SurfaceTerm
+    location: Location
+
+    def __str__(self) -> str:
+        return f"({self.left} {self.op} {self.right})"
+
+
+@dataclass(frozen=True)
 class SurfacePattern:
     """Pattern in a case branch: Con vars."""
 
@@ -270,6 +309,9 @@ SurfaceTermRepr = Union[
     SurfaceConstructor,
     SurfaceCase,
     SurfaceToolCall,
+    SurfaceIntLit,
+    SurfaceStringLit,
+    SurfaceOp,
 ]
 
 
@@ -348,4 +390,43 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
         return f"{self.name} = {self.body}"
 
 
-SurfaceDeclarationRepr = Union[SurfaceDataDeclaration, SurfaceTermDeclaration]
+@dataclass(frozen=True)
+class SurfacePrimTypeDecl(SurfaceDeclaration):
+    """Primitive type declaration: prim_type Name.
+
+    Declares a primitive type in the prelude. This registers the type
+    name in the primitive_types registry for use by the type checker.
+
+    Example: prim_type Int
+    """
+
+    name: str
+    location: Location
+    docstring: str | None = None
+
+    def __str__(self) -> str:
+        return f"prim_type {self.name}"
+
+
+@dataclass(frozen=True)
+class SurfacePrimOpDecl(SurfaceDeclaration):
+    """Primitive operation declaration: prim_op name : type.
+
+    Declares a primitive operation with its type signature.
+    The name is registered as $prim.name in global_types.
+
+    Example: prim_op int_plus : Int -> Int -> Int
+    """
+
+    name: str
+    type_annotation: SurfaceType
+    location: Location
+    docstring: str | None = None
+
+    def __str__(self) -> str:
+        return f"prim_op {self.name} : {self.type_annotation}"
+
+
+SurfaceDeclarationRepr = Union[
+    SurfaceDataDeclaration, SurfaceTermDeclaration, SurfacePrimTypeDecl, SurfacePrimOpDecl
+]

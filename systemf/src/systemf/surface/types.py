@@ -101,6 +101,28 @@ class NumberToken:
 
 
 @dataclass(frozen=True)
+class StringToken:
+    """String literal token."""
+
+    string: str
+    location: Location
+
+    @property
+    def value(self) -> str:
+        return self.string
+
+    @property
+    def type(self) -> str:
+        return "STRING"
+
+    def __str__(self) -> str:
+        return f"{self.type}({self.value!r})"
+
+    def __repr__(self) -> str:
+        return f"StringToken({self.value!r}, {self.location})"
+
+
+@dataclass(frozen=True)
 class KeywordToken:
     """Keyword token (data, let, in, case, of, forall, type)."""
 
@@ -292,12 +314,27 @@ class TokenType:
     TYPE = "TYPE"
     LLM = "LLM"
     TOOL = "TOOL"
+    PRIM_TYPE = "PRIM_TYPE"
+    PRIM_OP = "PRIM_OP"
 
     # Multi-character operators
     ARROW = "ARROW"  # ->
     DARROW = "DARROW"  # =>
     LAMBDA = "LAMBDA"  # \
     TYPELAMBDA = "TYPELAMBDA"  # /\
+
+    # Arithmetic operators
+    PLUS = "PLUS"  # +
+    MINUS = "MINUS"  # -
+    STAR = "STAR"  # *
+    SLASH = "SLASH"  # /
+
+    # Comparison operators
+    EQ = "EQ"  # ==
+    LT = "LT"  # <
+    GT = "GT"  # >
+    LE = "LE"  # <=
+    GE = "GE"  # >=
 
     # Single-character operators
     EQUALS = "EQUALS"  # =
@@ -321,6 +358,7 @@ class TokenType:
 
     # Literals
     NUMBER = "NUMBER"  # Numeric literals
+    STRING = "STRING"  # String literals
 
     # End of file
     EOF = "EOF"
@@ -351,10 +389,21 @@ class TokenType:
             TYPE,
             LLM,
             TOOL,
+            PRIM_TYPE,
+            PRIM_OP,
             ARROW,
             DARROW,
             LAMBDA,
             TYPELAMBDA,
+            PLUS,
+            MINUS,
+            STAR,
+            SLASH,
+            EQ,
+            LT,
+            GT,
+            LE,
+            GE,
             EQUALS,
             COLON,
             BAR,
@@ -370,6 +419,7 @@ class TokenType:
             CONSTRUCTOR,
             IDENT,
             NUMBER,
+            STRING,
             EOF,
             PRAGMA_START,
             PRAGMA_CONTENT,
@@ -386,7 +436,7 @@ class TokenType:
     INDENTATION = frozenset([INDENT, DEDENT, NEWLINE])
 
     # Keywords for syntax highlighting or validation
-    KEYWORDS = frozenset([DATA, LET, IN, CASE, OF, FORALL, TYPE, LLM, TOOL])
+    KEYWORDS = frozenset([DATA, LET, IN, CASE, OF, FORALL, TYPE, LLM, TOOL, PRIM_TYPE, PRIM_OP])
 
 
 # Type alias for token type strings

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from systemf.core.ast import Term
 
@@ -55,6 +55,34 @@ class VNeutral:
 
 
 @dataclass(frozen=True)
+class VInt:
+    """Runtime integer value.
+
+    Represents a primitive integer at runtime.
+    Created by evaluating IntLit terms.
+    """
+
+    value: int
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+
+@dataclass(frozen=True)
+class VString:
+    """Runtime string value.
+
+    Represents a primitive string at runtime.
+    Created by evaluating StringLit terms.
+    """
+
+    value: str
+
+    def __str__(self) -> str:
+        return f'"{self.value}"'
+
+
+@dataclass(frozen=True)
 class VToolResult:
     """Tool execution result: represents the result of a tool call.
 
@@ -71,8 +99,47 @@ class VToolResult:
         return f"<tool:{self.tool_name}!{self.result}>"
 
 
+@dataclass(frozen=True)
+class VPrimOp:
+    """Primitive operation closure.
+
+    Wraps a primitive operation implementation that expects VInt arguments.
+    """
+
+    name: str
+    impl: Callable  # Callable[[Value, Value], Value]
+
+    def __str__(self) -> str:
+        return f"<primop:{self.name}>"
+
+
+@dataclass(frozen=True)
+class VPrimOpPartial:
+    """Partially applied primitive operation.
+
+    Stores the first argument while waiting for the second.
+    """
+
+    name: str
+    impl: Callable  # Callable[[Value, Value], Value]
+    first_arg: "Value"
+
+    def __str__(self) -> str:
+        return f"<primop:{self.name} {self.first_arg}>"
+
+
 # Sum type for all values
-Value = VClosure | VTypeClosure | VConstructor | VNeutral | VToolResult
+Value = (
+    VClosure
+    | VTypeClosure
+    | VConstructor
+    | VNeutral
+    | VInt
+    | VString
+    | VToolResult
+    | VPrimOp
+    | VPrimOpPartial
+)
 
 
 @dataclass(frozen=True)

@@ -11,7 +11,10 @@ from systemf.core.ast import (
     DataDeclaration,
     Declaration,
     Global,
+    IntLit,
     Let,
+    PrimOp,
+    StringLit,
     TAbs,
     TApp,
     Term,
@@ -35,6 +38,7 @@ class TypeChecker:
         self,
         datatype_constructors: dict[str, Type] | None = None,
         global_types: dict[str, Type] | None = None,
+        primitive_types: dict[str, Type] | None = None,
     ):
         """Initialize with data type constructor signatures.
 
@@ -43,9 +47,12 @@ class TypeChecker:
                 Example: {"Nil": ∀a. List a, "Cons": ∀a. a → List a → List a}
             global_types: Maps global term names to their types.
                 Example: {"id": ∀a. a → a}
+            primitive_types: Maps primitive type names to their types.
+                Example: {"Int": Int}
         """
         self.constructors = datatype_constructors if datatype_constructors is not None else {}
         self.global_types = global_types if global_types is not None else {}
+        self.primitive_types = primitive_types if primitive_types is not None else {}
         self._meta_counter = itertools.count(0)
 
     def infer(self, ctx: Context, term: Term) -> Type:
@@ -143,6 +150,24 @@ class TypeChecker:
                 new_ctx = ctx.extend_type(var)
                 body_type = self.infer(new_ctx, body)
                 return TypeForall(var, body_type)
+
+            case IntLit(_):
+                # Lookup from prelude-populated registry
+                if "Int" not in self.primitive_types:
+                    raise TypeError("Int type not registered in primitive_types")
+                return self.primitive_types["Int"]
+
+            case StringLit(_):
+                # Lookup from prelude-populated registry
+                if "String" not in self.primitive_types:
+                    raise TypeError("String type not registered in primitive_types")
+                return self.primitive_types["String"]
+
+            case PrimOp(name):
+                full_name = f"$prim.{name}"
+                if full_name not in self.global_types:
+                    raise TypeError(f"Unknown primitive: {name}")
+                return self.global_types[full_name]
 
             case _:
                 # Fall back to checking with a fresh meta-variable

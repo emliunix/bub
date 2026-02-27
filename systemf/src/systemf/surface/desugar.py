@@ -12,7 +12,9 @@ from systemf.surface.ast import (
     SurfaceCase,
     SurfaceConstructor,
     SurfaceLet,
+    SurfaceOp,
     SurfacePattern,
+    SurfacePrimOpDecl,
     SurfaceTerm,
     SurfaceTypeAbs,
     SurfaceTypeApp,
@@ -22,13 +24,29 @@ from systemf.surface.ast import (
 from systemf.utils.location import Location
 
 
+# Operator to primitive operation name mapping
+# Maps surface operators to $prim names that cannot be shadowed
+# Using underscore naming to match prelude declarations (e.g., prim_op int_plus)
+OPERATOR_TO_PRIM: dict[str, str] = {
+    "+": "$prim.int_plus",
+    "-": "$prim.int_minus",
+    "*": "$prim.int_multiply",
+    "/": "$prim.int_divide",
+    "==": "$prim.int_eq",
+    "<": "$prim.int_lt",
+    ">": "$prim.int_gt",
+    "<=": "$prim.int_le",
+    ">=": "$prim.int_ge",
+}
+
+
 class Desugarer:
     """Desugars surface syntax to simpler forms.
 
     Performs transformations like:
     - if-then-else -> case expressions
     - let bindings -> lambda applications
-    - Operator sections
+    - Operator expressions -> primitive operation applications
     """
 
     def desugar(self, term: SurfaceTerm) -> SurfaceTerm:
@@ -47,6 +65,7 @@ class Desugarer:
         term = self._desugar_if_then_else(term)
         term = self._desugar_multi_arg_lambda(term)
         term = self._desugar_letrec(term)
+        term = self._desugar_operators(term)
 
         return term
 
@@ -87,6 +106,9 @@ class Desugarer:
                     ],
                     loc,
                 )
+
+            case SurfaceOp(left, op, right, loc):
+                return SurfaceOp(self.desugar(left), op, self.desugar(right), loc)
 
             case _:
                 return term
@@ -129,6 +151,40 @@ class Desugarer:
         """
         # Placeholder - System F doesn't have recursion by default
         return term
+
+    def _desugar_operators(self, term: SurfaceTerm) -> SurfaceTerm:
+        """Convert operator expressions to primitive operation applications.
+
+        Transforms:
+            left + right  ->  ($prim.int.plus left) right
+            left - right  ->  ($prim.int.minus left) right
+            left * right  ->  ($prim.int.multiply left) right
+            left / right  ->  ($prim.int.divide left) right
+            left == right ->  ($prim.int.eq left) right
+            left < right  ->  ($prim.int.lt left) right
+            left > right  ->  ($prim.int.gt left) right
+            left <= right ->  ($prim.int.le left) right
+            left >= right ->  ($prim.int.ge left) right
+        """
+        match term:
+            case SurfaceOp(left, op, right, loc):
+                # Get the primitive operation name
+                prim_name = OPERATOR_TO_PRIM.get(op)
+                if prim_name is None:
+                    # Unknown operator, return as-is
+                    return term
+
+                # Create the primitive variable reference
+                prim_var = SurfaceVar(prim_name, loc)
+
+                # Build: ((prim left) right)
+                # First apply: (prim left)
+                first_app = SurfaceApp(prim_var, left, loc)
+                # Then apply: ((prim left) right)
+                return SurfaceApp(first_app, right, loc)
+
+            case _:
+                return term
 
 
 class LetToLambdaDesugarer:
@@ -183,6 +239,9 @@ class LetToLambdaDesugarer:
                     ],
                     loc,
                 )
+
+            case SurfaceOp(left, op, right, loc):
+                return SurfaceOp(self.desugar(left), op, self.desugar(right), loc)
 
             case _:
                 return term

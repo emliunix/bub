@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from systemf.core.types import Type, TypeArrow, TypeConstructor, TypeForall, TypeVar
+from systemf.core.types import Type, TypeArrow, TypeConstructor, TypeForall, TypeVar, PrimitiveType
 from systemf.core.errors import OccursCheckError, UnificationError
 
 
@@ -39,6 +39,9 @@ class Substitution:
                 return TypeForall(var, Substitution(filtered_mapping).apply(body))
             case TypeConstructor(name, args):
                 return TypeConstructor(name, [self.apply(arg) for arg in args])
+            case PrimitiveType(name):
+                # Primitive types have no variables to substitute
+                return t
             case _:
                 raise TypeError(f"Unknown type: {t}")
 
@@ -82,6 +85,9 @@ def occurs_in(var: str, t: Type) -> bool:
             return occurs_in(var, body)
         case TypeConstructor(_, args):
             return any(occurs_in(var, arg) for arg in args)
+        case PrimitiveType(_):
+            # Primitive types have no type variables
+            return False
         case _:
             raise TypeError(f"Unknown type: {t}")
 
@@ -145,6 +151,12 @@ def unify(t1: Type, t2: Type) -> Substitution:
                 subst = s.compose(subst)
 
             return subst
+
+        # Both are primitive types
+        case PrimitiveType(name1), PrimitiveType(name2):
+            if name1 != name2:
+                raise UnificationError(t1, t2)
+            return Substitution.empty()
 
         # Types are different constructors
         case _:

@@ -19,9 +19,14 @@ from systemf.surface.ast import (
     SurfaceConstructorInfo,
     SurfaceDataDeclaration,
     SurfaceDeclaration,
+    SurfaceIntLit,
     SurfaceLet,
+    SurfaceOp,
     SurfacePattern,
     SurfacePragma,
+    SurfacePrimOpDecl,
+    SurfacePrimTypeDecl,
+    SurfaceStringLit,
     SurfaceTerm,
     SurfaceTermDeclaration,
     SurfaceToolCall,
@@ -104,6 +109,19 @@ BAR = match_token("BAR")
 AT = match_token("AT")
 DOT = match_token("DOT")
 
+# Arithmetic operators
+PLUS = match_token("PLUS")
+MINUS = match_token("MINUS")
+STAR = match_token("STAR")
+SLASH = match_token("SLASH")
+
+# Comparison operators
+EQ = match_token("EQ")
+LT = match_token("LT")
+GT = match_token("GT")
+LE = match_token("LE")
+GE = match_token("GE")
+
 # Delimiters
 LPAREN = match_token("LPAREN")
 RPAREN = match_token("RPAREN")
@@ -120,6 +138,7 @@ DEDENT = match_token("DEDENT")
 IDENT = match_token("IDENT").map(lambda t: t.value)
 CONSTRUCTOR = match_token("CONSTRUCTOR").map(lambda t: t.value)
 NUMBER = match_token("NUMBER").map(lambda t: t.value)
+STRING = match_token("STRING").map(lambda t: t.value)
 EOF = match_token("EOF")
 
 # Pragma tokens
@@ -128,6 +147,10 @@ PRAGMA_END = match_token("PRAGMA_END")
 PRAGMA_CONTENT = match_token("PRAGMA_CONTENT").map(lambda t: t.value)
 LLM = match_token("LLM").map(lambda t: t.value)
 TOOL = match_token("TOOL").map(lambda t: t.value)
+
+# Primitive declaration tokens
+PRIM_TYPE = match_token("PRIM_TYPE")
+PRIM_OP = match_token("PRIM_OP")
 
 
 # =============================================================================
@@ -326,10 +349,15 @@ def atom_base():
     if ident is not None:
         return SurfaceVar(ident.value, ident.location)
 
-    # Number literal (treated as constructor)
+    # Number literal
     num = yield match_token("NUMBER").optional()
     if num is not None:
-        return SurfaceConstructor(num.value, [], num.location)
+        return SurfaceIntLit(int(num.value), num.location)
+
+    # String literal
+    string = yield match_token("STRING").optional()
+    if string is not None:
+        return SurfaceStringLit(string.value, string.location)
 
     # Constructor application or nullary constructor
     con = yield match_token("CONSTRUCTOR").optional()
@@ -440,6 +468,123 @@ def app_parser():
         break
 
     return result
+
+
+# =============================================================================
+# Operator Precedence Parser
+# =============================================================================
+
+
+# Operator precedence levels (higher number = tighter binding)
+# Level 7: * /
+# Level 6: + -
+# Level 5: == < > <= >=
+# Level 4: Application (handled separately)
+# Level 3: -> (type arrow, not term operator)
+# Level 2: \ (lambda, not handled here)
+# Level 1: let (not handled here)
+
+OPERATOR_PRECEDENCE: dict[str, int] = {
+    "*": 7,
+    "/": 7,
+    "+": 6,
+    "-": 6,
+    "==": 5,
+    "<": 5,
+    ">": 5,
+    "<=": 5,
+    ">=": 5,
+}
+
+
+def make_op_parser(atom_parser: P, min_precedence: int = 0) -> P:
+    """Create a precedence-climbing parser for infix operators.
+
+    This implements the precedence climbing algorithm for parsing binary
+    operators with different precedence levels.
+
+    Args:
+        atom_parser: Parser for atomic expressions (higher precedence)
+        min_precedence: Minimum precedence level to parse at this level
+
+    Returns:
+        Parser for expressions at this precedence level or higher
+    """
+
+    @generate
+    def op_parser():
+        # Parse the left operand
+        left = yield atom_parser
+
+        while True:
+            # Peek at the next token to see if it's an operator
+            next_tok = yield peek_token
+
+            # Check if it's an operator token
+            op_symbol = None
+            if next_tok.type == "STAR":
+                op_symbol = "*"
+            elif next_tok.type == "SLASH":
+                op_symbol = "/"
+            elif next_tok.type == "PLUS":
+                op_symbol = "+"
+            elif next_tok.type == "MINUS":
+                op_symbol = "-"
+            elif next_tok.type == "EQ":
+                op_symbol = "=="
+            elif next_tok.type == "LT":
+                op_symbol = "<"
+            elif next_tok.type == "GT":
+                op_symbol = ">"
+            elif next_tok.type == "LE":
+                op_symbol = "<="
+            elif next_tok.type == "GE":
+                op_symbol = ">="
+            else:
+                # Not an operator, we're done
+                break
+
+            precedence = OPERATOR_PRECEDENCE[op_symbol]
+
+            # If operator precedence is less than minimum, stop here
+            if precedence < min_precedence:
+                break
+
+            # Consume the operator
+            if op_symbol == "*":
+                yield STAR
+            elif op_symbol == "/":
+                yield SLASH
+            elif op_symbol == "+":
+                yield PLUS
+            elif op_symbol == "-":
+                yield MINUS
+            elif op_symbol == "==":
+                yield EQ
+            elif op_symbol == "<":
+                yield LT
+            elif op_symbol == ">":
+                yield GT
+            elif op_symbol == "<=":
+                yield LE
+            elif op_symbol == ">=":
+                yield GE
+
+            # Parse the right operand with higher precedence
+            # (for left-associative operators)
+            right = yield make_op_parser(atom_parser, precedence + 1)
+
+            # Build the operator node
+            loc = left.location
+            left = SurfaceOp(left, op_symbol, right, loc)
+
+        return left
+
+    return op_parser
+
+
+# Create the operator expression parser using app_parser as the atomic base
+op_expr_parser = make_op_parser(app_parser)
 
 
 @P
@@ -696,13 +841,25 @@ def decl_type_abs_parser():
     return SurfaceTypeAbs(var, body, loc)
 
 
+# Create declaration versions of operator parsers
+# These use decl_app_parser as the base instead of app_parser
+decl_op_expr_parser = make_op_parser(decl_app_parser)
+
 # Define the actual term parsers
-term_parser.become(lambda_parser | let_parser | case_parser | type_abs_parser | app_parser)
+# Use op_expr_parser for expression-level parsing (includes operators)
+term_parser.become(lambda_parser | let_parser | case_parser | type_abs_parser | op_expr_parser)
 decl_term_parser.become(
-    decl_lambda_parser | decl_let_parser | decl_case_parser | decl_type_abs_parser | decl_app_parser
+    decl_lambda_parser
+    | decl_let_parser
+    | decl_case_parser
+    | decl_type_abs_parser
+    | decl_op_expr_parser
 )
 
 # Define simple term parsers for branch bodies (use atom_parser instead of app_parser)
+# Note: We don't use op_expr_parser here because branch bodies need to stop at
+# branch boundaries (BAR, DEDENT). Operators in branches need to be handled
+# by parsing them differently.
 simple_term_parser.become(lambda_parser | let_parser | case_parser | type_abs_parser | atom_parser)
 decl_simple_term_parser.become(
     decl_lambda_parser | decl_let_parser | decl_case_parser | decl_type_abs_parser | atom_parser
@@ -997,6 +1154,10 @@ def declaration_parser():
         result = yield data_declaration_with_docstring_and_pragma_parser(
             preceding_docstring, pragma
         )
+    elif next_tok.type == "PRIM_TYPE":
+        result = yield prim_type_decl_parser
+    elif next_tok.type == "PRIM_OP":
+        result = yield prim_op_decl_parser
     else:
         result = yield term_declaration_with_docstring_and_pragma_parser(
             preceding_docstring, pragma
@@ -1086,6 +1247,24 @@ def term_declaration_with_docstring(preceding_docstring: str | None = None):
     yield EQUALS
     body = yield declaration_body
     return SurfaceTermDeclaration(name, type_ann, body, loc, preceding_docstring)
+
+
+@generate
+def prim_type_decl_parser():
+    """Parse primitive type declaration: prim_type Name."""
+    loc_token = yield PRIM_TYPE
+    name = yield CONSTRUCTOR  # Type names start with uppercase
+    return SurfacePrimTypeDecl(name, loc_token.location)
+
+
+@generate
+def prim_op_decl_parser():
+    """Parse primitive operation declaration: prim_op name : type."""
+    loc_token = yield PRIM_OP
+    name = yield IDENT  # Operation names start with lowercase
+    yield COLON
+    ty = yield type_parser
+    return SurfacePrimOpDecl(name, ty, loc_token.location)
 
 
 # Program parser

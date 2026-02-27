@@ -155,6 +155,52 @@ class Let(Term):
 
 
 @dataclass(frozen=True)
+class IntLit(Term):
+    """Integer literal: 42
+
+    Created directly by the parser from NUMBER tokens.
+    Type checker looks up the Int type from prelude-populated registry.
+    """
+
+    value: int
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+
+@dataclass(frozen=True)
+class StringLit(Term):
+    """String literal: "hello"
+
+    Created directly by the parser from STRING tokens.
+    Type checker looks up the String type from prelude-populated registry.
+    """
+
+    value: str
+
+    def __str__(self) -> str:
+        return f'"{self.value}"'
+
+
+@dataclass(frozen=True)
+class PrimOp(Term):
+    """Primitive operation: $prim.xxx
+
+    Elaborator converts $prim.xxx names to PrimOp.
+    The name is stored without the $prim. prefix.
+    Arguments are handled via App wrapping (consistent with functions).
+
+    Example: $prim.int_plus becomes PrimOp("int_plus")
+    Usage: App(App(PrimOp("int_plus"), IntLit(1)), IntLit(2))
+    """
+
+    name: str
+
+    def __str__(self) -> str:
+        return f"$prim.{self.name}"
+
+
+@dataclass(frozen=True)
 class ToolCall(Term):
     """Tool invocation for FFI operations.
 
@@ -194,4 +240,6 @@ Declaration = DataDeclaration | TermDeclaration
 
 
 # Export the term union for type checking
-TermRepr = Union[Var, Abs, App, TAbs, TApp, Constructor, Case, Let, ToolCall]
+TermRepr = Union[
+    Var, Abs, App, TAbs, TApp, Constructor, Case, Let, ToolCall, IntLit, StringLit, PrimOp
+]
