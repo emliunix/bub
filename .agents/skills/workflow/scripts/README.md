@@ -19,7 +19,7 @@ Creates a new task file with a validated YAML header.
 ```bash
 # Basic usage (kanban and creator-role are required)
 .agents/skills/workflow/scripts/create-task.py \
-    --role Architect \
+    --assignee Architect \
     --expertise "System Design,Python" \
     --title "Design API Layer" \
     --kanban "tasks/0-kanban-project.md" \
@@ -27,7 +27,7 @@ Creates a new task file with a validated YAML header.
 
 # Full usage with all options
 .agents/skills/workflow/scripts/create-task.py \
-    --role Implementor \
+    --assignee Implementor \
     --expertise "Software Engineering,Type Theory" \
     --skills "python-project,testing" \
     --title "Implement Authentication" \
@@ -43,7 +43,7 @@ Creates a new task file with a validated YAML header.
 ```
 
 **Options:**
-- `--role, -r` (required): Agent role (Supervisor, Manager, Architect, Implementor)
+- `--assignee, -a` (required): Task assignee (Architect, Implementor)
 - `--expertise, -e` (required): Comma-separated expertise areas
 - `--title, -t` (required): Task title (used for filename slug)
 - `--kanban, -k` (required): Path to kanban file for global context

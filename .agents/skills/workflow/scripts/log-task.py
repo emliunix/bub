@@ -16,17 +16,23 @@ Usage:
 
     # Agent edits the temp file...
 
-    # Commit log (Phase 2)
-    .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" ./tmp-abc12345-log-content.md
+    # Commit log (Phase 2) - REQUIRES --role and --new-state
+    .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" ./tmp-abc12345-log-content.md --role Architect --new-state review
 
-    # Update state while committing
-    .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Done" ./tmp-abc12345-log-content.md --new-state done
+    # Implementor sets review state
+    .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Ready" ./tmp-abc12345-log-content.md --role Implementor --new-state review
+
+    # Architect approves to done
+    .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Approved" ./tmp-abc12345-log-content.md --role Architect --new-state done
 
 Single-phase mode for quick logs:
-    .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Log" "Fixed the bug"
+    .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Log" "Fixed the bug" --role Architect --new-state done
 
-    # Update state while logging
-    .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Done" "Fixed the bug" --new-state done
+State transition rules:
+- todo → review: Implementation complete (MANDATORY for Implementor)
+- review → done: Review passed (ONLY Architect can set 'done')
+- Any → escalated: Issues found
+- Any → cancelled: Task cancelled
 """
 
 import argparse
@@ -78,8 +84,22 @@ def get_current_state(task_content: str) -> str | None:
     return match.group(1) if match else None
 
 
-def validate_state_transition(current_state: str | None, new_state: str) -> tuple[bool, str]:
-    """Validate state transition follows workflow rules.
+def get_assignee(task_content: str) -> str | None:
+    """Extract the assignee from YAML frontmatter."""
+    if not task_content.startswith("---"):
+        return None
+
+    frontmatter_end = task_content.find("\n---", 3)
+    if frontmatter_end == -1:
+        return None
+
+    frontmatter = task_content[:frontmatter_end]
+    match = re.search(r"^assignee:\s*(\w+)", frontmatter, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def validate_state_transition(current_state: str | None, new_state: str, role: str) -> tuple[bool, str]:
+    """Validate state transition follows workflow rules and role permissions.
 
     Allowed transitions:
     - todo → review: Implementation complete, ready for review (MANDATORY)
@@ -91,6 +111,7 @@ def validate_state_transition(current_state: str | None, new_state: str) -> tupl
 
     Forbidden:
     - todo → done: Direct completion without review
+    - Implementor setting state to 'done': Only Architect can approve
     """
     if current_state is None:
         return True, ""
@@ -98,6 +119,14 @@ def validate_state_transition(current_state: str | None, new_state: str) -> tupl
     # Forbidden: todo → done (direct completion)
     if current_state == "todo" and new_state == "done":
         return False, "Forbidden transition: todo → done. All work MUST be reviewed. Use 'review' state instead."
+
+    # Role-based restrictions: Implementor cannot set 'done'
+    if role == "Implementor" and new_state == "done":
+        return (
+            False,
+            "Role permission denied: Implementor cannot set state to 'done'. "
+            "Only Architect can approve work. Use 'review' or 'escalated' instead.",
+        )
 
     # Allowed transitions
     allowed = {
@@ -183,7 +212,7 @@ def cmd_generate(task_file: Path, title: str) -> None:
     print(temp_path)
 
 
-def cmd_commit(task_file: Path, title: str, temp_file: Path, new_state: str | None = None) -> None:
+def cmd_commit(task_file: Path, title: str, temp_file: Path, role: str, new_state: str) -> None:
     """Commit subcommand: Read temp file and append formatted log to task."""
     if not task_file.exists():
         print(f"Error: Task file not found: {task_file}", file=sys.stderr)
@@ -205,14 +234,13 @@ def cmd_commit(task_file: Path, title: str, temp_file: Path, new_state: str | No
     # Read task file
     task_content = task_file.read_text(encoding="utf-8")
 
-    # Update state if requested
-    if new_state:
-        current_state = get_current_state(task_content)
-        is_valid, error_msg = validate_state_transition(current_state, new_state)
-        if not is_valid:
-            print(f"Error: {error_msg}", file=sys.stderr)
-            sys.exit(1)
-        task_content = update_task_state(task_content, new_state)
+    # Validate and update state (required)
+    current_state = get_current_state(task_content)
+    is_valid, error_msg = validate_state_transition(current_state, new_state, role)
+    if not is_valid:
+        print(f"Error: {error_msg}", file=sys.stderr)
+        sys.exit(1)
+    task_content = update_task_state(task_content, new_state)
 
     # Check if Work Log section exists
     if "## Work Log" not in task_content:
@@ -227,13 +255,10 @@ def cmd_commit(task_file: Path, title: str, temp_file: Path, new_state: str | No
     # Clean up temp file
     temp_file.unlink()
 
-    if new_state:
-        print(f"Work log committed to: {task_file} (state: {new_state})")
-    else:
-        print(f"Work log committed to: {task_file}")
+    print(f"Work log committed to: {task_file} (state: {new_state})")
 
 
-def cmd_quick(task_file: Path, title: str, content: str, new_state: str | None = None) -> None:
+def cmd_quick(task_file: Path, title: str, content: str, role: str, new_state: str) -> None:
     """Quick subcommand: Directly log content without temp file."""
     if not task_file.exists():
         print(f"Error: Task file not found: {task_file}", file=sys.stderr)
@@ -247,9 +272,13 @@ def cmd_quick(task_file: Path, title: str, content: str, new_state: str | None =
 
     task_content = task_file.read_text(encoding="utf-8")
 
-    # Update state if requested
-    if new_state:
-        task_content = update_task_state(task_content, new_state)
+    # Validate and update state (required)
+    current_state = get_current_state(task_content)
+    is_valid, error_msg = validate_state_transition(current_state, new_state, role)
+    if not is_valid:
+        print(f"Error: {error_msg}", file=sys.stderr)
+        sys.exit(1)
+    task_content = update_task_state(task_content, new_state)
 
     if "## Work Log" not in task_content:
         task_content += "\n\n## Work Log\n\n"
@@ -257,10 +286,7 @@ def cmd_quick(task_file: Path, title: str, content: str, new_state: str | None =
     task_content = task_content.rstrip() + "\n\n" + log_entry
     task_file.write_text(task_content, encoding="utf-8")
 
-    if new_state:
-        print(f"Work log committed to: {task_file} (state: {new_state})")
-    else:
-        print(f"Work log committed to: {task_file}")
+    print(f"Work log committed to: {task_file} (state: {new_state})")
 
 
 def main():
@@ -278,25 +304,27 @@ SUBCOMMANDS:
     Example:
       .agents/skills/workflow/scripts/log-task.py generate ./tasks/0-explore.md "Analysis"
 
-  commit TASK TITLE TEMP_FILE [--new-state STATE]
+  commit TASK TITLE TEMP_FILE --role ROLE --new-state STATE
     Reads the temp file, formats with timestamp, appends to task, deletes temp.
     This is Phase 2 - call after editing the temp file.
-    Optionally updates task state (todo, review, done, escalated, cancelled).
+    REQUIRES: --role (who is logging) and --new-state (state transition).
     NOTE: Direct todo→done is forbidden. Must go through review state.
+    NOTE: Implementor cannot set 'done' - only Architect can approve.
 
     Example:
-      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Analysis" ./tmp-abc12345-log-content.md
-      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Ready for Review" ./tmp-abc12345-log-content.md --new-state review
-      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Review Passed" ./tmp-abc12345-log-content.md --new-state done
+      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Analysis" ./tmp-abc12345-log-content.md --role Architect --new-state review
+      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Ready for Review" ./tmp-abc12345-log-content.md --role Implementor --new-state review
+      .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-impl.md "Review Passed" ./tmp-abc12345-log-content.md --role Architect --new-state done
 
-  quick TASK TITLE CONTENT [--new-state STATE]
+  quick TASK TITLE CONTENT --role ROLE --new-state STATE
     For simple logs, bypass temp file and commit directly.
-    Optionally updates task state (todo, review, done, escalated, cancelled).
+    REQUIRES: --role (who is logging) and --new-state (state transition).
     NOTE: Direct todo→done is forbidden. Must go through review state.
+    NOTE: Implementor cannot set 'done' - only Architect can approve.
 
     Example:
-      .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Fix" "Fixed the auth bug"
-      .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-impl.md "Ready" "Implementation complete" --new-state review
+      .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Fix" "Fixed the auth bug" --role Architect --new-state done
+      .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-impl.md "Ready" "Implementation complete" --role Implementor --new-state review
 
 WORK LOG FORMAT:
   Each log entry includes:
@@ -328,9 +356,17 @@ WORK LOG FORMAT:
     commit_parser.add_argument("title", help="Title for this work log entry")
     commit_parser.add_argument("temp_file", help="Path to temp file from generate command")
     commit_parser.add_argument(
+        "--role",
+        "-r",
+        required=True,
+        choices=["Architect", "Implementor", "Manager", "Supervisor", "user"],
+        help="Role of the agent logging work. Used for permission checks.",
+    )
+    commit_parser.add_argument(
         "--new-state",
+        required=True,
         choices=["todo", "review", "done", "escalated", "cancelled"],
-        help="Update task state (todo → review → done). Direct todo→done is forbidden.",
+        help="Update task state (todo → review → done). Direct todo→done is forbidden. Implementor cannot set 'done'.",
     )
 
     # quick subcommand
@@ -343,9 +379,17 @@ WORK LOG FORMAT:
     quick_parser.add_argument("title", help="Title for this work log entry")
     quick_parser.add_argument("content", help="Content for Facts section")
     quick_parser.add_argument(
+        "--role",
+        "-r",
+        required=True,
+        choices=["Architect", "Implementor", "Manager", "Supervisor", "user"],
+        help="Role of the agent logging work. Used for permission checks.",
+    )
+    quick_parser.add_argument(
         "--new-state",
+        required=True,
         choices=["todo", "review", "done", "escalated", "cancelled"],
-        help="Update task state (todo → review → done). Direct todo→done is forbidden.",
+        help="Update task state (todo → review → done). Direct todo→done is forbidden. Implementor cannot set 'done'.",
     )
 
     args = parser.parse_args()
@@ -353,9 +397,9 @@ WORK LOG FORMAT:
     if args.command == "generate":
         cmd_generate(Path(args.task), args.title)
     elif args.command == "commit":
-        cmd_commit(Path(args.task), args.title, Path(args.temp_file), args.new_state)
+        cmd_commit(Path(args.task), args.title, Path(args.temp_file), args.role, args.new_state)
     elif args.command == "quick":
-        cmd_quick(Path(args.task), args.title, args.content, args.new_state)
+        cmd_quick(Path(args.task), args.title, args.content, args.role, args.new_state)
     else:
         parser.print_help()
         sys.exit(1)

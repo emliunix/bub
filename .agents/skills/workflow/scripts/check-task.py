@@ -1,6 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = ["pyyaml"]
+# requires-python = ">=3.12"
 # ///
 """
 check-task.py - Generate agent briefing from task file metadata.
@@ -118,7 +119,7 @@ def get_instructions(role: str, task_type: str) -> list:
 
 def render_briefing(metadata: dict, task_path: str) -> str:
     """Render agent briefing from task metadata."""
-    role = metadata.get("role", "Unknown")
+    role = metadata.get("assignee", "Unknown")
     expertise = metadata.get("expertise", [])
     skills = metadata.get("skills", [])
     task_type = metadata.get("type", "unknown")

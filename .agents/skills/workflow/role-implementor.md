@@ -56,26 +56,26 @@ def execute(task_file):
         if discovered:
             work_facts.append("Discovered issues for future tasks")
         
-        # Log work using script
+        # Log work using script - MUST set state to 'review' (Implementor cannot set 'done')
         execute_script(f"{skill_path}/scripts/log-task.py", {
             "command": "quick",
             "task": task_file,
             "title": "Implementation Complete",
-            "facts": work_facts,
-            "analysis": work_analysis,
-            "conclusion": "ok"
+            "content": "; ".join(work_facts),
+            "role": "Implementor",
+            "new_state": "review"
         })
         return "ok"
-        
+
     except Exception as e:
-        # Log escalation
+        # Log escalation - MUST set state to 'escalated'
         execute_script(f"{skill_path}/scripts/log-task.py", {
-            "command": "quick", 
+            "command": "quick",
             "task": task_file,
             "title": "Blocked",
-            "facts": ["Implementation blocked"],
-            "analysis": ["Cannot proceed with current spec"],
-            "conclusion": "escalate"
+            "content": "Implementation blocked: " + str(e),
+            "role": "Implementor",
+            "new_state": "escalated"
         })
         return "blocked"
 ```
@@ -176,4 +176,6 @@ work_items:
 - [ ] No TODOs remaining
 - [ ] No workarounds without escalation
 - [ ] Expertise requirements met (or escalated)
-- [ ] **Work log written** (REQUIRED - Facts, Analysis, Conclusion)
+- [ ] **Work log written with `--role Implementor --new-state review`** (REQUIRED)
+  - Implementor MUST set state to `review` (cannot set `done`)
+  - This triggers Architect review workflow
