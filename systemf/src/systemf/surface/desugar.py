@@ -5,12 +5,13 @@ Converts syntactic sugar to simpler core constructs.
 
 from __future__ import annotations
 
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceAbs,
     SurfaceApp,
     SurfaceBranch,
     SurfaceCase,
     SurfaceConstructor,
+    SurfaceIf,
     SurfaceLet,
     SurfaceOp,
     SurfacePattern,
@@ -121,9 +122,16 @@ class Desugarer:
         To:
             case c of { True -> t | False -> f }
         """
-        # Note: This assumes a surface syntax for if-then-else
-        # For now, this is a placeholder since we don't have If construct
-        # When If is added to surface AST, implement the transformation here
+        match term:
+            case SurfaceIf(cond, then_branch, else_branch, loc):
+                return SurfaceCase(
+                    cond,
+                    [
+                        SurfaceBranch(SurfacePattern("True", [], loc), then_branch, loc),
+                        SurfaceBranch(SurfacePattern("False", [], loc), else_branch, loc),
+                    ],
+                    loc,
+                )
         return term
 
     def _desugar_multi_arg_lambda(self, term: SurfaceTerm) -> SurfaceTerm:

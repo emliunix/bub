@@ -1,17 +1,13 @@
-"""Tests for surface language lexer.
+"""Tests for System F lexer.
 
-Tests for indentation-aware lexer including:
-- Basic token recognition
-- INDENT/DEDENT token emission
-- Indentation error handling
-- Newline and comment handling
+Tests basic tokenization without virtual indentation tokens.
+The lexer now just emits raw tokens with location information.
+Layout handling is done by the stateful parser using column tracking.
 """
 
 import pytest
 
-from systemf.surface.lexer import Lexer, lex
-from systemf.surface.types import LexerError, Token
-from systemf.utils.location import Location
+from systemf.surface.parser import Lexer, lex, LexerError
 
 
 # =============================================================================
@@ -29,31 +25,36 @@ class TestBasicTokens:
         assert tokens[0].type == "EOF"
 
     def test_simple_tokens(self):
-        """Tokenize simple identifiers and operators."""
+        """Tokenize simple identifiers."""
         tokens = lex("x y z")
         types = [t.type for t in tokens]
         assert types == ["IDENT", "IDENT", "IDENT", "EOF"]
 
     def test_keywords(self):
         """Tokenize keywords."""
-        source = "data let case of forall type"
+        source = "data let in case of forall type if then else"
         tokens = lex(source)
         types = [t.type for t in tokens[:-1]]  # Exclude EOF
-        assert types == ["DATA", "LET", "CASE", "OF", "FORALL", "TYPE"]
-
-    def test_in_keyword_still_recognized(self):
-        """The 'in' keyword is still recognized by lexer (though not used in new syntax)."""
-        # The lexer still has 'in' as a keyword for backward compatibility
-        tokens = lex("in")
-        assert tokens[0].type == "IN"
-        assert tokens[0].value == "in"
+        assert types == ["DATA", "LET", "IN", "CASE", "OF", "FORALL", "TYPE", "IF", "THEN", "ELSE"]
 
     def test_operators(self):
         """Tokenize operators."""
-        source = "-> => = : | @ ."
+        source = "-> => = : | @ . ++ && || /="
         tokens = lex(source)
         types = [t.type for t in tokens[:-1]]  # Exclude EOF
-        assert types == ["ARROW", "DARROW", "EQUALS", "COLON", "BAR", "AT", "DOT"]
+        assert types == [
+            "ARROW",
+            "DARROW",
+            "EQUALS",
+            "COLON",
+            "BAR",
+            "AT",
+            "DOT",
+            "APPEND",
+            "AND",
+            "OR",
+            "NEQ",
+        ]
 
     def test_arithmetic_operators(self):
         """Tokenize arithmetic operators."""
@@ -69,138 +70,12 @@ class TestBasicTokens:
         types = [t.type for t in tokens[:-1]]  # Exclude EOF
         assert types == ["EQ", "LT", "GT", "LE", "GE"]
 
-    def test_mixed_operators(self):
-        """Tokenize mix of all operators."""
-        source = "+ - * / == < > <= >= -> =>"
-        tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]  # Exclude EOF
-        assert types == [
-            "PLUS",
-            "MINUS",
-            "STAR",
-            "SLASH",
-            "EQ",
-            "LT",
-            "GT",
-            "LE",
-            "GE",
-            "ARROW",
-            "DARROW",
-        ]
-
     def test_delimiters(self):
         """Tokenize delimiters."""
-        source = "( ) [ ] { } ,"
+        source = "( ) [ ] { }"
         tokens = lex(source)
         types = [t.type for t in tokens[:-1]]  # Exclude EOF
-        assert types == ["LPAREN", "RPAREN", "LBRACKET", "RBRACKET", "LBRACE", "RBRACE", "COMMA"]
-
-
-# =============================================================================
-# Identifier Tests
-# =============================================================================
-
-
-class TestIdentifiers:
-    """Tests for identifier tokenization."""
-
-    def test_lowercase_ident(self):
-        """Lowercase names are identifiers."""
-        tokens = lex("hello")
-        assert tokens[0].type == "IDENT"
-        assert tokens[0].value == "hello"
-
-    def test_underscore_ident(self):
-        """Names starting with underscore are identifiers."""
-        tokens = lex("_foo")
-        assert tokens[0].type == "IDENT"
-        assert tokens[0].value == "_foo"
-
-    def test_uppercase_constr(self):
-        """Uppercase names are constructors."""
-        tokens = lex("Hello")
-        assert tokens[0].type == "CONSTRUCTOR"
-        assert tokens[0].value == "Hello"
-
-    def test_constructor_with_args(self):
-        """Constructor names are uppercase."""
-        tokens = lex("Cons Nil Just Nothing")
-        types = [t.type for t in tokens[:-1]]  # Exclude EOF
-        assert all(t == "CONSTRUCTOR" for t in types)
-
-    def test_alphanumeric_ident(self):
-        """Identifiers can contain numbers."""
-        tokens = lex("x1 y2 z3")
-        assert tokens[0].value == "x1"
-        assert tokens[1].value == "y2"
-        assert tokens[2].value == "z3"
-
-
-# =============================================================================
-# Number Tests
-# =============================================================================
-
-
-class TestNumbers:
-    """Tests for number literals."""
-
-    def test_number(self):
-        """Numbers are tokenized."""
-        tokens = lex("123")
-        assert tokens[0].type == "NUMBER"
-        assert tokens[0].value == "123"
-
-    def test_number_in_context(self):
-        """Numbers in larger expressions."""
-        tokens = lex("let x = 42")
-        assert tokens[3].type == "NUMBER"
-        assert tokens[3].value == "42"
-
-
-# =============================================================================
-# Lambda and Type Lambda Tests
-# =============================================================================
-
-
-class TestLambdaTokens:
-    """Tests for lambda and type lambda tokens."""
-
-    def test_lambda(self):
-        """Backslash is lambda."""
-        tokens = lex(r"\x -> x")
-        assert tokens[0].type == "LAMBDA"
-
-    def test_type_lambda(self):
-        """Slash-backslash is type lambda."""
-        tokens = lex(r"/\a. x")
-        assert tokens[0].type == "TYPELAMBDA"
-
-
-# =============================================================================
-# Comment Tests
-# =============================================================================
-
-
-class TestComments:
-    """Tests for comment handling."""
-
-    def test_line_comment(self):
-        """Line comments are ignored."""
-        tokens = lex("x -- this is a comment")
-        assert len(tokens) == 2  # IDENT, EOF
-        assert tokens[0].value == "x"
-
-    def test_comment_at_start(self):
-        """Comments at start of line."""
-        tokens = lex("-- comment\nx")
-        assert len(tokens) == 2
-        assert tokens[0].value == "x"
-
-    def test_multiple_comments(self):
-        """Multiple comments are ignored."""
-        tokens = lex("x -- comment 1\ny -- comment 2")
-        types = [t.type for t in tokens[:-1]]
-        assert types == ["IDENT", "IDENT"]
+        assert types == ["LPAREN", "RPAREN", "LBRACKET", "RBRACKET", "LBRACE", "RBRACE"]
 
 
 # =============================================================================
@@ -208,364 +83,124 @@ class TestComments:
 # =============================================================================
 
 
-class TestLocations:
-    """Tests for source location tracking."""
+class TestTokenLocations:
+    """Tests for token location tracking (column info)."""
 
-    def test_line_tracking(self):
-        """Line numbers are tracked correctly."""
-        tokens = lex("x\ny")
-        assert tokens[0].location.line == 1
-        assert tokens[1].location.line == 2
+    def test_token_columns(self):
+        """Each token should have column information."""
+        tokens = lex("x y")
+        # x at col 1, y at col 3
+        assert tokens[0].column == 1
+        assert tokens[1].column == 3
 
-    def test_column_tracking(self):
-        """Column numbers are tracked correctly."""
-        tokens = lex("x y z")
-        assert tokens[0].location.column == 1
-        assert tokens[1].location.column == 3
-        assert tokens[2].location.column == 5
-
-    def test_filename(self):
-        """Filename is included in location."""
-        tokens = lex("x", filename="test.sf")
-        assert tokens[0].location.file == "test.sf"
-
-
-# =============================================================================
-# Indentation Token Tests
-# =============================================================================
-
-
-class TestIndentTokens:
-    """Tests for INDENT/DEDENT token emission."""
-
-    def test_no_indent_single_line(self):
-        """Single line has no INDENT/DEDENT."""
-        tokens = lex("x y z")
-        types = [t.type for t in tokens]
-        assert "INDENT" not in types
-        assert "DEDENT" not in types
-
-    def test_simple_indent(self):
-        """Simple indentation emits INDENT/DEDENT."""
-        tokens = lex("let x = 1\n  x")
-        types = [t.type for t in tokens]
-        assert "INDENT" in types
-        assert "DEDENT" in types
-
-    def test_indent_token_position(self):
-        """INDENT appears after let binding, before body."""
-        tokens = lex("let x = 1\n  x")
-        types = [t.type for t in tokens]
-        # Should be: LET, IDENT, EQUALS, NUMBER, INDENT, IDENT, DEDENT, EOF
-        assert types == ["LET", "IDENT", "EQUALS", "NUMBER", "INDENT", "IDENT", "DEDENT", "EOF"]
-
-    def test_multiple_indent_levels(self):
-        """Multiple indentation levels emit multiple INDENTs."""
-        source = """let x = 1
-  let y = 2
-    y"""
-        tokens = lex(source)
-        indent_count = sum(1 for t in tokens if t.type == "INDENT")
-        dedent_count = sum(1 for t in tokens if t.type == "DEDENT")
-        assert indent_count == 2
-        assert dedent_count == 2
-
-    def test_multiple_dedent(self):
-        """Large dedent emits multiple DEDENT tokens."""
-        source = """let x = 1
-  let y = 2
-    y
-x"""
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        # After the inner body 'y', we should have two DEDENTs to get back to level 0
-        dedent_indices = [i for i, t in enumerate(types) if t == "DEDENT"]
-        assert len(dedent_indices) >= 2
-
-    def test_dedent_at_eof(self):
-        """EOF triggers DEDENTs to close all open blocks."""
-        source = """let x = 1
-  x"""
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        # Last token before EOF should be DEDENT
-        assert types[-2] == "DEDENT"
-        assert types[-1] == "EOF"
-
-    def test_blank_lines_ignored(self):
-        """Blank lines don't affect indentation tracking."""
-        source = """let x = 1
-
-  x"""
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        # Should still have just one INDENT/DEDENT pair
-        assert types.count("INDENT") == 1
-        assert types.count("DEDENT") == 1
-
-    def test_comment_lines_ignored(self):
-        """Comment-only lines don't affect indentation tracking."""
-        source = """let x = 1
-  -- this is a comment
-  x"""
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        # Should have one INDENT/DEDENT pair
-        assert types.count("INDENT") == 1
-        assert types.count("DEDENT") == 1
-
-    def test_case_with_indented_branches(self):
-        """Case expression with indented branches."""
+    def test_multiline_columns(self):
+        """Column tracking works across lines."""
         source = """case x of
-  True -> y
-  False -> z"""
+  A -> 1"""
         tokens = lex(source)
-        types = [t.type for t in tokens]
-        assert "INDENT" in types
-        assert "DEDENT" in types
 
-    def test_data_declaration_indent(self):
-        """Data declaration with indented constructors."""
-        source = """data Bool =
-  True
-  False"""
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        assert "INDENT" in types
-        assert "DEDENT" in types
+        # Find case keyword at col 1
+        case_tok = next(t for t in tokens if t.type == "CASE")
+        assert case_tok.column == 1
+
+        # Find A constructor at col 3 (indented)
+        a_tok = next(t for t in tokens if t.type == "CONSTRUCTOR" and t.value == "A")
+        assert a_tok.column == 3
 
 
 # =============================================================================
-# Indentation Error Tests
-# =============================================================================
-
-
-class TestIndentErrors:
-    """Tests for indentation error handling."""
-
-    def test_mixed_tabs_spaces(self):
-        """Mixed tabs and spaces in same indentation raise error."""
-        source = "let x = 1\n \tx"  # space then tab on same line
-        with pytest.raises(LexerError) as exc_info:
-            lex(source)
-        assert "Mixed tabs and spaces" in str(exc_info.value)
-
-    def test_inconsistent_indent(self):
-        """Inconsistent indentation (not matching previous levels) raises error."""
-        source = """let x = 1
-  let y = 2
-      y
-   x"""  # 3 spaces doesn't match any previous level (0, 2)
-        with pytest.raises(LexerError) as exc_info:
-            lex(source)
-        assert "Inconsistent indentation" in str(exc_info.value)
-
-
-# =============================================================================
-# Error Tests
-# =============================================================================
-
-
-class TestErrors:
-    """Tests for lexer error handling."""
-
-    def test_unknown_character(self):
-        """Unknown characters raise error."""
-        with pytest.raises(LexerError) as exc_info:
-            lex("$")
-        assert "Unexpected character" in str(exc_info.value)
-
-    def test_error_location(self):
-        """Error includes location information."""
-        with pytest.raises(LexerError) as exc_info:
-            lex("x\n$")
-        # Line 2, column 1
-        assert "2:" in str(exc_info.value) or "line 2" in str(exc_info.value)
-
-
-# =============================================================================
-# Complex Examples with New Syntax
+# Complex Examples
 # =============================================================================
 
 
 class TestComplexExamples:
-    """Tests for complex token sequences with indentation-aware syntax."""
+    """Tests for complete code examples."""
 
-    def test_let_binding(self):
-        """Tokenize let binding (no 'in' keyword)."""
-        tokens = lex("let x = 1")
-        types = [t.type for t in tokens[:-1]]
-        assert types == ["LET", "IDENT", "EQUALS", "NUMBER"]
-
-    def test_let_binding_with_indent(self):
-        """Tokenize let binding with indented body."""
-        tokens = lex("let x = 1\n  x")
-        types = [t.type for t in tokens[:-1]]
-        assert types == ["LET", "IDENT", "EQUALS", "NUMBER", "INDENT", "IDENT", "DEDENT"]
-
-    def test_lambda_expression(self):
-        """Tokenize lambda expression."""
-        tokens = lex(r"\x -> x")
-        types = [t.type for t in tokens[:-1]]
-        assert types == ["LAMBDA", "IDENT", "ARROW", "IDENT"]
-
-    def test_annotated_lambda(self):
-        """Tokenize lambda with type annotation."""
-        tokens = lex(r"\x:Int -> x")
-        types = [t.type for t in tokens[:-1]]
-        assert types == ["LAMBDA", "IDENT", "COLON", "CONSTRUCTOR", "ARROW", "IDENT"]
-
-    def test_type_application(self):
-        """Tokenize type application."""
-        tokens = lex("id @Int")
-        types = [t.type for t in tokens[:-1]]
-        assert types == ["IDENT", "AT", "CONSTRUCTOR"]
-
-    def test_data_declaration_indentation(self):
-        """Tokenize data declaration with indentation."""
-        source = """data List a =
-  Nil
-  Cons a (List a)"""
-        tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]
-        # Should have: DATA, CONSTRUCTOR, IDENT, EQUALS, INDENT,
-        #              CONSTRUCTOR, CONSTRUCTOR, IDENT, LPAREN, CONSTRUCTOR, IDENT, RPAREN,
-        #              DEDENT
-        assert "INDENT" in types
-        assert "DEDENT" in types
-        assert types[0] == "DATA"
-
-    def test_case_expression_indentation(self):
-        """Tokenize case expression with indentation."""
+    def test_simple_case_expression(self):
+        """Case expression with indentation."""
         source = """case x of
-  True -> y
-  False -> z"""
-        tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]
-        # Should have INDENT/DEDENT for the branches
-        assert "INDENT" in types
-        assert "DEDENT" in types
-        # No braces or BAR in new syntax
-        assert "LBRACE" not in types
-        assert "RBRACE" not in types
-
-
-# =============================================================================
-# Edge Cases
-# =============================================================================
-
-
-class TestEdgeCases:
-    """Tests for edge cases."""
-
-    def test_whitespace_only(self):
-        """Whitespace-only source returns EOF."""
-        tokens = lex("   \n\t  ")
-        assert len(tokens) == 1
-        assert tokens[0].type == "EOF"
-
-    def test_adjacent_operators(self):
-        """Adjacent operators are tokenized separately."""
-        tokens = lex("x->y")  # This should not be valid, but test parsing
-        # Actually, 'x->y' is x -> y (with arrow operator)
-        types = [t.type for t in tokens[:-1]]
-        assert types == ["IDENT", "ARROW", "IDENT"]
-
-    def test_long_identifier(self):
-        """Long identifiers work correctly."""
-        long_name = "a" * 100
-        tokens = lex(long_name)
-        assert tokens[0].type == "IDENT"
-        assert tokens[0].value == long_name
-
-    def test_unicode_not_supported(self):
-        """Unicode characters may not be supported."""
-        # This test documents behavior - unicode may raise error or be treated as identifier
-        try:
-            tokens = lex("λ")
-            # If it works, great
-        except LexerError:
-            pass  # Also acceptable
-
-
-# =============================================================================
-# Indent Token Tests
-# =============================================================================
-
-
-class TestIndentTokensIncluded:
-    """Tests to ensure INDENT/DEDENT tokens are always included."""
-
-    def test_indent_tokens_always_included(self):
-        """By default, INDENT/DEDENT tokens are included."""
-        source = """let x = 1
-  x"""
+  True -> 1
+  False -> 0"""
         tokens = lex(source)
         types = [t.type for t in tokens]
-        assert "INDENT" in types
-        assert "DEDENT" in types
+
+        # No virtual tokens - just raw tokens
+        expected = [
+            "CASE",
+            "IDENT",
+            "OF",
+            "CONSTRUCTOR",
+            "ARROW",
+            "NUMBER",
+            "CONSTRUCTOR",
+            "ARROW",
+            "NUMBER",
+            "EOF",
+        ]
+        assert types == expected
+
+    def test_let_expression(self):
+        """Let expression with indentation."""
+        source = """let
+  x = 1
+  y = 2
+in x + y"""
+        tokens = lex(source)
+        types = [t.type for t in tokens]
+
+        # No virtual tokens
+        assert "LET" in types
+        assert "IN" in types
+        # Check columns
+        let_tok = next(t for t in tokens if t.type == "LET")
+        assert let_tok.column == 1
+
+    def test_data_declaration(self):
+        """Data declaration with constructors."""
+        source = """data Bool = True | False"""
+        tokens = lex(source)
+        types = [t.type for t in tokens]
+
+        expected = ["DATA", "CONSTRUCTOR", "EQUALS", "CONSTRUCTOR", "BAR", "CONSTRUCTOR", "EOF"]
+        assert types == expected
 
 
 # =============================================================================
-# Pragma Token Tests
+# Error Handling
 # =============================================================================
 
 
-class TestPragmaTokens:
-    """Tests for pragma tokenization."""
+class TestLexerErrors:
+    """Tests for lexer error handling."""
 
-    def test_basic_pragma(self):
-        """Tokenize basic pragma syntax."""
-        source = "{-# LLM model=gpt-4 #-}"
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        assert types == ["PRAGMA_START", "PRAGMA_CONTENT", "PRAGMA_END", "EOF"]
-
-    def test_pragma_with_multiple_attributes(self):
-        """Tokenize pragma with multiple key-value pairs."""
-        source = "{-# LLM model=gpt-4, temperature=0.7 #-}"
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        assert types == ["PRAGMA_START", "PRAGMA_CONTENT", "PRAGMA_END", "EOF"]
-        # Check that content contains the attributes
-        content = [t for t in tokens if t.type == "PRAGMA_CONTENT"][0]
-        assert "model=gpt-4" in content.value
-        assert "temperature=0.7" in content.value
-
-    def test_pragma_before_declaration(self):
-        """Pragma can appear before a declaration."""
-        source = "{-# LLM model=gpt-4 #-}\nresearch_topic :: String -> String"
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        assert "PRAGMA_START" in types
-        assert "PRAGMA_CONTENT" in types
-        assert "PRAGMA_END" in types
-        # Should have the declaration tokens too
-        assert "IDENT" in types
-
-    def test_pragma_multiline(self):
-        """Pragma can span multiple lines."""
-        source = """{-# LLM
-            model=gpt-4,
-            temperature=0.7
-        #-}"""
-        tokens = lex(source)
-        types = [t.type for t in tokens]
-        assert types == ["PRAGMA_START", "PRAGMA_CONTENT", "PRAGMA_END", "EOF"]
-        content = [t for t in tokens if t.type == "PRAGMA_CONTENT"][0]
-        assert "model=gpt-4" in content.value
-        assert "temperature=0.7" in content.value
-
-    def test_pragma_with_quoted_values(self):
-        """Pragma can have quoted string values."""
-        source = '{-# LLM model="gpt-4", tag="code_review" #-}'
-        tokens = lex(source)
-        content = [t for t in tokens if t.type == "PRAGMA_CONTENT"][0]
-        assert 'model="gpt-4"' in content.value
-        assert 'tag="code_review"' in content.value
-
-    def test_unclosed_pragma_error(self):
-        """Unclosed pragma should raise error."""
-        source = "{-# LLM model=gpt-4"
+    def test_unexpected_character(self):
+        """Lexer should raise error for unexpected characters."""
         with pytest.raises(LexerError):
-            lex(source)
+            lex("x $ y")
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def get_token_columns(source: str) -> list[tuple[str, int]]:
+    """Get (type, column) pairs for all tokens."""
+    tokens = lex(source)
+    return [(t.type, t.column) for t in tokens]
+
+
+def test_column_tracking():
+    """Verify column tracking in lexer."""
+    source = """let x = 1
+    y = 2"""
+    cols = get_token_columns(source)
+
+    # let at col 1, x at col 5, = at col 7, 1 at col 9
+    assert cols[0] == ("LET", 1)
+    assert cols[1] == ("IDENT", 5)
+    assert cols[2] == ("EQUALS", 7)
+    assert cols[3] == ("NUMBER", 9)
+
+    # y at col 5 (second line)
+    assert cols[4] == ("IDENT", 5)

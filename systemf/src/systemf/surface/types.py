@@ -1,443 +1,492 @@
-"""Type definitions for surface language lexer.
+"""Surface language AST for System F.
 
-Provides typed token classes for the indentation-aware lexer.
+Surface syntax uses name-based binding (not de Bruijn indices) and allows
+omitting type annotations where they can be inferred.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Optional, Union
 
 from systemf.utils.location import Location
 
 
-class Token(Protocol):
-    """Protocol for all tokens.
+# =============================================================================
+# Surface Types
+# =============================================================================
 
-    All token types implement this protocol with type and value properties
-    for pattern matching compatibility.
-    """
 
-    @property
-    def type(self) -> str:
-        """Get the token type identifier."""
-        ...
+class SurfaceType:
+    """Base class for surface types."""
 
-    @property
-    def value(self) -> str:
-        """Get the token value as a string."""
-        ...
-
-    @property
-    def location(self) -> Location:
-        """Get the source location of this token."""
-        ...
+    pass
 
 
 @dataclass(frozen=True)
-class IdentifierToken:
-    """Identifier token (lowercase or underscore start)."""
+class SurfaceTypeVar(SurfaceType):
+    """Type variable: a."""
 
     name: str
     location: Location
 
-    @property
-    def value(self) -> str:
-        return self.name
-
-    @property
-    def type(self) -> str:
-        return "IDENT"
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"IdentifierToken({self.value!r}, {self.location})"
+        return self.name
 
 
 @dataclass(frozen=True)
-class ConstructorToken:
-    """Constructor token (uppercase start)."""
+class SurfaceTypeArrow(SurfaceType):
+    """Function type: arg -> ret with optional parameter docstring.
+
+    Example:
+        String -- ^ Input text -> String
+
+    Representation:
+        SurfaceTypeArrow(
+            arg=SurfaceTypeConstructor("String"),
+            ret=SurfaceTypeConstructor("String"),
+            param_doc="Input text",
+            location=loc
+        )
+    """
+
+    arg: SurfaceType
+    ret: SurfaceType
+    param_doc: Optional[str] = None  # Populated when parser sees -- ^ after type
+    location: Location = None  # type: ignore[assignment]  # noqa: RUF009
+
+    def __str__(self) -> str:
+        match self.arg:
+            case SurfaceTypeArrow():
+                arg_str = f"({self.arg})"
+            case _:
+                arg_str = str(self.arg)
+        doc_suffix = f" -- ^ {self.param_doc}" if self.param_doc else ""
+        return f"{arg_str}{doc_suffix} -> {self.ret}"
+
+
+@dataclass(frozen=True)
+class SurfaceTypeForall(SurfaceType):
+    """Polymorphic type: forall a. body."""
+
+    var: str
+    body: SurfaceType
+    location: Location
+
+    def __str__(self) -> str:
+        return f"forall {self.var}. {self.body}"
+
+
+@dataclass(frozen=True)
+class SurfaceTypeConstructor(SurfaceType):
+    """Data type constructor: T t1 ... tn."""
+
+    name: str
+    args: list[SurfaceType]
+    location: Location
+
+    def __str__(self) -> str:
+        if not self.args:
+            return self.name
+        args_strs = []
+        for arg in self.args:
+            match arg:
+                case SurfaceTypeArrow() | SurfaceTypeForall():
+                    args_strs.append(f"({arg})")
+                case _:
+                    args_strs.append(str(arg))
+        args_str = " ".join(args_strs)
+        return f"{self.name} {args_str}"
+
+
+SurfaceTypeRepr = Union[SurfaceTypeVar, SurfaceTypeArrow, SurfaceTypeForall, SurfaceTypeConstructor]
+
+
+# =============================================================================
+# Surface Terms
+# =============================================================================
+
+
+class SurfaceTerm:
+    """Base class for surface terms."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class SurfaceVar(SurfaceTerm):
+    """Variable reference by name: x."""
 
     name: str
     location: Location
 
-    @property
-    def value(self) -> str:
+    def __str__(self) -> str:
         return self.name
 
-    @property
-    def type(self) -> str:
-        return "CONSTRUCTOR"
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"ConstructorToken({self.value!r}, {self.location})"
-
 
 @dataclass(frozen=True)
-class NumberToken:
-    """Numeric literal token."""
+class SurfaceAbs(SurfaceTerm):
+    """Lambda abstraction: \\x -> body or \\x:T -> body.
 
-    number: str
-    location: Location
-
-    @property
-    def value(self) -> str:
-        return self.number
-
-    @property
-    def type(self) -> str:
-        return "NUMBER"
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"NumberToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class StringToken:
-    """String literal token."""
-
-    string: str
-    location: Location
-
-    @property
-    def value(self) -> str:
-        return self.string
-
-    @property
-    def type(self) -> str:
-        return "STRING"
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"StringToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class KeywordToken:
-    """Keyword token (data, let, in, case, of, forall, type)."""
-
-    keyword: str
-    location: Location
-
-    @property
-    def value(self) -> str:
-        return self.keyword
-
-    @property
-    def type(self) -> str:
-        return self.keyword.upper()
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"KeywordToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class OperatorToken:
-    """Operator token."""
-
-    operator: str
-    location: Location
-    op_type: str  # The token type name (ARROW, EQUALS, etc.)
-
-    @property
-    def value(self) -> str:
-        return self.operator
-
-    @property
-    def type(self) -> str:
-        return self.op_type
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"OperatorToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class DelimiterToken:
-    """Delimiter token (parentheses, brackets, braces, comma)."""
-
-    delimiter: str
-    location: Location
-    delim_type: str  # The token type name (LPAREN, RPAREN, etc.)
-
-    @property
-    def value(self) -> str:
-        return self.delimiter
-
-    @property
-    def type(self) -> str:
-        return self.delim_type
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"DelimiterToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class IndentationToken:
-    """Indentation token (INDENT or DEDENT)."""
-
-    indent_type: str  # "INDENT" or "DEDENT"
-    level: str  # The indentation level as a string
-    location: Location
-
-    @property
-    def value(self) -> str:
-        return self.level
-
-    @property
-    def type(self) -> str:
-        return self.indent_type
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"IndentationToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class PragmaToken:
-    """Pragma token (START, CONTENT, or END)."""
-
-    pragma_type: str  # "PRAGMA_START", "PRAGMA_CONTENT", or "PRAGMA_END"
-    content: str
-    location: Location
-
-    @property
-    def value(self) -> str:
-        return self.content
-
-    @property
-    def type(self) -> str:
-        return self.pragma_type
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"PragmaToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class DocstringToken:
-    """Docstring token (-- | or -- ^)."""
-
-    docstring_type: str  # "DOCSTRING_PRECEDING" or "DOCSTRING_INLINE"
-    content: str
-    location: Location
-
-    @property
-    def value(self) -> str:
-        return self.content
-
-    @property
-    def type(self) -> str:
-        return self.docstring_type
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"DocstringToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True)
-class EOFToken:
-    """End of file token."""
-
-    location: Location
-
-    @property
-    def value(self) -> str:
-        return ""
-
-    @property
-    def type(self) -> str:
-        return "EOF"
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"EOFToken({self.location})"
-
-
-class LexerError(Exception):
-    """Error during lexical analysis."""
-
-    def __init__(self, message: str, location: Location):
-        super().__init__(f"{location}: {message}")
-        self.location = location
-
-
-class TokenType:
-    """Token types for the System F surface language lexer.
-
-    This class uses class attributes instead of Enum for string compatibility
-    with the existing parser which expects token types as strings.
+    Supports Haddock-style parameter docstrings: \\x -- ^ docstring -> body
     """
 
-    # Whitespace and comments (skipped during normal tokenization)
-    WHITESPACE = "WHITESPACE"
-    COMMENT = "COMMENT"
+    var: str
+    var_type: Optional[SurfaceType]
+    body: SurfaceTerm
+    location: Location
+    param_docstrings: list[str | None] = field(
+        default_factory=list
+    )  # Docstrings for each parameter
 
-    # Indentation tokens (new for indentation-aware parsing)
-    INDENT = "INDENT"  # Increased indentation level
-    DEDENT = "DEDENT"  # Decreased indentation level
-    NEWLINE = "NEWLINE"  # Explicit newline (may be used instead of implicit)
-
-    # Keywords
-    DATA = "DATA"
-    LET = "LET"
-    IN = "IN"
-    CASE = "CASE"
-    OF = "OF"
-    FORALL = "FORALL"
-    TYPE = "TYPE"
-    LLM = "LLM"
-    TOOL = "TOOL"
-    PRIM_TYPE = "PRIM_TYPE"
-    PRIM_OP = "PRIM_OP"
-
-    # Multi-character operators
-    ARROW = "ARROW"  # ->
-    DARROW = "DARROW"  # =>
-    LAMBDA = "LAMBDA"  # \
-    TYPELAMBDA = "TYPELAMBDA"  # /\
-
-    # Arithmetic operators
-    PLUS = "PLUS"  # +
-    MINUS = "MINUS"  # -
-    STAR = "STAR"  # *
-    SLASH = "SLASH"  # /
-
-    # Comparison operators
-    EQ = "EQ"  # ==
-    LT = "LT"  # <
-    GT = "GT"  # >
-    LE = "LE"  # <=
-    GE = "GE"  # >=
-
-    # Single-character operators
-    EQUALS = "EQUALS"  # =
-    COLON = "COLON"  # :
-    BAR = "BAR"  # |
-    AT = "AT"  # @
-    DOT = "DOT"  # .
-
-    # Delimiters
-    LPAREN = "LPAREN"  # (
-    RPAREN = "RPAREN"  # )
-    LBRACKET = "LBRACKET"  # [
-    RBRACKET = "RBRACKET"  # ]
-    LBRACE = "LBRACE"  # {
-    RBRACE = "RBRACE"  # }
-    COMMA = "COMMA"  # ,
-
-    # Identifiers and constructors
-    CONSTRUCTOR = "CONSTRUCTOR"  # Type/constructor names (Uppercase)
-    IDENT = "IDENT"  # Variables (lowercase or underscore)
-
-    # Literals
-    NUMBER = "NUMBER"  # Numeric literals
-    STRING = "STRING"  # String literals
-
-    # End of file
-    EOF = "EOF"
-
-    # Pragma tokens
-    PRAGMA_START = "PRAGMA_START"
-    PRAGMA_CONTENT = "PRAGMA_CONTENT"
-    PRAGMA_END = "PRAGMA_END"
-
-    # Docstring tokens
-    DOCSTRING_PRECEDING = "DOCSTRING_PRECEDING"
-    DOCSTRING_INLINE = "DOCSTRING_INLINE"
-
-    # All token types as a set for quick lookup
-    ALL = frozenset(
-        [
-            WHITESPACE,
-            COMMENT,
-            INDENT,
-            DEDENT,
-            NEWLINE,
-            DATA,
-            LET,
-            IN,
-            CASE,
-            OF,
-            FORALL,
-            TYPE,
-            LLM,
-            TOOL,
-            PRIM_TYPE,
-            PRIM_OP,
-            ARROW,
-            DARROW,
-            LAMBDA,
-            TYPELAMBDA,
-            PLUS,
-            MINUS,
-            STAR,
-            SLASH,
-            EQ,
-            LT,
-            GT,
-            LE,
-            GE,
-            EQUALS,
-            COLON,
-            BAR,
-            AT,
-            DOT,
-            LPAREN,
-            RPAREN,
-            LBRACKET,
-            RBRACKET,
-            LBRACE,
-            RBRACE,
-            COMMA,
-            CONSTRUCTOR,
-            IDENT,
-            NUMBER,
-            STRING,
-            EOF,
-            PRAGMA_START,
-            PRAGMA_CONTENT,
-            PRAGMA_END,
-            DOCSTRING_PRECEDING,
-            DOCSTRING_INLINE,
-        ]
-    )
-
-    # Tokens that are skipped in normal output (whitespace, comments)
-    SKIPPABLE = frozenset([WHITESPACE, COMMENT])
-
-    # Indentation-related tokens
-    INDENTATION = frozenset([INDENT, DEDENT, NEWLINE])
-
-    # Keywords for syntax highlighting or validation
-    KEYWORDS = frozenset([DATA, LET, IN, CASE, OF, FORALL, TYPE, LLM, TOOL, PRIM_TYPE, PRIM_OP])
+    def __str__(self) -> str:
+        if self.var_type:
+            return f"\\{self.var}:{self.var_type} -> {self.body}"
+        return f"\\{self.var} -> {self.body}"
 
 
-# Type alias for token type strings
-TokenTypeStr = str
+@dataclass(frozen=True)
+class SurfaceApp(SurfaceTerm):
+    """Function application: f arg."""
+
+    func: SurfaceTerm
+    arg: SurfaceTerm
+    location: Location
+
+    def __str__(self) -> str:
+        return f"({self.func} {self.arg})"
+
+
+@dataclass(frozen=True)
+class SurfaceTypeAbs(SurfaceTerm):
+    """Type abstraction: /\\a. body (written as /\\a. or Λa.)."""
+
+    var: str
+    body: SurfaceTerm
+    location: Location
+
+    def __str__(self) -> str:
+        return f"/\\{self.var}. {self.body}"
+
+
+@dataclass(frozen=True)
+class SurfaceTypeApp(SurfaceTerm):
+    """Type application: func @type or func [type]."""
+
+    func: SurfaceTerm
+    type_arg: SurfaceType
+    location: Location
+
+    def __str__(self) -> str:
+        return f"({self.func} @{self.type_arg})"
+
+
+@dataclass(frozen=True)
+class SurfaceLet(SurfaceTerm):
+    """Local let binding within an expression.
+
+    Syntax:
+        let x : Int = 42 in x + 1
+
+    Note: type annotation is optional for locals since they can be inferred.
+    """
+
+    var: str
+    value: SurfaceTerm
+    body: SurfaceTerm
+    location: Location
+    var_type: Optional[SurfaceType] = None  # Optional explicit annotation
+
+    def __str__(self) -> str:
+        type_part = f" : {self.var_type}" if self.var_type else ""
+        return f"let {self.var}{type_part} = {self.value} in {self.body}"
+
+
+@dataclass(frozen=True)
+class SurfaceAnn(SurfaceTerm):
+    """Type annotation: term : type."""
+
+    term: SurfaceTerm
+    type: SurfaceType
+    location: Location
+
+    def __str__(self) -> str:
+        return f"({self.term} : {self.type})"
+
+
+@dataclass(frozen=True)
+class SurfaceIf(SurfaceTerm):
+    """Conditional expression: if cond then t else f.
+
+    Syntactic sugar for: case cond of True -> t | False -> f
+    """
+
+    cond: SurfaceTerm
+    then_branch: SurfaceTerm
+    else_branch: SurfaceTerm
+    location: Location
+
+    def __str__(self) -> str:
+        return f"if {self.cond} then {self.then_branch} else {self.else_branch}"
+
+
+@dataclass(frozen=True)
+class SurfaceConstructor(SurfaceTerm):
+    """Data constructor application: Con args."""
+
+    name: str
+    args: list[SurfaceTerm]
+    location: Location
+
+    def __str__(self) -> str:
+        if not self.args:
+            return self.name
+        args_str = " ".join(str(arg) for arg in self.args)
+        return f"({self.name} {args_str})"
+
+
+@dataclass(frozen=True)
+class SurfaceIntLit(SurfaceTerm):
+    """Integer literal: 42, -7, etc."""
+
+    value: int
+    location: Location
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+
+@dataclass(frozen=True)
+class SurfaceStringLit(SurfaceTerm):
+    """String literal: "hello", "world", etc."""
+
+    value: str
+    location: Location
+
+    def __str__(self) -> str:
+        return f'"{self.value}"'
+
+
+@dataclass(frozen=True)
+class SurfaceOp(SurfaceTerm):
+    """Infix operator expression: left op right.
+
+    This is a surface syntax construct that gets desugared to a primitive
+    operation application. Operators include +, -, *, /, ==, <, >, <=, >=.
+    """
+
+    left: SurfaceTerm
+    op: str  # The operator symbol: '+', '-', '*', '/', '==', '<', '>', '<=', '>='
+    right: SurfaceTerm
+    location: Location
+
+    def __str__(self) -> str:
+        return f"({self.left} {self.op} {self.right})"
+
+
+@dataclass(frozen=True)
+class SurfacePattern:
+    """Pattern in a case branch: Con vars."""
+
+    constructor: str
+    vars: list[str]
+    location: Location
+
+    def __str__(self) -> str:
+        if self.vars:
+            return f"{self.constructor} {' '.join(self.vars)}"
+        return self.constructor
+
+
+@dataclass(frozen=True)
+class SurfaceBranch:
+    """Case branch: pattern -> body."""
+
+    pattern: SurfacePattern
+    body: SurfaceTerm
+    location: Location
+
+    def __str__(self) -> str:
+        return f"{self.pattern} -> {self.body}"
+
+
+@dataclass(frozen=True)
+class SurfaceCase(SurfaceTerm):
+    """Pattern matching: case scrutinee of branches."""
+
+    scrutinee: SurfaceTerm
+    branches: list[SurfaceBranch]
+    location: Location
+
+    def __str__(self) -> str:
+        branches_str = " | ".join(str(branch) for branch in self.branches)
+        return f"case {self.scrutinee} of {{ {branches_str} }}"
+
+
+@dataclass(frozen=True)
+class SurfaceToolCall(SurfaceTerm):
+    """Tool invocation: @tool_name arg1 arg2 ...
+
+    Tool calls allow SystemF code to invoke external operations.
+    The tool name is resolved at runtime from the tool registry.
+    """
+
+    tool_name: str
+    args: list[SurfaceTerm]
+    location: Location
+
+    def __str__(self) -> str:
+        if not self.args:
+            return f"@{self.tool_name}"
+        args_str = " ".join(str(arg) for arg in self.args)
+        return f"(@{self.tool_name} {args_str})"
+
+
+SurfaceTermRepr = Union[
+    SurfaceVar,
+    SurfaceAbs,
+    SurfaceApp,
+    SurfaceTypeAbs,
+    SurfaceTypeApp,
+    SurfaceLet,
+    SurfaceAnn,
+    SurfaceConstructor,
+    SurfaceCase,
+    SurfaceToolCall,
+    SurfaceIntLit,
+    SurfaceStringLit,
+    SurfaceOp,
+]
+
+
+# =============================================================================
+# Surface Pragmas
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class SurfacePragma:
+    """Pragma annotation: {-# LLM raw_content #-}.
+
+    Simplified storage - just keeps the raw string after the directive.
+    Key=value parsing happens in later passes if needed.
+    """
+
+    directive: str  # e.g., "LLM"
+    raw_content: str  # Raw string content after directive (e.g., "model=gpt-4 temperature=0.7")
+    location: Location
+
+    def __str__(self) -> str:
+        return "{-# " + self.directive + " " + self.raw_content + " #-}"
+
+
+# =============================================================================
+# Surface Declarations
+# =============================================================================
+
+
+class SurfaceDeclaration:
+    """Base class for surface declarations."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class SurfaceConstructorInfo:
+    """Data constructor with optional docstring."""
+
+    name: str
+    args: list[SurfaceType]
+    docstring: str | None = None
+    location: Location = None  # type: ignore[assignment]
+
+
+@dataclass(frozen=True)
+class SurfaceDataDeclaration(SurfaceDeclaration):
+    """Data type declaration: data Name params = Con1 args1 | Con2 args2 | ..."""
+
+    name: str
+    params: list[str]
+    constructors: list[SurfaceConstructorInfo]
+    location: Location
+    docstring: str | None = None
+
+    def __str__(self) -> str:
+        params_str = " ".join(self.params) if self.params else ""
+        constrs_str = " | ".join(
+            f"{c.name} {' '.join(str(t) for t in c.args)}" for c in self.constructors
+        )
+        return f"data {self.name} {params_str} = {constrs_str}"
+
+
+@dataclass(frozen=True)
+class SurfaceTermDeclaration(SurfaceDeclaration):
+    """Named term declaration at module level.
+
+    Syntax:
+        -- | Function description
+        func : Type -- ^ param -> Type
+        func = \\x -> body
+
+    Or with pragma:
+        {-# LLM model=gpt-4 #-}
+        -- | Translate text
+        prim_op func : Type -- ^ param -> Type
+    """
+
+    name: str
+    type_annotation: SurfaceType  # REQUIRED - changed from Optional
+    body: SurfaceTerm
+    location: Location = None  # type: ignore[assignment]  # noqa: RUF009
+    docstring: str | None = None  # -- | style, attaches to this declaration
+    pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
+
+    def __str__(self) -> str:
+        return f"{self.name} : {self.type_annotation} = {self.body}"
+
+
+@dataclass(frozen=True)
+class SurfacePrimTypeDecl(SurfaceDeclaration):
+    """Primitive type declaration: prim_type Name.
+
+    Declares a primitive type in the prelude. This registers the type
+    name in the primitive_types registry for use by the type checker.
+
+    Example: prim_type Int
+    """
+
+    name: str
+    location: Location
+    docstring: str | None = None
+
+    def __str__(self) -> str:
+        return f"prim_type {self.name}"
+
+
+@dataclass(frozen=True)
+class SurfacePrimOpDecl(SurfaceDeclaration):
+    """Primitive operation declaration: prim_op name : type.
+
+    Declares a primitive operation with its type signature.
+    The name is registered as $prim.name in global_types.
+
+    Example: prim_op int_plus : Int -> Int -> Int
+
+    With pragma for LLM functions:
+        {-# LLM model=gpt-4 #-}
+        prim_op translate : String -> String
+    """
+
+    name: str
+    type_annotation: SurfaceType
+    location: Location
+    docstring: str | None = None
+    pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
+
+    def __str__(self) -> str:
+        return f"prim_op {self.name} : {self.type_annotation}"
+
+
+SurfaceDeclarationRepr = Union[
+    SurfaceDataDeclaration, SurfaceTermDeclaration, SurfacePrimTypeDecl, SurfacePrimOpDecl
+]

@@ -5,7 +5,7 @@ Tests that operator expressions are correctly desugared to primitive operation c
 
 import pytest
 
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceApp,
     SurfaceCase,
     SurfaceIntLit,

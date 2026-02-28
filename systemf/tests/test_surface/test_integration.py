@@ -9,7 +9,7 @@ from systemf.core.checker import TypeChecker
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
 from systemf.surface.elaborator import elaborate
 from systemf.core.module import Module
-from systemf.surface.lexer import lex
+from systemf.surface.parser import lex
 from systemf.surface.parser import Parser
 
 

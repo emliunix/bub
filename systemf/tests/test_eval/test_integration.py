@@ -107,7 +107,7 @@ def test_core_to_eval_program():
 @pytest.mark.skip(reason="Surface language parser syntax not finalized")
 def test_full_pipeline_simple():
     """Test full pipeline with simple expression (requires surface parser)."""
-    from systemf.surface.lexer import Lexer
+    from systemf.surface.parser import Lexer
     from systemf.surface.parser import Parser
     from systemf.surface.elaborator import Elaborator
 

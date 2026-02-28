@@ -11,7 +11,7 @@ import re
 import parsy
 from parsy import Parser as P, Result, generate
 
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceAbs,
     SurfaceAnn,
     SurfaceApp,
@@ -41,8 +41,8 @@ from systemf.surface.ast import (
     SurfaceTypeVar,
     SurfaceVar,
 )
-from systemf.surface.lexer import Lexer
-from systemf.surface.types import Token
+from systemf.surface.indentation import indented_block, indented_opt
+from systemf.surface.parser import Lexer, Token
 from systemf.utils.location import Location
 
 
@@ -174,55 +174,6 @@ type_parser: P = parsy.forward_declaration()
 decl_term_parser: P = parsy.forward_declaration()  # Parser that stops at decl boundaries
 simple_term_parser: P = parsy.forward_declaration()  # Non-greedy term parser for branch bodies
 decl_simple_term_parser: P = parsy.forward_declaration()  # Non-greedy decl term parser
-
-
-# =============================================================================
-# Indentation-Aware Combinators
-# =============================================================================
-
-
-def indented_block(content_parser: P) -> P:
-    """Create a parser for INDENT content DEDENT sequence.
-
-    Used for parsing content that is indented relative to its parent.
-    """
-
-    @generate
-    def block_parser():
-        yield INDENT
-        content = yield content_parser
-        yield DEDENT
-        return content
-
-    return block_parser
-
-
-def indented_many(item_parser: P) -> P:
-    """Create a parser for one or more indented items (no separator).
-
-    Each item must be at the same indentation level within the block.
-    """
-
-    @generate
-    def many_parser():
-        yield INDENT
-        first = yield item_parser
-        items = [first]
-        # Parse remaining items - each at the same indentation level
-        while True:
-            # Peek at next token to check if we're still in the block
-            next_tok = yield peek_token
-            if next_tok.type == "DEDENT":
-                break
-            # Try to parse another item
-            item = yield item_parser.optional()
-            if item is None:
-                break
-            items.append(item)
-        yield DEDENT
-        return items
-
-    return many_parser
 
 
 # =============================================================================
@@ -689,6 +640,12 @@ def decl_app_parser():
         if at_indent_boundary:
             break
 
+        # Check for pattern boundary (CONSTRUCTOR followed by IDENT or ARROW)
+        # This prevents consuming the next pattern in a case expression as an argument
+        at_pattern_boundary = yield is_pattern_boundary
+        if at_pattern_boundary:
+            break
+
         # Try next atom for application
         next_atom = yield atom_base.optional()
         if next_atom is not None:
@@ -780,8 +737,19 @@ def case_parser():
         branches = yield explicit_branches_parser
         yield RBRACE
     else:
-        # Indented style
-        branches = yield indented_many(branch_parser)
+        # Indented style: INDENT branch+ DEDENT
+        yield INDENT
+        first_branch = yield branch_parser
+        branches = [first_branch]
+        while True:
+            next_tok = yield peek_token
+            if next_tok.type == "DEDENT":
+                break
+            branch = yield branch_parser.optional()
+            if branch is None:
+                break
+            branches.append(branch)
+        yield DEDENT
 
     return SurfaceCase(scrutinee, branches, loc)
 
@@ -822,13 +790,23 @@ def decl_lambda_parser():
 
 @generate
 def decl_let_parser():
-    """Parse let binding (declaration context) with indentation-aware body and optional type annotation."""
+    """Parse let binding (declaration context) with optional type annotation.
+
+    Supports both inline syntax: let x = value in body
+    And indented syntax: let x = value
+                           body
+    """
     loc_token = yield LET
     loc = loc_token.location
     name = yield IDENT
     var_type = yield (COLON >> type_parser).optional()
     yield EQUALS
     value = yield decl_term_parser
+    # Try inline syntax first: 'in' followed by expression
+    inline_in = yield (IN >> decl_term_parser).optional()
+    if inline_in is not None:
+        return SurfaceLet(name, value, inline_in, loc, var_type)
+    # Otherwise expect indented block
     body = yield indented_block(decl_term_parser)
     return SurfaceLet(name, value, body, loc, var_type)
 
@@ -868,8 +846,19 @@ def decl_case_parser():
         branches = yield decl_explicit_branches_parser
         yield RBRACE
     else:
-        # Indented style
-        branches = yield indented_many(decl_branch_parser)
+        # Indented style: INDENT branch+ DEDENT
+        yield INDENT
+        first_branch = yield decl_branch_parser
+        branches = [first_branch]
+        while True:
+            next_tok = yield peek_token
+            if next_tok.type == "DEDENT":
+                break
+            branch = yield decl_branch_parser.optional()
+            if branch is None:
+                break
+            branches.append(branch)
+        yield DEDENT
 
     return SurfaceCase(scrutinee, branches, loc)
 
@@ -906,7 +895,7 @@ decl_term_parser.become(
 # by parsing them differently.
 simple_term_parser.become(lambda_parser | let_parser | case_parser | type_abs_parser | atom_parser)
 decl_simple_term_parser.become(
-    decl_lambda_parser | decl_let_parser | decl_case_parser | decl_type_abs_parser | atom_parser
+    decl_lambda_parser | decl_let_parser | decl_case_parser | decl_type_abs_parser | decl_app_parser
 )
 
 
@@ -945,7 +934,8 @@ def decl_branch_parser():
     loc = loc_token.location
     pat = yield pattern_parser
     yield ARROW
-    body = yield decl_simple_term_parser
+    # Handle optional indentation for multi-line branch bodies
+    body = yield indented_block(decl_simple_term_parser) | decl_simple_term_parser
     return SurfaceBranch(pat, body, loc)
 
 

@@ -12,7 +12,7 @@ Uses new indentation-aware syntax (no 'in', braces, or bars for blocks).
 
 import pytest
 
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceAbs,
     SurfaceAnn,
     SurfaceApp,
@@ -32,7 +32,7 @@ from systemf.surface.ast import (
     SurfaceTypeVar,
     SurfaceVar,
 )
-from systemf.surface.lexer import Lexer
+from systemf.surface.parser import Lexer
 from systemf.surface.parser import (
     Parser,
     ParseError,
@@ -849,7 +849,7 @@ class TestOperatorExpressions:
 
     def test_simple_addition(self):
         """Parse simple addition expression."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("1 + 2")
         assert isinstance(term, SurfaceOp)
@@ -861,7 +861,7 @@ class TestOperatorExpressions:
 
     def test_simple_subtraction(self):
         """Parse simple subtraction expression."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("5 - 3")
         assert isinstance(term, SurfaceOp)
@@ -871,7 +871,7 @@ class TestOperatorExpressions:
 
     def test_simple_multiplication(self):
         """Parse simple multiplication expression."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("4 * 5")
         assert isinstance(term, SurfaceOp)
@@ -881,7 +881,7 @@ class TestOperatorExpressions:
 
     def test_simple_division(self):
         """Parse simple division expression."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("10 / 2")
         assert isinstance(term, SurfaceOp)
@@ -891,7 +891,7 @@ class TestOperatorExpressions:
 
     def test_equality_comparison(self):
         """Parse equality comparison."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("1 == 2")
         assert isinstance(term, SurfaceOp)
@@ -901,7 +901,7 @@ class TestOperatorExpressions:
 
     def test_less_than(self):
         """Parse less than comparison."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("1 < 2")
         assert isinstance(term, SurfaceOp)
@@ -909,7 +909,7 @@ class TestOperatorExpressions:
 
     def test_greater_than(self):
         """Parse greater than comparison."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("3 > 2")
         assert isinstance(term, SurfaceOp)
@@ -917,7 +917,7 @@ class TestOperatorExpressions:
 
     def test_less_than_or_equal(self):
         """Parse less than or equal comparison."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("2 <= 3")
         assert isinstance(term, SurfaceOp)
@@ -925,7 +925,7 @@ class TestOperatorExpressions:
 
     def test_greater_than_or_equal(self):
         """Parse greater than or equal comparison."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         term = parse_term("3 >= 2")
         assert isinstance(term, SurfaceOp)
@@ -933,7 +933,7 @@ class TestOperatorExpressions:
 
     def test_operator_precedence_mul_over_add(self):
         """Multiplication has higher precedence than addition."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         # 1 + 2 * 3 should parse as 1 + (2 * 3)
         term = parse_term("1 + 2 * 3")
@@ -948,7 +948,7 @@ class TestOperatorExpressions:
 
     def test_operator_precedence_mul_over_sub(self):
         """Multiplication has higher precedence than subtraction."""
-        from systemf.surface.ast import SurfaceOp
+        from systemf.surface.types import SurfaceOp
 
         term = parse_term("10 - 2 * 3")
         assert isinstance(term, SurfaceOp)
@@ -958,7 +958,7 @@ class TestOperatorExpressions:
 
     def test_left_associativity(self):
         """Operators are left-associative."""
-        from systemf.surface.ast import SurfaceOp, SurfaceIntLit
+        from systemf.surface.types import SurfaceOp, SurfaceIntLit
 
         # 1 + 2 + 3 should parse as (1 + 2) + 3
         term = parse_term("1 + 2 + 3")
@@ -972,7 +972,7 @@ class TestOperatorExpressions:
 
     def test_operator_with_variables(self):
         """Operators work with variables."""
-        from systemf.surface.ast import SurfaceOp, SurfaceVar
+        from systemf.surface.types import SurfaceOp, SurfaceVar
 
         term = parse_term("x + y")
         assert isinstance(term, SurfaceOp)
@@ -984,7 +984,7 @@ class TestOperatorExpressions:
 
     def test_comparison_with_variables(self):
         """Comparison operators work with variables."""
-        from systemf.surface.ast import SurfaceOp, SurfaceVar
+        from systemf.surface.types import SurfaceOp, SurfaceVar
 
         term = parse_term("x == y")
         assert isinstance(term, SurfaceOp)
@@ -996,7 +996,7 @@ class TestOperatorExpressions:
 
     def test_complex_expression(self):
         """Parse complex expression with multiple operators."""
-        from systemf.surface.ast import SurfaceOp
+        from systemf.surface.types import SurfaceOp
 
         term = parse_term("1 + 2 * 3 - 4 / 2")
         assert isinstance(term, SurfaceOp)
@@ -1004,7 +1004,7 @@ class TestOperatorExpressions:
 
     def test_parenthesized_expression(self):
         """Parentheses override operator precedence."""
-        from systemf.surface.ast import SurfaceOp
+        from systemf.surface.types import SurfaceOp
 
         term = parse_term("(1 + 2) * 3")
         assert isinstance(term, SurfaceOp)

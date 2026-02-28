@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Working demo of System F language features."""
 
-from systemf.surface.lexer import Lexer
-from systemf.surface.parser import Parser
+from systemf.surface.parser import Lexer, Parser
 from systemf.surface.elaborator import Elaborator
 from systemf.core.checker import TypeChecker
 from systemf.eval.machine import Evaluator

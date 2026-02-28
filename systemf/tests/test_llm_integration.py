@@ -11,7 +11,7 @@ import pytest
 
 from systemf.surface.parser import parse_program
 from systemf.surface.elaborator import elaborate, Elaborator
-from systemf.surface.ast import SurfaceTermDeclaration, SurfaceAbs
+from systemf.surface.types import SurfaceTermDeclaration, SurfaceAbs
 from systemf.eval.machine import Evaluator
 
 

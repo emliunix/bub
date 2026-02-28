@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from systemf.surface.lexer import Lexer
+from systemf.surface.parser import Lexer
 from systemf.surface.parser import Parser, ParseError
 from systemf.surface.elaborator import Elaborator
 from systemf.surface.desugar import desugar

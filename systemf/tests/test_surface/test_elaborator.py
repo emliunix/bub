@@ -4,7 +4,7 @@ import pytest
 
 from systemf.core import ast as core
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceAbs,
     SurfaceApp,
     SurfaceConstructor,

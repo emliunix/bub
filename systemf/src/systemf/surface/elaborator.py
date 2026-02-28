@@ -13,7 +13,7 @@ from systemf.core.module import Module
 from systemf.core.types import PrimitiveType, Type as CoreType
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
 from systemf.surface.desugar import desugar
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceAbs,
     SurfaceAnn,
     SurfaceApp,

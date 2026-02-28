@@ -17,13 +17,13 @@ from systemf.eval.tools import (
     reset_tool_registry,
 )
 from systemf.eval.value import VConstructor, VToolResult
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceIntLit,
     SurfaceToolCall,
     SurfaceVar,
 )
 from systemf.surface.elaborator import elaborate_term
-from systemf.surface.lexer import Lexer
+from systemf.surface.parser import Lexer
 from systemf.surface.parser import parse_term
 
 
@@ -333,7 +333,7 @@ class TestToolCallIntegration:
 
 # Import needed for tests
 from systemf.core import ast as core
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceAbs,
     SurfaceApp,
     SurfaceConstructor,

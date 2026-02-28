@@ -12,7 +12,7 @@ from systemf.core.types import PrimitiveType, TypeArrow
 from systemf.eval.machine import Evaluator
 from systemf.eval.value import VString, VInt
 from systemf.surface.elaborator import elaborate
-from systemf.surface.lexer import lex
+from systemf.surface.parser import lex
 from systemf.surface.parser import Parser, parse_term
 
 

@@ -1,6 +1,6 @@
 """Surface language: parser and elaborator for System F."""
 
-from systemf.surface.ast import (
+from systemf.surface.types import (
     SurfaceAbs,
     SurfaceApp,
     SurfaceBranch,
@@ -36,14 +36,14 @@ from systemf.surface.elaborator import (
     elaborate,
     elaborate_term,
 )
-from systemf.surface.lexer import Lexer, lex
-from systemf.surface.types import Token
-from systemf.surface.parser import (
-    ParseError,
-    Parser,
-    parse_program,
-    parse_term,
-)
+from systemf.surface.parser import Lexer, lex, Token
+# Parser imports - will be added when parser is fully implemented
+# from systemf.surface.parser import (
+#     ParseError,
+#     Parser,
+#     parse_program,
+#     parse_term,
+# )
 
 __all__ = [
     # AST
@@ -72,11 +72,11 @@ __all__ = [
     "Lexer",
     "Token",
     "lex",
-    # Parser
-    "Parser",
-    "ParseError",
-    "parse_term",
-    "parse_program",
+    # Parser (will be added when parser is fully implemented)
+    # "Parser",
+    # "ParseError",
+    # "parse_term",
+    # "parse_program",
     # Elaborator
     "Elaborator",
     "ElaborationError",
