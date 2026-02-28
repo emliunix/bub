@@ -268,6 +268,131 @@ The trade-off is **rigidity for safety**. For System F, we should prioritize **f
 
 ---
 
+## 5. REPL Query Architecture
+
+### 5.1 How Idris2 REPL Queries Docstrings
+
+Idris2 uses a **dual storage approach** for documentation, optimized for fast REPL queries:
+
+**Storage Locations** (`Idris/Syntax.idr:1028`):
+```idris
+defDocstrings : ANameMap String  -- Name -> Docstring map
+```
+
+Plus AST-embedded docs in declarations:
+- `PData : (doc : String) -> ...` (`Idris/Syntax.idr:536`)
+- `PRecord : (doc : String) -> ...` (`Idris/Syntax.idr:561`)
+- `PInterface : ... -> (doc : String) -> ...` (`Idris/Syntax.idr:546`)
+
+**Query Path** (`Idris/REPL.idr:1021-1022`):
+```idris
+process (Doc dir) = do doc <- getDocs dir
+                       pure $ PrintedDoc doc
+```
+
+**Implementation** (`Idris/REPL/Common.idr:240-258`):
+```idris
+docsOrSignature fc n
+    = do syn  <- get Syn
+         defs <- get Ctxt
+         all@(_ :: _) <- lookupCtxtName n (gamma defs)
+         let ns@(_ :: _) = concatMap (\n => lookupName n (defDocstrings syn))
+                                     (map fst all)
+         getDocsForName fc n MkConfig
+```
+
+**Key characteristics:**
+- **O(1) dict lookup** via `ANameMap` (NameMap wrapper)
+- Stored in mutable `Ref Syn SyntaxInfo` context
+- Populated during elaboration (`Idris/Doc/String.idr:46-47`):
+  ```idris
+  update Syn { defDocstrings $= addName n doc,
+               saveDocstrings $= insert n () }
+  ```
+
+### 5.2 Comparison with Lean4 for REPL Use Cases
+
+| Aspect | Idris2 (AST-embedded/Dict) | Lean4 (Environment Extensions) |
+|--------|---------------------------|-------------------------------|
+| **Doc Lookup** | O(1) dict access | O(log n) binary search |
+| **Type Lookup** | O(n) linear scan (gamma context) | O(log n) via environment |
+| **Storage** | Mutable `SyntaxInfo` reference | Persistent environment extensions |
+| **Cross-module** | Manual resolution | Automatic via env merging |
+| **Persistence** | Requires custom serialization | Built into .olean format |
+| **Thread-safety** | Single-threaded (Ref) | Async-safe (parallel elaboration) |
+| **Complexity** | ~20 lines for lookup | ~100+ lines with async modes |
+
+**Trade-offs for REPL-only use:**
+
+**Idris2 approach wins when:**
+- REPL sessions are ephemeral (no persistence needed)
+- Single-user interactive use (no async elaboration)
+- Fast startup not critical (modules loaded into memory)
+- Simplicity preferred over scalability
+
+**Lean4 approach wins when:**
+- Need LSP/IDE integration (cross-module lookups)
+- Implementing incremental compilation
+- Building persistent documentation databases
+- Supporting parallel/async elaboration
+
+### 5.3 Recommendation for System F
+
+**For REPL-only development: Use Idris2-style AST-embedded approach**
+
+**Why:**
+
+1. **Simplicity**: O(1) dict lookups are trivial to implement
+   ```python
+   # System F approach
+   class Module:
+       declarations: dict[str, Declaration]
+       docstrings: dict[str, str]  # name -> doc
+   
+   def repl_doc(name: str) -> str:
+       return current_module.docstrings.get(name, "")  # O(1)
+   ```
+
+2. **Sufficient performance**: For interactive REPL use, difference between O(1) and O(log n) is negligible
+
+3. **No persistence complexity**: REPL sessions don't need .olean equivalents
+
+4. **Easier debugging**: All doc data in one place (Module dataclass)
+
+5. **Migration path**: Can add environment extensions later when adding LSP
+
+**Implementation sketch:**
+```python
+@dataclass
+class Declaration:
+    name: str
+    docstring: Optional[str]  # Embedded in AST
+    # ... type, body, etc.
+
+@dataclass
+class Module:
+    declarations: dict[str, Declaration]
+    module_doc: Optional[str]
+    
+    def get_docstring(self, name: str) -> Optional[str]:
+        """O(1) lookup for REPL queries."""
+        if decl := self.declarations.get(name):
+            return decl.docstring
+        return None
+```
+
+**When to migrate to Lean4-style environment extensions:**
+- Adding LSP support (needs fast cross-module resolution)
+- Implementing incremental compilation with persistence
+- Supporting async/parallel elaboration
+- Building documentation browsers that load modules on-demand
+
+**Verdict**: Start simple. Environment extensions add ~5x code complexity for benefits you don't need in a REPL-only tool.
+
+---
+
 *Analysis based on:*
 - `src/Idris/Syntax/Pragmas.idr` (161 lines)
 - `docs/source/reference/pragmas.rst` (517 lines)
+- `src/Idris/REPL.idr` (REPL command processing)
+- `src/Idris/REPL/Common.idr` (Doc query implementation)

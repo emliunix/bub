@@ -387,3 +387,124 @@ def find_docstring(env: Environment, decl_name: str) -> Optional[str]:
 ```
 
 This is simpler than Lean4 but sufficient for System F's current scope.
+
+---
+
+## 6. REPL Query Architecture
+
+### Storage and Query Mechanism
+
+Lean4 uses `MapDeclarationExtension` for docstring storage with a **two-tier lookup system**:
+
+```lean
+-- From EnvExtension.lean:161-168
+def find? [Inhabited α] (ext : MapDeclarationExtension α) (env : Environment) (declName : Name) : Option α :=
+  match env.getModuleIdxFor? declName with
+  | some modIdx =>
+    -- Imported module: binary search in sorted array (O(log n))
+    match (ext.getModuleEntries env modIdx).binSearch (declName, default) (fun a b => Name.quickLt a.1 b.1) with
+    | some e => some e.2
+    | none   => none
+  | none =>
+    -- Current module: RBTree lookup (O(log n))
+    (ext.getState env).find? declName
+```
+
+**Key findings:**
+- **Not O(1) hash map anywhere** - both tiers use O(log n) data structures
+- Imported modules use **binary search** on sorted arrays (cache-friendly, persistent)
+- Current module uses **RBTree** (persistent, efficient for <10k entries)
+- Trade-off: persistent data structures over mutable hash maps for async safety
+
+### How `#check` Command Works
+
+The `#check` command uses the **Environment's declaration map**, not environment extensions:
+
+```lean
+-- From Elab/BuiltinCommand.lean:430-437
+def elabCheckCore (ignoreStuckTC : Bool) : CommandElab
+  | `(#check%$tk $term) => withoutModifyingEnv <| runTermElabM fun _ => Term.withDeclName `_check do
+    if let `($id:ident) := term then
+      for c in (← realizeGlobalConstWithInfos term) do
+        logInfoAt tk <| .signature c  -- Lookup in env declaration map
+        return
+    let e ← Term.elabTerm term none  -- Elaboration uses environment
+    ...
+```
+
+**Difference from docstring queries:**
+- `#check` resolves constants via `realizeGlobalConstWithInfos` → Environment's constant map
+- Docstrings use `MapDeclarationExtension.find?` → separate extension maps
+- Both operate on the Environment, but through different mechanisms
+
+### Inheritance Chain Resolution
+
+Docstring inheritance is resolved during lookup, not storage:
+
+```lean
+-- From Extension.lean:154-168
+partial def findInternalDocString? (env : Environment) (declName : Name) : IO (Option (String ⊕ VersoDocString)) := do
+  if let some target := inheritDocStringExt.find? env declName then
+    return (← findInternalDocString? env target)  -- Recursive inheritance resolution
+  match docStringExt.find? env declName with
+  | some md => return some (.inl md)
+  | none => pure ()
+  match versoDocStringExt.find? env declName with
+  | some v => return some (.inr v)
+  | none => pure ()
+  ...
+```
+
+**Chain resolution order:**
+1. Follow inheritance links (via `inheritDocStringExt`)
+2. Check Markdown docs (`docStringExt`)
+3. Check Verso docs (`versoDocStringExt`)
+4. Check builtin docs
+
+### Comparison: Lean4 vs Idris2 for REPL
+
+| Aspect | Lean4 | Idris2 |
+|--------|-------|--------|
+| **Lookup complexity** | O(log n) | O(1) average |
+| **Data structure** | RBTree + sorted arrays | Hash map |
+| **Persistence** | Native (persistent DS) | Requires copying |
+| **Async safety** | Built-in | Requires locks/mutable state |
+| **Cross-module** | Binary search in imports | Direct lookup if loaded |
+| **REPL overhead** | Higher | Lower |
+| **IDE/LSP** | Excellent | Good |
+
+**When to use which:**
+- **Lean4 approach**: When you need LSP, async elaboration, or .olean-style caching
+- **Idris2 approach**: For simple REPL-only tools where O(1) lookup matters more than persistence
+
+### Updated Recommendation for System F
+
+For a **REPL-only tool** (no LSP, no async):
+
+**Recommended: Idris2-style AST-embedded storage**
+
+```python
+@dataclass
+class Declaration:
+    name: str
+    docstring: Optional[str]  # Embedded, not external
+    # ... other fields
+
+@dataclass
+class Module:
+    declarations: dict[str, Declaration]  # O(1) lookup
+```
+
+**Why not Lean4's environment extensions:**
+1. **No async needs**: REPL is sequential, persistent DS overhead unnecessary
+2. **No cross-module queries**: You load what you need, no binary search needed
+3. **Simpler implementation**: No environment extension machinery
+4. **Better REPL performance**: O(1) hash map vs O(log n) tree
+
+**When to switch to Lean4-style:**
+- Adding LSP support (needs fast cross-module lookups)
+- Implementing incremental compilation
+- Needing .olean-style object file caching
+- Adding async elaboration for performance
+
+**Key insight:** Lean4's complexity is justified for their use case (full IDE support + async + persistence). For a research REPL, the simpler approach is preferable until those features are actually needed.
