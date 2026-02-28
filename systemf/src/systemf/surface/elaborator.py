@@ -12,6 +12,7 @@ from systemf.core.errors import ElaborationError
 from systemf.core.module import Module
 from systemf.core.types import PrimitiveType, Type as CoreType
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
+from systemf.surface.desugar import desugar
 from systemf.surface.ast import (
     SurfaceAbs,
     SurfaceAnn,
@@ -489,8 +490,6 @@ class Elaborator:
 
             case SurfaceOp(left, op, right, location):
                 # Desugar operator to primitive application
-                from systemf.surface.desugar import desugar
-
                 desugared = desugar(term)
                 return self.elaborate_term(desugared)
 

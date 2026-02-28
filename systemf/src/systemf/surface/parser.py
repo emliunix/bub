@@ -6,6 +6,8 @@ for Haskell-like do-notation syntax.
 
 from __future__ import annotations
 
+import re
+
 import parsy
 from parsy import Parser as P, Result, generate
 
@@ -1065,8 +1067,6 @@ def parse_pragma_attributes(content: str) -> dict[str, str]:
 
     # Parse key=value pairs, splitting on space (but not inside quotes)
     # Pattern matches: key=value where value may be quoted
-    import re
-
     # Regex to match key=value pairs, handling quoted values
     # Matches: key=value or key="value with spaces" or key='value with spaces'
     # Note: [^\s,]+ stops at whitespace or comma (for multiline pragmas)

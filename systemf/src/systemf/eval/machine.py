@@ -1,6 +1,7 @@
 """Abstract machine / evaluator for System F core language."""
 
 import os
+import re
 from typing import Callable
 
 from systemf.core.ast import (
@@ -97,24 +98,18 @@ class Evaluator:
 
     def _int_eq(self, x: Value, y: Value) -> Value:
         """Integer equality."""
-        from systemf.eval.value import VConstructor
-
         if not isinstance(x, VInt) or not isinstance(y, VInt):
             raise RuntimeError("int_eq expects Int arguments")
         return VConstructor("True" if x.value == y.value else "False", [])
 
     def _int_lt(self, x: Value, y: Value) -> Value:
         """Integer less than."""
-        from systemf.eval.value import VConstructor
-
         if not isinstance(x, VInt) or not isinstance(y, VInt):
             raise RuntimeError("int_lt expects Int arguments")
         return VConstructor("True" if x.value < y.value else "False", [])
 
     def _int_gt(self, x: Value, y: Value) -> Value:
         """Integer greater than."""
-        from systemf.eval.value import VConstructor
-
         if not isinstance(x, VInt) or not isinstance(y, VInt):
             raise RuntimeError("int_gt expects Int arguments")
         return VConstructor("True" if x.value > y.value else "False", [])
@@ -225,8 +220,6 @@ class Evaluator:
         Returns:
             LLM response text
         """
-        import re
-
         # Parse model and temperature from pragma_params
         pragma = metadata.pragma_params or ""
         model_match = re.search(r"model=([^\s,]+)", pragma)
@@ -394,8 +387,6 @@ class Evaluator:
         Returns a curried function that takes two Int arguments.
         Handles both regular primitives and LLM primitives ($llm.*).
         """
-        from systemf.core.ast import Var, Abs, App
-
         # Check if this is an LLM primitive
         if name.startswith("llm."):
             llm_name = name[4:]  # Strip "llm." prefix
@@ -422,8 +413,6 @@ class Evaluator:
         """
         # Create a simple wrapper closure that calls the LLM closure
         # This avoids the binary primitive infrastructure
-        from systemf.core.ast import Abs, Var, App, Term
-        from systemf.eval.value import Environment
 
         # Create a simple term that when evaluated will call the closure
         # We use a special marker to identify this as an LLM call

@@ -6,6 +6,7 @@ from systemf.surface.parser import Parser
 from systemf.surface.elaborator import Elaborator
 from systemf.core.checker import TypeChecker
 from systemf.eval.machine import Evaluator
+from systemf.eval.value import VConstructor, VClosure, VTypeClosure
 
 
 def demo_section(title):
@@ -22,8 +23,6 @@ def format_type(ty):
 
 def format_value(val):
     """Pretty print a value."""
-    from systemf.eval.value import VConstructor, VClosure, VTypeClosure
-
     match val:
         case VConstructor(name, args):
             if not args:

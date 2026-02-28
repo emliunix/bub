@@ -8,6 +8,7 @@ from systemf.core.ast import (
     Branch,
     Case,
     Constructor,
+    Constructor as AstConstructor,
     DataDeclaration,
     Declaration,
     Global,
@@ -97,8 +98,6 @@ class TypeChecker:
                 # TApp: Infer polymorphic type, instantiate with type arg
                 # Special case: if func is a Constructor, look up its type directly
                 # to avoid premature instantiation
-                from systemf.core.ast import Constructor as AstConstructor
-
                 if isinstance(func, AstConstructor):
                     if func.name not in self.constructors:
                         raise UndefinedConstructor(func.name)
