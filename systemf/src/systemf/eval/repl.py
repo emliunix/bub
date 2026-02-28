@@ -4,6 +4,7 @@ import atexit
 import os
 import readline
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from systemf.surface.lexer import Lexer
@@ -17,6 +18,15 @@ from systemf.core.module import LLMMetadata
 from systemf.llm.extractor import extract_llm_metadata
 from systemf.eval.machine import Evaluator
 from systemf.eval.value import VClosure, VConstructor, VTypeClosure, Value
+
+
+@dataclass
+class LoadResult:
+    """Result of loading a file."""
+
+    success: bool
+    count: int = 0
+    error: str | None = None
 
 
 class REPL:
@@ -93,7 +103,7 @@ class REPL:
     def _completer(self, text: str, state: int) -> str | None:
         """Tab completion for REPL commands and identifiers."""
         # Commands that start with ':'
-        commands = [":quit", ":q", ":help", ":h", ":env", ":llm", ":{", ":}"]
+        commands = [":quit", ":q", ":help", ":h", ":load", ":env", ":llm", ":{", ":}"]
 
         # Add global identifiers
         identifiers = list(self.global_terms)
@@ -106,20 +116,24 @@ class REPL:
             return matches[state]
         return None
 
-    def _load_prelude(self) -> None:
-        """Load the prelude file if it exists."""
-        if not self.PRELUDE_FILE.exists():
-            return
+    def _load_file(self, filepath: Path) -> LoadResult:
+        """Load definitions from a file into the REPL environment.
 
+        Args:
+            filepath: Path to the .sf file
+
+        Returns:
+            LoadResult with success status, count of definitions, and error message.
+        """
         try:
-            source = self.PRELUDE_FILE.read_text()
+            source = filepath.read_text()
             if not source.strip():
-                return
+                return LoadResult(success=True, count=0)
 
-            # Clear local term environment before loading prelude
+            # Clear local term environment before loading
             self.elaborator.term_env = {}
 
-            tokens = Lexer(source, filename=str(self.PRELUDE_FILE)).tokenize()
+            tokens = Lexer(source, filename=str(filepath)).tokenize()
             surface_decls = Parser(tokens).parse()
             module = self.elaborator.elaborate(surface_decls)
             types = self.checker.check_program(module.declarations)
@@ -135,17 +149,32 @@ class REPL:
             # Now evaluate the program (closures are registered)
             values = self.evaluator.evaluate_program(module.declarations)
 
-            # Update environments with prelude definitions
+            # Update environments with definitions
             for name, value in values.items():
                 self.global_values[name] = value
                 self.global_types[name] = types[name]
                 self.global_terms.add(name)
                 self.elaborator.global_terms.add(name)
 
-            print(f"Loaded prelude: {len(values)} definitions")
+            return LoadResult(success=True, count=len(values))
 
         except Exception as e:
-            print(f"Warning: Could not load prelude: {e}")
+            return LoadResult(success=False, count=0, error=str(e))
+
+    def _load_prelude(self) -> None:
+        """Load the prelude file if it exists."""
+        if not self.PRELUDE_FILE.exists():
+            return
+
+        print("Loading prelude...", end=" ", flush=True)
+        result = self._load_file(self.PRELUDE_FILE)
+        if result.success:
+            if result.count > 0:
+                print(f"({result.count} definitions)")
+            else:
+                print("(empty)")
+        else:
+            print(f"(failed: {result.error})")
 
     def run(self) -> None:
         """Run the REPL."""
@@ -200,6 +229,7 @@ class REPL:
                 print("Commands:")
                 print("  :quit, :q    Exit REPL")
                 print("  :help, :h    Show this help")
+                print("  :load        Load definitions from a file")
                 print("  :env         Show current environment")
                 print("  :llm         List LLM functions or show details")
                 print("  :{           Start multiline input")
@@ -233,6 +263,20 @@ class REPL:
                 self.multiline_buffer = []
             case ":}":
                 print("Error: Not in multiline mode (use :{ first)")
+            case ":load":
+                if len(parts) < 2:
+                    print("Usage: :load <filepath>")
+                    print("Example: :load myfile.sf")
+                else:
+                    filepath = Path(parts[1])
+                    if not filepath.exists():
+                        print(f"Error: File not found: {filepath}")
+                    else:
+                        result = self._load_file(filepath)
+                        if result.success:
+                            print(f"Loaded {result.count} definition(s) from {filepath}")
+                        else:
+                            print(f"Error: {result.error}")
             case _:
                 print(f"Unknown command: {cmd}")
 
