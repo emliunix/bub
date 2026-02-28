@@ -10,6 +10,10 @@ dependencies = [
     "anthropic>=0.21.0",
 ]
 
+[project.scripts]
+systemf = "systemf.eval.repl:main"
+systemf-repl = "systemf.eval.repl:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
