@@ -319,7 +319,7 @@ class TestToolCallIntegration:
         from systemf.surface.parser import parse_program
         from systemf.surface.elaborator import elaborate
 
-        source = """result = @identity 42"""
+        source = """result : Int = @identity 42"""
         decls = parse_program(source)
         module = elaborate(decls)
 

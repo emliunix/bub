@@ -183,15 +183,15 @@ class Evaluator:
             lines.append(metadata.function_docstring)
             lines.append("")
 
-        # Add parameter info
-        if metadata.arg_names and len(metadata.arg_names) > 0:
+        # Add parameter info (use indices since arg names not available per design spec)
+        if len(metadata.arg_types) > 0:
             lines.append("Parameters:")
-            for i, name in enumerate(metadata.arg_names):
+            for i, _ in enumerate(metadata.arg_types):
                 doc = metadata.arg_docstrings[i] if i < len(metadata.arg_docstrings) else None
                 if doc:
-                    lines.append(f"  {name}: {doc}")
+                    lines.append(f"  arg{i}: {doc}")
                 else:
-                    lines.append(f"  {name}")
+                    lines.append(f"  arg{i}")
             lines.append("")
 
         # Add the input value

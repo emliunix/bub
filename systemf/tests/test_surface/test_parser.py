@@ -235,7 +235,7 @@ class TestLetBindings:
         """Parse simple let binding with indented body."""
         term = parse_term("let x = 1\n  x")
         assert isinstance(term, SurfaceLet)
-        assert term.name == "x"
+        assert term.var == "x"
         assert isinstance(term.value, SurfaceIntLit)
         assert term.value.value == 1
         assert isinstance(term.body, SurfaceVar)
@@ -244,9 +244,9 @@ class TestLetBindings:
         """Parse nested let bindings."""
         term = parse_term("let x = 1\n  let y = 2\n    x")
         assert isinstance(term, SurfaceLet)
-        assert term.name == "x"
+        assert term.var == "x"
         assert isinstance(term.body, SurfaceLet)
-        assert term.body.name == "y"
+        assert term.body.var == "y"
 
     def test_let_with_expression_body(self):
         """Parse let with complex expression body."""
@@ -260,6 +260,25 @@ class TestLetBindings:
         assert isinstance(term, SurfaceLet)
         assert isinstance(term.body, SurfaceLet)
         assert isinstance(term.body.body, SurfaceLet)
+
+    def test_let_with_type_annotation(self):
+        """Parse let with type annotation."""
+        term = parse_term("let x : Int = 1\n  x")
+        assert isinstance(term, SurfaceLet)
+        assert term.var == "x"
+        assert term.var_type is not None
+        assert isinstance(term.var_type, SurfaceTypeConstructor)
+        assert term.var_type.name == "Int"
+        assert isinstance(term.value, SurfaceIntLit)
+        assert term.value.value == 1
+
+    def test_let_with_arrow_type_annotation(self):
+        """Parse let with function type annotation."""
+        term = parse_term("let f : Int -> Int = (\\x -> x)\n  f 1")
+        assert isinstance(term, SurfaceLet)
+        assert term.var == "f"
+        assert term.var_type is not None
+        assert isinstance(term.var_type, SurfaceTypeArrow)
 
 
 # =============================================================================
@@ -479,12 +498,10 @@ class TestDeclarations:
     """Tests for declaration parsing with indentation-aware syntax."""
 
     def test_term_declaration_no_type(self):
-        """Parse term declaration without type."""
-        decls = parse_program("x = 1")
-        assert len(decls) == 1
-        assert isinstance(decls[0], SurfaceTermDeclaration)
-        assert decls[0].name == "x"
-        assert decls[0].type_annotation is None
+        """Parse term declaration without type - now requires explicit annotation."""
+        # Type annotations are now mandatory for globals per design doc
+        with pytest.raises(ParseError):
+            parse_program("x = 1")
 
     def test_term_declaration_with_type(self):
         """Parse term declaration with type."""
@@ -516,15 +533,15 @@ class TestDeclarations:
         assert decls[0].constructors[1].name == "Cons"
 
     def test_multiple_declarations(self):
-        """Parse multiple declarations."""
-        decls = parse_program("x = 1\ny = 2")
+        """Parse multiple declarations with type annotations."""
+        decls = parse_program("x : Int = 1\ny : Int = 2")
         assert len(decls) == 2
         assert decls[0].name == "x"
         assert decls[1].name == "y"
 
     def test_declaration_boundary(self):
         """Test that declarations are properly separated."""
-        decls = parse_program("f = 1\ng = 2")
+        decls = parse_program("f : Int = 1\ng : Int = 2")
         assert len(decls) == 2
         assert isinstance(decls[0].body, SurfaceIntLit)
         assert decls[0].body.value == 1
@@ -755,7 +772,7 @@ class TestDocstrings:
 
     def test_preceding_docstring_term_declaration(self):
         """Parse term declaration with preceding docstring (-- |)."""
-        decls = parse_program("-- | Identity function\nid = \\x -> x")
+        decls = parse_program("-- | Identity function\nid : forall a. a -> a = \\x -> x")
         assert len(decls) == 1
         assert isinstance(decls[0], SurfaceTermDeclaration)
         assert decls[0].name == "id"
@@ -1009,7 +1026,7 @@ class TestOperatorExpressions:
 
     def test_declaration_without_pragma(self):
         """Declarations without pragmas have None."""
-        decls = parse_program("x = 1")
+        decls = parse_program("x : Int = 1")
         assert len(decls) == 1
         assert decls[0].pragma is None
 

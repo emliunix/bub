@@ -21,6 +21,7 @@ class TestLLMParser:
     def test_param_docstring_in_lambda(self):
         """Parser captures -- ^ style parameter docstrings."""
         source = r"""
+translate : String -> String
 translate = \text -- ^ The English text to translate -> text
 """
         decls = parse_program(source)
@@ -35,7 +36,7 @@ translate = \text -- ^ The English text to translate -> text
     def test_no_param_docstring(self):
         """Lambda without param docstring has empty list."""
         source = r"""
-identity = \x -> x
+identity : String -> String = \x -> x
 """
         decls = parse_program(source)
         assert len(decls) == 1
@@ -52,22 +53,38 @@ class TestLLMElaborator:
     def test_llm_pragma_detection(self):
         """Elaborator detects LLM pragma on term declarations."""
         source = r"""
+prim_type String
+
 {-# LLM model=gpt-4 temperature=0.7 #-}
 -- | Translate English to French
-translate : String -> String
-translate = \text -- ^ The English text to translate -> text
+translate : String -- ^ The English text to translate -> String
+translate = \text -> text
 """
         decls = parse_program(source)
         evaluator = Evaluator()
         elab = Elaborator(evaluator=evaluator)
         module = elab.elaborate(decls)
 
+        # Type check to get validated types
+        from systemf.core.checker import TypeChecker
+
+        checker = TypeChecker(
+            datatype_constructors=elab.constructor_types,
+            global_types=elab.global_types,
+            primitive_types=elab.primitive_types,
+        )
+        types = checker.check_program(module.declarations)
+
+        # Extract LLM metadata after type checking
+        from systemf.llm.extractor import extract_llm_metadata
+
+        llm_functions = extract_llm_metadata(module, types)
+
         # Check that LLM metadata was created
-        assert "translate" in module.llm_functions
-        metadata = module.llm_functions["translate"]
+        assert "translate" in llm_functions
+        metadata = llm_functions["translate"]
         assert metadata.function_name == "translate"
         assert metadata.function_docstring == "Translate English to French"
-        assert metadata.arg_names == ["text"]
         assert metadata.arg_docstrings == ["The English text to translate"]
         assert "model=gpt-4" in metadata.pragma_params
         assert "temperature=0.7" in metadata.pragma_params
@@ -75,7 +92,10 @@ translate = \text -- ^ The English text to translate -> text
     def test_llm_body_is_primop(self):
         """LLM function body is elaborated to PrimOp."""
         source = r"""
+prim_type String
+
 {-# LLM #-}
+translate : String -> String
 translate = \text -> text
 """
         decls = parse_program(source)
@@ -86,29 +106,62 @@ translate = \text -> text
         # Check the declaration body is a PrimOp
         from systemf.core.ast import TermDeclaration, PrimOp
 
-        decl = module.declarations[0]
-        assert isinstance(decl, TermDeclaration)
+        # Find the translate declaration (not the prim_type declaration)
+        translate_decls = [
+            d
+            for d in module.declarations
+            if isinstance(d, TermDeclaration) and d.name == "translate"
+        ]
+        assert len(translate_decls) == 1, (
+            f"Expected 1 translate declaration, found {len(translate_decls)}"
+        )
+        decl = translate_decls[0]
         assert isinstance(decl.body, PrimOp)
         assert decl.body.name == "llm.translate"
 
     def test_non_llm_declaration_unchanged(self):
         """Non-LLM declarations are processed normally."""
         source = r"""
-identity = \x -> x
+prim_type String
+
+identity : String -> String = \x -> x
 """
         decls = parse_program(source)
         evaluator = Evaluator()
         elab = Elaborator(evaluator=evaluator)
         module = elab.elaborate(decls)
 
+        # Type check to get validated types
+        from systemf.core.checker import TypeChecker
+
+        checker = TypeChecker(
+            datatype_constructors=elab.constructor_types,
+            global_types=elab.global_types,
+            primitive_types=elab.primitive_types,
+        )
+        types = checker.check_program(module.declarations)
+
+        # Extract LLM metadata after type checking
+        from systemf.llm.extractor import extract_llm_metadata
+
+        llm_functions = extract_llm_metadata(module, types)
+
         # No LLM functions registered
-        assert len(module.llm_functions) == 0
+        assert len(llm_functions) == 0
 
         # Declaration is normal lambda
         from systemf.core.ast import TermDeclaration, Abs
 
-        decl = module.declarations[0]
-        assert isinstance(decl, TermDeclaration)
+        # Find the identity declaration (not the prim_type declaration)
+        identity_decls = [
+            d
+            for d in module.declarations
+            if isinstance(d, TermDeclaration) and d.name == "identity"
+        ]
+        assert len(identity_decls) == 1, (
+            f"Expected 1 identity declaration, found {len(identity_decls)}"
+        )
+        decl = identity_decls[0]
         assert isinstance(decl.body, Abs)
 
 
@@ -118,13 +171,34 @@ class TestLLMEvaluator:
     def test_llm_closure_registration(self):
         """Evaluator registers LLM closures correctly."""
         source = r"""
+prim_type String
+
 {-# LLM model=gpt-4 #-}
-translate = \text -> text
+translate : String -> String = \text -> text
 """
         decls = parse_program(source)
         evaluator = Evaluator()
         elab = Elaborator(evaluator=evaluator)
-        elab.elaborate(decls)
+        module = elab.elaborate(decls)
+
+        # Type check to get validated types
+        from systemf.core.checker import TypeChecker
+
+        checker = TypeChecker(
+            datatype_constructors=elab.constructor_types,
+            global_types=elab.global_types,
+            primitive_types=elab.primitive_types,
+        )
+        types = checker.check_program(module.declarations)
+
+        # Extract LLM metadata after type checking
+        from systemf.llm.extractor import extract_llm_metadata
+
+        llm_functions = extract_llm_metadata(module, types)
+
+        # Register LLM closures with evaluator
+        for name, metadata in llm_functions.items():
+            evaluator.register_llm_closure(name, metadata)
 
         # Check that closure was registered in evaluator
         assert "translate" in evaluator.llm_closures
@@ -134,13 +208,34 @@ translate = \text -> text
     def test_llm_fallback_without_api_key(self):
         """LLM call falls back to identity when API key is missing."""
         source = r"""
+prim_type String
+
 {-# LLM #-}
-translate = \text -> text
+translate : String -> String = \text -> text
 """
         decls = parse_program(source)
         evaluator = Evaluator()
         elab = Elaborator(evaluator=evaluator)
         module = elab.elaborate(decls)
+
+        # Type check to get validated types
+        from systemf.core.checker import TypeChecker
+
+        checker = TypeChecker(
+            datatype_constructors=elab.constructor_types,
+            global_types=elab.global_types,
+            primitive_types=elab.primitive_types,
+        )
+        types = checker.check_program(module.declarations)
+
+        # Extract LLM metadata after type checking
+        from systemf.llm.extractor import extract_llm_metadata
+
+        llm_functions = extract_llm_metadata(module, types)
+
+        # Register LLM closures with evaluator
+        for name, metadata in llm_functions.items():
+            evaluator.register_llm_closure(name, metadata)
 
         # Evaluate the translate function
         from systemf.eval.value import VString
@@ -168,7 +263,6 @@ translate = \text -> text
         metadata = LLMMetadata(
             function_name="translate",
             function_docstring="Translate English to French",
-            arg_names=["text"],
             arg_types=[TypeVar("String")],
             arg_docstrings=["The English text to translate"],
             pragma_params="model=gpt-4 temperature=0.7",
@@ -188,21 +282,42 @@ class TestLLMIntegration:
     def test_full_llm_declaration_pipeline(self):
         """Complete pipeline from parsing to evaluation setup."""
         source = r"""
+prim_type String
+
 {-# LLM model=gpt-4 temperature=0.7 #-}
 -- | Translate English to French
-translate : String -> String
-translate = \text -- ^ The English text to translate -> text
+translate : String -> String = \text -- ^ The English text to translate -> text
 """
         # Parse
         decls = parse_program(source)
-        assert len(decls) == 1
+        assert len(decls) == 2  # prim_type + translate
 
         # Elaborate with evaluator
         evaluator = Evaluator()
-        module = elaborate(decls, evaluator=evaluator)
+        elab = Elaborator(evaluator=evaluator)
+        module = elab.elaborate(decls)
+
+        # Type check to get validated types
+        from systemf.core.checker import TypeChecker
+
+        checker = TypeChecker(
+            datatype_constructors=elab.constructor_types,
+            global_types=elab.global_types,
+            primitive_types=elab.primitive_types,
+        )
+        types = checker.check_program(module.declarations)
+
+        # Extract LLM metadata after type checking
+        from systemf.llm.extractor import extract_llm_metadata
+
+        llm_functions = extract_llm_metadata(module, types)
+
+        # Register LLM closures with evaluator
+        for name, metadata in llm_functions.items():
+            evaluator.register_llm_closure(name, metadata)
 
         # Check module has LLM metadata
-        assert "translate" in module.llm_functions
+        assert "translate" in llm_functions
 
         # Check evaluator has closure
         assert "translate" in evaluator.llm_closures
@@ -210,8 +325,14 @@ translate = \text -- ^ The English text to translate -> text
         # Check declaration is a PrimOp
         from systemf.core.ast import TermDeclaration, PrimOp
 
-        decl = module.declarations[0]
-        assert isinstance(decl, TermDeclaration)
+        # Find the translate declaration (not the prim_type declaration)
+        translate_decls = [
+            d
+            for d in module.declarations
+            if isinstance(d, TermDeclaration) and d.name == "translate"
+        ]
+        assert len(translate_decls) == 1
+        decl = translate_decls[0]
         assert isinstance(decl.body, PrimOp)
 
 
@@ -227,28 +348,34 @@ class TestDocstringStyles:
     def test_preceding_docstring_pipe_style(self):
         """Function docstring with -- | before declaration works."""
         source = r"""
+prim_type String
+
 -- | Translate English to French
-translate : String -> String
-translate = \text -> text
+translate : String -> String = \text -> text
 """
         decls = parse_program(source)
-        assert len(decls) == 1
-        decl = decls[0]
+        assert len(decls) == 2  # prim_type + translate
+        # Find the term declaration
+        term_decls = [d for d in decls if isinstance(d, SurfaceTermDeclaration)]
+        assert len(term_decls) == 1
+        decl = term_decls[0]
 
-        assert isinstance(decl, SurfaceTermDeclaration)
         assert decl.docstring == "Translate English to French"
 
     def test_trailing_docstring_caret_style_after_body(self):
         """Function docstring with -- ^ after body (parameter docstring)."""
         source = r"""
-translate : String -> String
-translate = \text -- ^ The English text to translate -> text
+prim_type String
+
+translate : String -> String = \text -- ^ The English text to translate -> text
 """
         decls = parse_program(source)
-        assert len(decls) == 1
-        decl = decls[0]
+        assert len(decls) == 2  # prim_type + translate
+        # Find the term declaration
+        term_decls = [d for d in decls if isinstance(d, SurfaceTermDeclaration)]
+        assert len(term_decls) == 1
+        decl = term_decls[0]
 
-        assert isinstance(decl, SurfaceTermDeclaration)
         assert decl.docstring is None  # Function-level docstring not set
         # But parameter docstring is captured in the lambda
         assert isinstance(decl.body, SurfaceAbs)
@@ -257,18 +384,36 @@ translate = \text -- ^ The English text to translate -> text
     def test_both_docstring_styles_together(self):
         """Both -- | (function) and -- ^ (parameter) docstrings work together."""
         source = r"""
+prim_type String
+
 {-# LLM model=gpt-4 temperature=0.7 #-}
 -- | Translate English to French
-translate : String -> String
-translate = \text -- ^ The English text to translate -> text
+translate : String -- ^ The English text to translate -> String
+translate = \text -> text
 """
         decls = parse_program(source)
         evaluator = Evaluator()
         elab = Elaborator(evaluator=evaluator)
         module = elab.elaborate(decls)
 
+        # Type check to get validated types
+        from systemf.core.checker import TypeChecker
+
+        checker = TypeChecker(
+            datatype_constructors=elab.constructor_types,
+            global_types=elab.global_types,
+            primitive_types=elab.primitive_types,
+        )
+        types = checker.check_program(module.declarations)
+
+        # Extract LLM metadata after type checking
+        from systemf.llm.extractor import extract_llm_metadata
+
+        llm_functions = extract_llm_metadata(module, types)
+
         # Check function docstring captured
-        metadata = module.llm_functions["translate"]
+        assert "translate" in llm_functions
+        metadata = llm_functions["translate"]
         assert metadata.function_docstring == "Translate English to French"
         # Check parameter docstring captured
         assert metadata.arg_docstrings == ["The English text to translate"]

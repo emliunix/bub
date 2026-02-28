@@ -38,10 +38,17 @@ class TypeVar(Type):
 
 @dataclass(frozen=True)
 class TypeArrow(Type):
-    """Function type: σ → τ."""
+    """Function type: σ → τ with optional parameter docstring.
+
+    Parameter docs are embedded in type annotations using -- ^ syntax:
+        String -- ^ Input text -> String
+
+    The param_doc field captures documentation for the argument type (σ).
+    """
 
     arg: Type
     ret: Type
+    param_doc: Optional[str] = None  # Populated when elaborator sees -- ^ after type
 
     def __str__(self) -> str:
         match self.arg:
@@ -49,13 +56,14 @@ class TypeArrow(Type):
                 arg_str = f"({self.arg})"
             case _:
                 arg_str = str(self.arg)
-        return f"{arg_str} -> {self.ret}"
+        doc_suffix = f" -- ^ {self.param_doc}" if self.param_doc else ""
+        return f"{arg_str}{doc_suffix} -> {self.ret}"
 
     def free_vars(self) -> set[str]:
         return self.arg.free_vars() | self.ret.free_vars()
 
     def substitute(self, subst: dict[str, Type]) -> Type:
-        return TypeArrow(self.arg.substitute(subst), self.ret.substitute(subst))
+        return TypeArrow(self.arg.substitute(subst), self.ret.substitute(subst), self.param_doc)
 
 
 @dataclass(frozen=True)

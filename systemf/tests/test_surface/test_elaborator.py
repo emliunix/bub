@@ -376,7 +376,8 @@ class TestElaborateDeclarations:
         elab = Elaborator()
 
         body = SurfaceConstructor("True", [], DUMMY_LOC)
-        decl = SurfaceTermDeclaration("x", None, body, DUMMY_LOC)
+        type_ann = SurfaceTypeConstructor("Bool", [], DUMMY_LOC)
+        decl = SurfaceTermDeclaration("x", type_ann, body, DUMMY_LOC)
         core_decl = elab._elaborate_term_decl(decl)
 
         assert isinstance(core_decl, core.TermDeclaration)

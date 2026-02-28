@@ -16,23 +16,26 @@ from systemf.core.errors import ElaborationError
 
 @dataclass(frozen=True)
 class LLMMetadata:
-    """Metadata for LLM function declarations.
+    """Complete metadata for an LLM function.
 
-    Captures the information needed to generate LLM prompts from
-    System F function declarations marked with the @llm decorator.
+    Used by the evaluator to:
+    1. Craft prompts (using docs and types)
+    2. Call LLM APIs (using pragma_params)
+    3. Parse responses (using return type)
+    4. Handle errors (fallback to identity)
+
+    All types are validated by type checker before extraction.
 
     Attributes:
         function_name: The name of the function in the module
-        function_docstring: Optional docstring describing the function's purpose
-        arg_names: Ordered list of parameter names
-        arg_types: Ordered list of parameter types (parallel to arg_names)
-        arg_docstrings: Ordered list of parameter docstrings (parallel to arg_names)
+        function_docstring: Optional docstring (-- | style) describing the function
+        arg_types: Ordered list of parameter types (validated)
+        arg_docstrings: Ordered list of parameter docstrings from -- ^ (parallel to arg_types)
         pragma_params: Raw pragma parameters as string (e.g., "model=gpt-4 temperature=0.7")
     """
 
     function_name: str
     function_docstring: str | None
-    arg_names: list[str]
     arg_types: list[Type]
     arg_docstrings: list[str | None]
     pragma_params: str | None

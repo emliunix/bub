@@ -10,6 +10,11 @@
 Bub is a coding agent CLI built on `republic`.
 It is designed for real engineering workflows where execution must be predictable, inspectable, and recoverable.
 
+**Features:**
+- Command-based workflow with natural language fallback
+- Session tape with anchor/handoff transitions
+- LLM function integration for System F
+
 ## Four Things To Know
 
 1. Command boundary is strict: only lines starting with `,` are treated as commands.
@@ -89,6 +94,36 @@ BUB_BUS_WEBSOCKET_URL=ws://localhost:7892
 uv run bub websocket
 ```
 
+## System F LLM Integration
+
+System F supports LLM functions using the `prim_op` syntax:
+
+```systemf
+{-# LLM model=gpt-4 temperature=0.7 #-}
+-- | Translate English to French
+prim_op translate : String
+  -- ^ The English text to translate
+  -> String
+  -- The French translation
+```
+
+**Quick example:**
+```bash
+# Start System F REPL
+uv run python -m systemf.repl
+
+# Load LLM examples
+> :load systemf/tests/llm_examples.sf
+
+# List LLM functions
+> :llm
+
+# Show function details
+> :llm translate
+```
+
+See `docs/user-manual.md` for complete LLM documentation.
+
 ## Documentation
 
 - `docs/index.md`: getting started and usage overview
@@ -98,6 +133,7 @@ uv run bub websocket
 - `docs/architecture.md`: agent loop, tape, anchor, and tool/skill design
 - `docs/telegram.md`: Telegram integration and operations
 - `docs/discord.md`: Discord integration and operations
+- `docs/user-manual.md`: System F LLM integration guide
 
 ## Development
 

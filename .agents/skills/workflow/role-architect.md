@@ -222,6 +222,7 @@ Create core specifications in types.py and define test contracts.
 **Inputs:**
 - Task file with context
 - Access to existing types.py
+- Design document from kanban (if task has `refers: kanban_file`)
 
 **Outputs:**
 - Updated types.py
@@ -242,6 +243,12 @@ def design_mode(task_file):
     # 1. Load context
     task = read(task_file)
     load_skills(task.skills)
+    
+    # 1a. Load design from kanban if referred
+    if task.get("refers"):
+        kanban = read(task["refers"])
+        design_doc = kanban.get("request", "")  # User's original design document
+        # Use design_doc as requirements for work item population
     
     # 2. Analyze scope
     scope_analysis = analyze_scope(task)

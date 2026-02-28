@@ -20,16 +20,19 @@ Use this workflow when:
 As a project creator, you initiate the workflow by providing the request. There are two ways to do this:
 
 ### Option 1: Pass request as message (Recommended)
-Simply describe your request in natural language. The system will:
-1. Create a kanban file
-2. Initialize the workflow
-3. Route to appropriate agents
+Simply describe your request or provide a design document. The system will:
+1. Create a kanban file with your request preserved as-is
+2. Create initial Architect task to populate work items from the design
+3. Route to Architect for work item population
+4. After design review, create implementation tasks
 
 **Example:**
 ```
 Create a Module dataclass and update the elaborator to return Module instead of tuple.
 This is Phase 1 of refactoring to support LLM integration.
 ```
+
+**Flow:** User Request → Kanban (preserved) → Architect (populate work items) → Design Review → Implementation Tasks
 
 ### Option 2: Create kanban manually and pass the file
 If you want more control over the kanban structure or need to add detailed context:
@@ -188,7 +191,7 @@ Creates kanban files (empty, Manager adds tasks separately):
     --request "Refactor the API layer"
 ```
 
-**Note:** Manager decides whether to start with exploration (unclear requirements) or direct work (clear requirements). See `role-manager.md` for details.
+**Note:** Manager always creates an initial Architect task to populate work items from the design document in the kanban. The Architect reads the kanban's request field and creates work items.
 
 ### log-task.py
 Logs work using subcommands (generate/commit/quick):

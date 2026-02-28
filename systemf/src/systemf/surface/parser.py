@@ -275,12 +275,32 @@ def app_type():
 
 @generate
 def arrow_type():
-    """Parse arrow type (right-associative)."""
+    """Parse arrow type (right-associative) with optional param docstring."""
     arg = yield app_type
-    arrow = yield (ARROW >> arrow_type).optional()
+
+    # Handle optional indentation before docstring (for multiline types like:
+    #   String
+    #     -- ^ doc
+    #     -> String)
+    yield INDENT.optional()
+
+    # Capture optional param docstring (-- ^ style)
+    param_doc = yield DOCSTRING_INLINE.optional()
+    param_doc_value: str | None = None
+    if param_doc is not None:
+        # Extract content after '-- ^' prefix
+        if "^" in param_doc:
+            param_doc_value = param_doc.split("^", 1)[1].strip()
+        else:
+            param_doc_value = ""
+
+    # Try to parse arrow (may be on same line or after indentation)
+    arrow_parser = ARROW >> arrow_type
+    arrow = yield arrow_parser.optional()
+
     if arrow is not None:
         loc = arg.location
-        return SurfaceTypeArrow(arg, arrow, loc)
+        return SurfaceTypeArrow(arg, arrow, param_doc_value, loc)
     return arg
 
 
@@ -711,22 +731,24 @@ def lambda_parser():
 
 @generate
 def let_parser():
-    """Parse let binding with indentation-aware body.
+    """Parse let binding with indentation-aware body and optional type annotation.
 
-    New syntax:
-        let x = value
+    Syntax:
+        let x : Type = value
           body
 
-    Instead of old:
-        let x = value in body
+    Or without type annotation:
+        let x = value
+          body
     """
     loc_token = yield LET
     loc = loc_token.location
     name = yield IDENT
+    var_type = yield (COLON >> type_parser).optional()
     yield EQUALS
     value = yield term_parser
     body = yield indented_block(term_parser)
-    return SurfaceLet(name, value, body, loc)
+    return SurfaceLet(name, value, body, loc, var_type)
 
 
 @generate
@@ -798,14 +820,15 @@ def decl_lambda_parser():
 
 @generate
 def decl_let_parser():
-    """Parse let binding (declaration context) with indentation-aware body."""
+    """Parse let binding (declaration context) with indentation-aware body and optional type annotation."""
     loc_token = yield LET
     loc = loc_token.location
     name = yield IDENT
+    var_type = yield (COLON >> type_parser).optional()
     yield EQUALS
     value = yield decl_term_parser
     body = yield indented_block(decl_term_parser)
-    return SurfaceLet(name, value, body, loc)
+    return SurfaceLet(name, value, body, loc, var_type)
 
 
 @generate
@@ -1156,7 +1179,7 @@ def declaration_parser():
     elif next_tok.type == "PRIM_TYPE":
         result = yield prim_type_decl_parser
     elif next_tok.type == "PRIM_OP":
-        result = yield prim_op_decl_parser
+        result = yield prim_op_decl_with_docstring_and_pragma_parser(preceding_docstring, pragma)
     else:
         result = yield term_declaration_with_docstring_and_pragma_parser(
             preceding_docstring, pragma
@@ -1195,7 +1218,7 @@ def data_declaration_with_docstring_and_pragma_parser(
 
 
 def term_declaration_with_docstring_and_pragma_parser(
-    preceding_docstring: str | None = None, pragma: SurfacePragma | None = None
+    preceding_docstring: str | None = None, pragma: dict[str, str] | None = None
 ):
     """Create a parser for term declaration with preceding docstring and pragma."""
 
@@ -1204,12 +1227,11 @@ def term_declaration_with_docstring_and_pragma_parser(
         name_tok = yield match_token("IDENT")
         name = name_tok.value
         loc = name_tok.location
-        type_ann = yield (COLON >> type_parser).optional()
+        yield COLON
+        type_ann = yield type_parser
         yield EQUALS
         body = yield declaration_body
-        return SurfaceTermDeclaration(
-            name, type_ann, body, loc, preceding_docstring, pragma=pragma
-        )
+        return SurfaceTermDeclaration(name, type_ann, body, loc, preceding_docstring, pragma=pragma)
 
     return parser
 
@@ -1244,7 +1266,8 @@ def term_declaration_with_docstring(preceding_docstring: str | None = None):
     name_tok = yield match_token("IDENT")
     name = name_tok.value
     loc = name_tok.location
-    type_ann = yield (COLON >> type_parser).optional()
+    yield COLON
+    type_ann = yield type_parser
     yield EQUALS
     body = yield declaration_body
     return SurfaceTermDeclaration(name, type_ann, body, loc, preceding_docstring)
@@ -1266,6 +1289,24 @@ def prim_op_decl_parser():
     yield COLON
     ty = yield type_parser
     return SurfacePrimOpDecl(name, ty, loc_token.location)
+
+
+def prim_op_decl_with_docstring_and_pragma_parser(
+    preceding_docstring: str | None = None, pragma: dict[str, str] | None = None
+):
+    """Create a parser for prim_op declaration with preceding docstring and pragma."""
+
+    @generate
+    def parser():
+        loc_token = yield PRIM_OP
+        name = yield IDENT  # Operation names start with lowercase
+        yield COLON
+        ty = yield type_parser
+        return SurfacePrimOpDecl(
+            name, ty, loc_token.location, docstring=preceding_docstring, pragma=pragma
+        )
+
+    return parser
 
 
 # Program parser

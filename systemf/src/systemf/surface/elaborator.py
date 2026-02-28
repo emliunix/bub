@@ -161,9 +161,18 @@ class Elaborator:
             Module containing elaborated declarations and type information
         """
         declarations: list[core.Declaration] = []
+        docstrings: dict[str, str] = {}
+
         for decl in decls:
             core_decl = self.elaborate_declaration(decl)
             declarations.append(core_decl)
+
+            # Extract docstring from surface declaration to module level
+            match decl:
+                case SurfaceTermDeclaration() if decl.docstring:
+                    docstrings[decl.name] = decl.docstring
+                case SurfacePrimOpDecl() if decl.docstring:
+                    docstrings[decl.name] = decl.docstring
 
         return Module(
             name="main",
@@ -171,7 +180,7 @@ class Elaborator:
             constructor_types=self.constructor_types,
             global_types=self.global_types,
             primitive_types=self.primitive_types,
-            docstrings={},
+            docstrings=docstrings,
             llm_functions={},  # Extracted after type checking
             errors=[],
             warnings=[],
@@ -186,8 +195,9 @@ class Elaborator:
                 return self._elaborate_term_decl(decl)
             case SurfacePrimTypeDecl(name, location):
                 return self._elaborate_prim_type_decl(name, location)
-            case SurfacePrimOpDecl(name, type_annotation, location):
-                return self._elaborate_prim_op_decl(name, type_annotation, location)
+            case SurfacePrimOpDecl(name, type_annotation, location, docstring, pragma):
+                # Note: docstring is extracted to Module.docstrings after type checking
+                return self._elaborate_prim_op_decl(name, type_annotation, location, pragma)
             case _:
                 raise ElaborationError(f"Unknown declaration type: {type(decl)}")
 
@@ -276,8 +286,8 @@ class Elaborator:
     ) -> core.TermDeclaration:
         """Elaborate an LLM function declaration.
 
-        Extracts metadata from the declaration and creates an LLM closure.
         The body is replaced with a PrimOp that calls the LLM.
+        Docstrings will be extracted to Module.docstrings after type checking.
         """
         # Extract function docstring
         func_docstring = decl.docstring
@@ -286,47 +296,23 @@ class Elaborator:
         lambda_body = decl.body
         assert isinstance(lambda_body, SurfaceAbs)
 
-        arg_names = [lambda_body.var]
-        arg_docstrings: list[str | None] = (
-            list(lambda_body.param_docstrings) if lambda_body.param_docstrings else [None]
-        )  # type: ignore[assignment]
-
-        # Extract types from type annotation
-        arg_types: list[CoreType] = []
-        if core_type:
-            # The type should be an arrow type: arg_type -> return_type
-            # We extract the argument type
-            match core_type:
-                case TypeArrow(arg_t, _):
-                    arg_types = [arg_t]
-                case _:
-                    arg_types = []
-        else:
-            arg_types = []
-
-        # Ensure arg_types has the same length as arg_names
-        while len(arg_types) < len(arg_names):
-            arg_types.append(TypeVar("_"))
-
         # Get raw pragma parameters (opaque to elaborator)
         pragma_params = None
         if decl.pragma and "LLM" in decl.pragma:
-            pragma_params = decl.pragma["LLM"].strip() or None
+            pragma_params = decl.pragma["LLM"].strip()
 
-        # Extract parameter docstrings from lambda
-        param_docstrings: list[str] = []
-        if lambda_body.param_docstrings:
-            param_docstrings = [str(ds) if ds else "" for ds in lambda_body.param_docstrings]
-
-        # Elaborate to PrimOp("$llm.{name}")
-        # Add to global_terms
+        # Elaborate to PrimOp("llm.{name}")
         self._add_global_term(decl.name)
 
         # Register type in global_types for type checking
         if core_type is not None:
             self.global_types[decl.name] = core_type
 
-        # Pass metadata fields to Core - LLMMetadata will be extracted after type checking
+        # Extract parameter docstrings from lambda
+        param_docstrings: list[str] = []
+        if lambda_body.param_docstrings:
+            param_docstrings = [str(ds) if ds else "" for ds in lambda_body.param_docstrings]
+
         return core.TermDeclaration(
             name=decl.name,
             type_annotation=core_type,
@@ -352,21 +338,40 @@ class Elaborator:
         )
 
     def _elaborate_prim_op_decl(
-        self, name: str, type_annotation: "SurfaceType", location: Location
+        self,
+        name: str,
+        type_annotation: "SurfaceType",
+        location: Location,
+        pragma: dict[str, str] | None = None,
     ) -> core.TermDeclaration:
         """Elaborate a primitive operation declaration.
 
         Registers the operation with its type signature in global_types
         as $prim.name and returns a TermDeclaration placeholder.
+        For LLM functions with pragma, registers as llm.name instead.
         """
         core_type = self._elaborate_type(type_annotation)
-        full_name = f"$prim.{name}"
-        self.global_types[full_name] = core_type
+
+        # Determine if this is an LLM function based on pragma
+        if pragma and "LLM" in pragma:
+            # LLM function: register as llm.name
+            full_name = f"llm.{name}"
+            self.global_types[full_name] = core_type
+            # Use the pragma content as the pragma string
+            pragma_str = pragma.get("LLM")
+        else:
+            # Regular primitive: register as $prim.name
+            full_name = f"$prim.{name}"
+            self.global_types[full_name] = core_type
+            pragma_str = None
+
         # Return a TermDeclaration as placeholder with a PrimOp body
+        # Note: docstrings are extracted to Module.docstrings, not stored in Core AST
         return core.TermDeclaration(
             name=name,
             type_annotation=core_type,
-            body=core.PrimOp(name),
+            body=core.PrimOp(full_name),
+            pragma=pragma_str,
         )
 
     # =====================================================================
@@ -503,10 +508,10 @@ class Elaborator:
                 # Type variables are by name in both surface and core
                 return TypeVar(name)
 
-            case SurfaceTypeArrow(arg, ret, location):
+            case SurfaceTypeArrow(arg, ret, param_doc, location):
                 core_arg = self._elaborate_type(arg)
                 core_ret = self._elaborate_type(ret)
-                return TypeArrow(core_arg, core_ret)
+                return TypeArrow(core_arg, core_ret, param_doc)
 
             case SurfaceTypeForall(var, body, location):
                 self._add_type_binding(var)

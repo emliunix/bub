@@ -83,10 +83,10 @@ Creates a new kanban file with a validated YAML header. Creates an **empty** kan
 
 **What it does:**
 1. Creates the kanban file with proper ID sequencing
-2. Kanban starts with empty tasks list
-3. Manager creates initial task separately based on request clarity
+2. Preserves user's design document in `request` field
+3. Manager creates initial Architect task to populate work items
 
-**Note:** The Manager decides whether to start with exploration (unclear requirements) or direct work (clear requirements). See role-manager.md for details.
+**Note:** Manager always starts with Architect task to populate work items from the design document. See role-manager.md for details.
 
 ### 3. log-task.py
 

@@ -36,11 +36,24 @@ class SurfaceTypeVar(SurfaceType):
 
 @dataclass(frozen=True)
 class SurfaceTypeArrow(SurfaceType):
-    """Function type: arg -> ret."""
+    """Function type: arg -> ret with optional parameter docstring.
+
+    Example:
+        String -- ^ Input text -> String
+
+    Representation:
+        SurfaceTypeArrow(
+            arg=SurfaceTypeConstructor("String"),
+            ret=SurfaceTypeConstructor("String"),
+            param_doc="Input text",
+            location=loc
+        )
+    """
 
     arg: SurfaceType
     ret: SurfaceType
-    location: Location
+    param_doc: Optional[str] = None  # Populated when parser sees -- ^ after type
+    location: Location = None  # type: ignore[assignment]  # noqa: RUF009
 
     def __str__(self) -> str:
         match self.arg:
@@ -48,7 +61,8 @@ class SurfaceTypeArrow(SurfaceType):
                 arg_str = f"({self.arg})"
             case _:
                 arg_str = str(self.arg)
-        return f"{arg_str} -> {self.ret}"
+        doc_suffix = f" -- ^ {self.param_doc}" if self.param_doc else ""
+        return f"{arg_str}{doc_suffix} -> {self.ret}"
 
 
 @dataclass(frozen=True)
@@ -169,15 +183,23 @@ class SurfaceTypeApp(SurfaceTerm):
 
 @dataclass(frozen=True)
 class SurfaceLet(SurfaceTerm):
-    """Let binding: let name = value in body."""
+    """Local let binding within an expression.
 
-    name: str
+    Syntax:
+        let x : Int = 42 in x + 1
+
+    Note: type annotation is optional for locals since they can be inferred.
+    """
+
+    var: str
     value: SurfaceTerm
     body: SurfaceTerm
     location: Location
+    var_type: Optional[SurfaceType] = None  # Optional explicit annotation
 
     def __str__(self) -> str:
-        return f"let {self.name} = {self.value} in {self.body}"
+        type_part = f" : {self.var_type}" if self.var_type else ""
+        return f"let {self.var}{type_part} = {self.value} in {self.body}"
 
 
 @dataclass(frozen=True)
@@ -383,19 +405,28 @@ class SurfaceDataDeclaration(SurfaceDeclaration):
 
 @dataclass(frozen=True)
 class SurfaceTermDeclaration(SurfaceDeclaration):
-    """Term declaration: name : type = body or name = body."""
+    """Named term declaration at module level.
+
+    Syntax:
+        -- | Function description
+        func : Type -- ^ param -> Type
+        func = \\x -> body
+
+    Or with pragma:
+        {-# LLM model=gpt-4 #-}
+        -- | Translate text
+        prim_op func : Type -- ^ param -> Type
+    """
 
     name: str
-    type_annotation: Optional[SurfaceType]
+    type_annotation: SurfaceType  # REQUIRED - changed from Optional
     body: SurfaceTerm
-    location: Location
-    docstring: str | None = None
-    pragma: dict[str, str] | None = None  # e.g., {"LLM": "model=gpt-4 temperature=0.7"}
+    location: Location = None  # type: ignore[assignment]  # noqa: RUF009
+    docstring: str | None = None  # -- | style, attaches to this declaration
+    pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
 
     def __str__(self) -> str:
-        if self.type_annotation:
-            return f"{self.name} : {self.type_annotation} = {self.body}"
-        return f"{self.name} = {self.body}"
+        return f"{self.name} : {self.type_annotation} = {self.body}"
 
 
 @dataclass(frozen=True)
@@ -424,12 +455,17 @@ class SurfacePrimOpDecl(SurfaceDeclaration):
     The name is registered as $prim.name in global_types.
 
     Example: prim_op int_plus : Int -> Int -> Int
+
+    With pragma for LLM functions:
+        {-# LLM model=gpt-4 #-}
+        prim_op translate : String -> String
     """
 
     name: str
     type_annotation: SurfaceType
     location: Location
     docstring: str | None = None
+    pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
 
     def __str__(self) -> str:
         return f"prim_op {self.name} : {self.type_annotation}"

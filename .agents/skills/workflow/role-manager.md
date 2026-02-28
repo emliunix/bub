@@ -82,27 +82,23 @@ def execute(input):
         return reconcile_tasks(input.kanban_file, input.done_task, input.tasks)
 
 def create_kanban(user_request):
-    """Create initial kanban and decide first task based on request clarity."""
-    # Create kanban file (empty, no automatic tasks)
+    """Create kanban with user's design doc and initial Architect task."""
+    # Create kanban file with user's request preserved unchanged
     kanban_file = execute_script(f"{skill_path}/scripts/create-kanban.py", {
         "title": "Workflow",
         "request": user_request
     })
     
-    # Manager decides initial task type based on request clarity
-    if has_clear_requirements(user_request):
-        # Request is clear - can start with design or implementation
-        initial_task = create_initial_task_from_request(kanban_file, user_request)
-    else:
-        # Request unclear - need exploration to understand scope
-        initial_task = execute_script(f"{skill_path}/scripts/create-task.py", {
-            "role": "Architect",
-            "type": "exploration",
-            "kanban": kanban_file,
-            "creator-role": "manager",
-            "title": "Explore Request",
-            "description": f"Explore and analyze: {user_request}"
-        })
+    # Always start with Architect to populate work items from design doc
+    initial_task = execute_script(f"{skill_path}/scripts/create-task.py", {
+        "role": "Architect",
+        "type": "design",
+        "kanban": kanban_file,
+        "creator-role": "manager",
+        "title": "Populate Work Items",
+        "description": "Review the design document in kanban and populate work items",
+        "refers": kanban_file
+    })
     
     # Update kanban with initial task
     kanban = read(kanban_file)
@@ -113,7 +109,8 @@ def create_kanban(user_request):
     # Log plan creation
     log_plan_adjustment(kanban_file, "kanban_created", {
         "action": "Created initial task",
-        "task_type": "exploration" if not has_clear_requirements(user_request) else "direct"
+        "task_type": "design",
+        "note": "Architect will populate work items from design doc"
     })
     
     return {
@@ -121,35 +118,6 @@ def create_kanban(user_request):
         "next_task": initial_task,
         "tasks": [initial_task]
     }
-
-def has_clear_requirements(user_request):
-    """Check if request has clear scope and known files."""
-    # If request includes specific files, implementation approach, or detailed plan
-    # Then we can skip exploration and go directly to design/implement
-    # Otherwise, need Architect to explore first
-    return "file:" in user_request.lower() or "implement:" in user_request.lower()
-
-def create_initial_task_from_request(kanban_file, user_request):
-    """Create first task directly from clear request (skipping exploration)."""
-    # Parse request to determine if design or implement task needed
-    if is_architecture_related(user_request):
-        return execute_script(f"{skill_path}/scripts/create-task.py", {
-            "role": "Architect",
-            "type": "design",
-            "kanban": kanban_file,
-            "creator-role": "manager",
-            "title": "Design System",
-            "description": user_request
-        })
-    else:
-        return execute_script(f"{skill_path}/scripts/create-task.py", {
-            "role": "Implementor",
-            "type": "implement",
-            "kanban": kanban_file,
-            "creator-role": "manager",
-            "title": "Implement Feature",
-            "description": user_request
-        })
 
 def reconcile_tasks(kanban_file, done_task, tasks):
     """Process completed task and plan next steps."""
@@ -760,9 +728,7 @@ Every significant decision is logged:
 
 ## Event Types
 
-- `kanban_created` - New workflow started (with initial task: exploration or direct)
-- `initial_task_exploration` - Started with exploration (unclear requirements)
-- `initial_task_direct` - Started with design/implement (clear requirements)
+- `kanban_created` - New workflow started with Architect task to populate work items
 - `blocker_detected` - Task blocked, exploration created
 - `design_ready_for_review` - Design task complete, assigned to Architect for design review
 - `design_review_approved` - Design review approved, creating implementation tasks
@@ -776,34 +742,19 @@ Every significant decision is logged:
 
 ## Initial Task Strategy
 
-**Manager decides whether to start with exploration or direct work:**
+**Manager always starts with Architect to populate work items:**
 
-**Start with EXPLORATION when:**
-- Request scope is unclear
-- Unknown which files are affected
-- Need to understand existing codebase first
-- Complex cross-cutting concerns
-- User says "explore", "analyze", "understand"
+Regardless of request clarity, Manager:
+1. Creates kanban with user's design doc preserved in `request` field
+2. Creates initial `design` task for Architect with `refers: kanban_file`
+3. Architect reads design from kanban and populates work items
+4. Design review validates work items
+5. Manager creates implementation tasks from approved work items
 
-**Start with DIRECT task when:**
-- Request specifies concrete files to modify
-- Clear implementation approach known
-- Detailed plan provided by user
-- Simple isolated change
-- Follow-up to completed exploration
-
-**Examples:**
-```
-"Analyze the error handling" → exploration task (Architect)
-"Implement Module class in src/module.py" → implement task (Implementor)
-"Design new API for caching" → design task (Architect)
-"Add tests for utils.py functions" → implement task (Implementor)
-```
-
-**Architect's Role in Exploration:**
-When given an exploration task, Architect:
-1. Explores relevant code
+**Architect's Role:**
+When given the initial design task, Architect:
+1. Reads the design document from the referenced kanban file
 2. Analyzes scope and complexity
-3. Documents findings in work log
-4. Suggests work items in `## Suggested Work Items` section
-5. Manager uses these work items to plan implementation tasks
+3. Populates work items in task file
+4. Work log records analysis and decisions
+5. Task transitions to `review` state for design review

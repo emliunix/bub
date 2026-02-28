@@ -231,10 +231,14 @@ class DataDeclaration:
 class TermDeclaration:
     """x : τ = e
 
-    Additional fields for LLM function support:
-    - pragma: Raw pragma parameters (e.g., "model=gpt-4 temperature=0.7")
-    - docstring: Function-level docstring (-- | style)
-    - param_docstrings: Parameter docstrings (-- ^ style)
+    Core term declaration after elaboration. The Core AST is clean and
+    focused on semantics.
+
+    LLM functions are identified by pragma field containing configuration
+    parameters (e.g., "model=gpt-4 temperature=0.7"). The body is replaced
+    with a PrimOp("llm.{name}") during elaboration.
+
+    Docstrings and param_docstrings are stored here for LLM metadata extraction.
     """
 
     name: str

@@ -32,6 +32,9 @@ class REPL:
         self.constructor_types: dict[str, Type] = {}
         self.global_terms: set[str] = set()
 
+        # LLM function metadata storage
+        self.llm_functions: dict[str, LLMMetadata] = {}
+
         # Initialize elaborator first (it creates its own constructor_types, primitive_types, and global_types)
         self.elaborator = Elaborator()
         # Share the elaborator's global_types so prim_op declarations are visible to checker
@@ -90,7 +93,7 @@ class REPL:
     def _completer(self, text: str, state: int) -> str | None:
         """Tab completion for REPL commands and identifiers."""
         # Commands that start with ':'
-        commands = [":quit", ":q", ":help", ":h", ":env", ":{", ":}"]
+        commands = [":quit", ":q", ":help", ":h", ":env", ":llm", ":{", ":}"]
 
         # Add global identifiers
         identifiers = list(self.global_terms)
@@ -120,10 +123,17 @@ class REPL:
             surface_decls = Parser(tokens).parse()
             module = self.elaborator.elaborate(surface_decls)
             types = self.checker.check_program(module.declarations)
-            values = self.evaluator.evaluate_program(module.declarations)
 
-            # Extract LLM metadata after type checking
+            # Extract LLM metadata after type checking, BEFORE evaluation
             llm_functions = extract_llm_metadata(module, types)
+
+            # Register LLM functions with evaluator BEFORE evaluating program
+            for name, metadata in llm_functions.items():
+                self.evaluator.register_llm_closure(name, metadata)
+                self.llm_functions[name] = metadata
+
+            # Now evaluate the program (closures are registered)
+            values = self.evaluator.evaluate_program(module.declarations)
 
             # Update environments with prelude definitions
             for name, value in values.items():
@@ -191,6 +201,7 @@ class REPL:
                 print("  :quit, :q    Exit REPL")
                 print("  :help, :h    Show this help")
                 print("  :env         Show current environment")
+                print("  :llm         List LLM functions or show details")
                 print("  :{           Start multiline input")
                 print("  :}           End multiline input")
                 print()
@@ -215,6 +226,8 @@ class REPL:
                 print("Environment:")
                 for name in self.global_values:
                     print(f"  {name}")
+            case ":llm":
+                self._handle_llm_command(parts)
             case ":{":
                 self.in_multiline = True
                 self.multiline_buffer = []
@@ -222,6 +235,40 @@ class REPL:
                 print("Error: Not in multiline mode (use :{ first)")
             case _:
                 print(f"Unknown command: {cmd}")
+
+    def _handle_llm_command(self, parts: list[str]) -> None:
+        """Handle :llm command to list or show LLM function details."""
+        if len(parts) == 1:
+            # List all LLM functions
+            if not self.llm_functions:
+                print("No LLM functions registered.")
+                print("Define LLM functions with {-# LLM model=... #-} pragma.")
+                return
+
+            print("LLM Functions:")
+            for name, metadata in sorted(self.llm_functions.items()):
+                doc = metadata.function_docstring or "(no description)"
+                print(f"  {name} - {doc}")
+        else:
+            # Show details for specific function
+            func_name = parts[1]
+            if func_name not in self.llm_functions:
+                print(f"Unknown LLM function: {func_name}")
+                print(f"Available: {', '.join(sorted(self.llm_functions.keys())) or '(none)'}")
+                return
+
+            metadata = self.llm_functions[func_name]
+            print(f"LLM Function: {metadata.function_name}")
+            if metadata.function_docstring:
+                print(f"Description: {metadata.function_docstring}")
+            print(f"Pragma: {metadata.pragma_params or '(none)'}")
+            if metadata.arg_types:
+                print("Parameters:")
+                for i, (arg_type, arg_doc) in enumerate(
+                    zip(metadata.arg_types, metadata.arg_docstrings)
+                ):
+                    doc_str = f" -- {arg_doc}" if arg_doc else ""
+                    print(f"  arg{i}: {arg_type}{doc_str}")
 
     def _end_multiline(self) -> None:
         """End multiline mode and evaluate accumulated input."""
@@ -247,10 +294,17 @@ class REPL:
                 surface_decls = Parser(tokens).parse()
                 module = self.elaborator.elaborate(surface_decls)
                 types = self.checker.check_program(module.declarations)
-                values = self.evaluator.evaluate_program(module.declarations)
 
-                # Extract LLM metadata after type checking
+                # Extract LLM metadata after type checking, BEFORE evaluation
                 llm_functions = extract_llm_metadata(module, types)
+
+                # Register LLM functions with evaluator BEFORE evaluating program
+                for name, metadata in llm_functions.items():
+                    self.evaluator.register_llm_closure(name, metadata)
+                    self.llm_functions[name] = metadata
+
+                # Now evaluate the program (closures are registered)
+                values = self.evaluator.evaluate_program(module.declarations)
 
                 for name, value in values.items():
                     ty = types[name]
