@@ -418,7 +418,6 @@ class LLMMetadata:
     function_docstring: Optional[str]  # -- | style doc
     
     # Arguments (parallel arrays)
-    arg_names: list[str]        # ["x", "y"] - extracted from type
     arg_types: list[Type]       # [String, Int] - validated types
     arg_docstrings: list[Optional[str]]  # ["doc for x", None] - from -- ^
     
@@ -440,7 +439,6 @@ Becomes:
 LLMMetadata(
     function_name="translate",
     function_docstring="Translate English to French",
-    arg_names=["arg0"],  # Generated if not in lambda
     arg_types=[PrimitiveType("String")],  # Validated!
     arg_docstrings=["The English text"],
     pragma_params="model=gpt-4 temperature=0.7"
@@ -454,20 +452,20 @@ Unified naming scheme for all documentation lookups.
 **Key Format:**
 ```
 {name}                    - Function/type declaration doc
-{name}.${n}               - nth parameter doc (1-indexed)
+{name}.${n}               - nth parameter doc (0-indexed)
 {name}.${field}          - Record field doc
-{name}.${ctor}.${n}      - Constructor parameter doc
+{name}.${ctor}           - Constructor doc
 ```
 
 **Examples:**
 ```python
 # Function
 docstrings["translate"] = "Translate English to French"
-docstrings["translate.$1"] = "The English text"
+docstrings["translate.$0"] = "The English text"
 
 # Multi-parameter
-docstrings["classify.$1"] = "Categories"
-docstrings["classify.$2"] = "Text to classify"
+docstrings["classify.$0"] = "Categories"
+docstrings["classify.$1"] = "Text to classify"
 
 # Data type
 docstrings["Person"] = "A person record"
@@ -475,11 +473,11 @@ docstrings["Person.$name"] = "Full name"
 docstrings["Person.$age"] = "Age in years"
 
 # Constructor
-docstrings["Maybe.$Just.$1"] = "The value"
+docstrings["Maybe.$Just"] = "Constructor documentation"
 ```
 
 **Why this format:**
-- Hierarchical: `func.$1` implies "function's first param"
+- Hierarchical: `func.$0` implies "function's first param"
 - Extensible: Can add more levels later
 - Query-friendly: `name.startswith("func.")` finds all func docs
 
@@ -832,7 +830,7 @@ def extract_docs(module: Module, global_types: dict[str, Type]) -> dict[str, str
             
             # Param docs from type
             param_docs = _extract_param_docs(decl.type_annotation)
-            for i, doc in enumerate(param_docs, 1):
+            for i, doc in enumerate(param_docs):
                 if doc:
                     docs[f"{decl.name}.${i}"] = doc
     
@@ -902,7 +900,6 @@ def _build_llm_metadata(decl: TermDeclaration, global_types: dict[str, Type]) ->
     return LLMMetadata(
         function_name=decl.name,
         function_docstring=decl.docstring,
-        arg_names=[f"arg{i}" for i in range(len(arg_types))],
         arg_types=arg_types,
         arg_docstrings=arg_docs,
         pragma_params=decl.pragma.get("LLM")
@@ -1423,8 +1420,8 @@ def extract_docs(module: Module, global_types: dict[str, Type]) -> dict[str, str
     
     Returns a dict mapping qualified names to docstrings:
     - "func" -> function-level doc
-    - "func.$1" -> first parameter doc
-    - "func.$2" -> second parameter doc
+    - "func.$0" -> first parameter doc
+    - "func.$1" -> second parameter doc
     """
     docs = {}
     
@@ -1436,7 +1433,7 @@ def extract_docs(module: Module, global_types: dict[str, Type]) -> dict[str, str
             
             # Extract param docs from type annotation
             param_docs = _extract_param_docs_from_type(decl.type_annotation)
-            for i, doc in enumerate(param_docs, 1):
+            for i, doc in enumerate(param_docs):
                 if doc:
                     docs[f"{decl.name}.${i}"] = doc
     
@@ -1521,13 +1518,9 @@ def _build_llm_metadata(
         arg_docs.append(getattr(current, 'param_doc', None))
         current = current.ret
     
-    # Generate arg names (or extract from lambda if available)
-    arg_names = [f"arg{i}" for i in range(len(arg_types))]
-    
     return LLMMetadata(
         function_name=decl.name,
         function_docstring=decl.docstring,
-        arg_names=arg_names,
         arg_types=arg_types,
         arg_docstrings=arg_docs,
         pragma_params=decl.pragma
@@ -1537,7 +1530,6 @@ def _build_llm_metadata(
 **Key Points:**
 - Only processes declarations with `pragma` containing "LLM"
 - Uses validated types (from type checker)
-- Arg names generated (could extract from lambda in future)
 - Returns dict for O(1) REPL lookup
 
 ### Component: REPL Integration
@@ -1574,7 +1566,7 @@ def command_llm(self, name: str):
         metadata = self.current_module.llm_functions[name]
         print(f"LLM Function: {metadata.function_name}")
         print(f"Model: {metadata.pragma_params}")
-        print(f"Args: {metadata.arg_names}")
+        print(f"Arg types: {metadata.arg_types}")
     else:
         print(f"Not an LLM function: {name}")
 ```
@@ -1696,25 +1688,21 @@ def test_full_pipeline():
 
 ### B.1 Should Core TypeArrow have param_doc?
 
-**Options:**
-1. **Yes, add to Core:** Consistent with Surface, extraction is simple
-2. **No, extract from Surface:** Core stays minimal, but extraction must happen before elaboration
-3. **Store separately during elaboration:** Complex bookkeeping
+**Decision:** Yes
 
-**Recommendation:** Option 1 - add `param_doc: Optional[str]` to Core `TypeArrow`. It's a semantic annotation, belongs in Core.
+Add `param_doc: Optional[str]` to Core `TypeArrow`. It's a semantic annotation that belongs in Core, making extraction simple and consistent with Surface AST.
 
 ### B.2 How to handle arg names?
 
-**Options:**
-1. **Generate names:** "arg0", "arg1" - simple, always works
-2. **Extract from lambda:** If body is `\x -> ...`, use "x" - more meaningful
-3. **Require explicit names:** New syntax for named params
+**Decision:** Do not support arg names
 
-**Recommendation:** Option 1 for now (generate), Option 2 as enhancement later.
+LLM functions are global declarations, so there's no lambda case. Arg names are not needed in LLMMetadata.
 
 ### B.3 What about record fields?
 
-**Future enhancement:** Support docs on record fields:
+**Decision:** Support record field documentation
+
+Docs attach to the field itself (not the field's type), since only the field name is part of the global declaration:
 ```systemf
 data Person = Person
   { name : String -- ^ Full name
@@ -1724,13 +1712,13 @@ data Person = Person
 
 **Key:** `Person.$name`, `Person.$age`
 
+This follows the convention that documentation is keyed by the global declaration name (the field), not the type.
+
 ### B.4 Should pragmas be typed?
 
-**Options:**
-1. **Dict of strings:** Flexible, parsed at runtime
-2. **Typed ADT:** `Pragma = LLM {model: str, temp: float} | Inline | ...`
+**Decision:** No, keep `dict[str, str]`
 
-**Recommendation:** Option 1 for now (experimental). Option 2 when stable.
+The current `dict[str, str]` format is sufficient for our use case. It's flexible and pragmatic for the experimental phase. A typed ADT would add unnecessary complexity.
 
 ---
 

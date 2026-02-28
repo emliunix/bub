@@ -109,6 +109,7 @@ Architect uses the `type` field in task metadata to determine mode:
 | Task Type | Mode | Description |
 |-----------|------|-------------|
 | `type: design` | DESIGN | Create types.py and define test contracts |
+| `type: design-review` | DESIGN REVIEW | Validate design work items against patterns |
 | `type: review` | REVIEW | Validate implementation quality |
 
 **Manager MUST set correct `type` when creating Architect tasks.**
@@ -119,7 +120,12 @@ def determine_mode(task_file):
     task_meta = read_yaml_frontmatter(task_file)
     
     if task_meta.get("type") == "design":
+        # Check if this is a design that needs review
+        if task_meta.get("state") == "review":
+            return design_review_mode(task_file)
         return design_mode(task_file)
+    elif task_meta.get("type") == "design-review":
+        return design_review_mode(task_file)
     elif task_meta.get("type") == "review":
         return review_mode(task_file)
     else:
@@ -263,7 +269,7 @@ def design_mode(task_file):
             "Dependencies documented for parallel/sequential execution"
         ]
         
-        # Log work using script
+        # Log work using script - MUST set state to 'review' (ready for design review)
         execute_script(f"{skill_path}/scripts/log-task.py", {
             "command": "quick",
             "task": task_file,
@@ -271,9 +277,10 @@ def design_mode(task_file):
             "facts": facts,
             "analysis": analysis,
             "conclusion": "ok",
-            "work_items": work_items
+            "work_items": work_items,
+            "new_state": "review"
         })
-        
+
         return work_items
         
     else:
@@ -307,7 +314,7 @@ def design_mode(task_file):
         if discovered:
             facts.append("Discovered issues for future tasks")
         
-        # Log work using script
+        # Log work using script - MUST set state to 'review' (ready for design review)
         execute_script(f"{skill_path}/scripts/log-task.py", {
             "command": "quick",
             "task": task_file,
@@ -316,10 +323,286 @@ def design_mode(task_file):
             "analysis": ["Design decisions documented"],
             "conclusion": "ok",
             "work_items": work_items,
-            "discovered_issues": discovered
+            "discovered_issues": discovered,
+            "new_state": "review"
         })
         
         return work_items
+```
+
+### Mode: DESIGN REVIEW (phase=design, sub_phase=review)
+
+Validate design work items against workflow patterns before implementation begins.
+
+**Full documentation:** See `patterns.md` Design Review pattern for detailed process.
+
+**Inputs:**
+- Design task file (state: review, work items created)
+- patterns.md for pattern validation rules
+
+**Outputs:**
+- Review verdict (approved / redesign required)
+- If redesign needed: escalation with specific issues
+
+**Quick Reference:**
+- Load context: Task metadata, work items, original requirements
+- Validate patterns: Check work items against patterns.md rules
+- Assess complexity: Are work items appropriately decomposed?
+- Verify dependencies: Core-First principle followed?
+- Make decision: Approve if valid, escalate if issues found
+
+```python
+def design_review_mode(task_file):
+    """
+    Review design work items against workflow patterns.
+    
+    See patterns.md Design Review pattern for detailed process.
+    
+    High-level flow:
+    1. Load context (task metadata, work items from design phase)
+    2. Validate work items against patterns.md rules
+    3. Check complexity assessment and decomposition
+    4. Verify Core-First dependency ordering
+    5. Make approve/redesign decision and log result
+    
+    Returns:
+        "approved" if design work items are valid
+        "escalate" if redesign required
+    """
+    # Step 1: Load design review context
+    context = load_design_review_context(task_file)
+    
+    # Step 2: Validate against patterns
+    pattern_issues = validate_work_items_against_patterns(
+        context.work_items, 
+        context.original_requirements
+    )
+    
+    # Step 3: Check complexity decomposition
+    complexity_issues = check_complexity_decomposition(context.work_items)
+    
+    # Step 4: Verify Core-First dependencies
+    dependency_issues = verify_core_first_ordering(context.work_items)
+    
+    # Step 5: Make decision
+    all_issues = pattern_issues + complexity_issues + dependency_issues
+    decision, reasoning = make_design_review_decision(all_issues)
+    
+    # Determine new state based on decision
+    # approved -> done (ready for implementation)
+    # escalate -> escalated (needs redesign)
+    new_state = "done" if decision == "approved" else "escalated"
+    
+    # Log result using log-task.py
+    execute_script(f"{skill_path}/scripts/log-task.py", {
+        "command": "quick",
+        "task": task_file,
+        "title": f"Design Review {'Approved' if decision == 'approved' else 'Escalated'}",
+        "content": format_design_review_content(decision, all_issues, reasoning),
+        "new_state": new_state
+    })
+    
+    return decision
+
+
+def load_design_review_context(task_file):
+    """
+    Load all context needed for design review.
+    
+    Returns context containing:
+    - task_meta: Task metadata (type, state, skills, etc.)
+    - work_items: Work items from design phase
+    - original_requirements: Original design requirements/spec
+    """
+    pass
+
+
+def validate_work_items_against_patterns(work_items, requirements):
+    """
+    Validate work items against patterns.md rules.
+    
+    Checks:
+    - [ ] Pattern selection is appropriate (Design-First vs direct implementation)
+    - [ ] Large work items are decomposed per Implementation-With-Review
+    - [ ] Integration pattern used for multi-component features
+    - [ ] Discovery pattern considered for unclear requirements
+    - [ ] Escalation Recovery pattern will work if needed
+    
+    Returns:
+        List of pattern violations with severity and fix recommendations
+    """
+    issues = []
+    
+    for idx, item in enumerate(work_items):
+        # Check if pattern selection is appropriate
+        pattern_selection = assess_pattern_selection(item, requirements)
+        if pattern_selection["inappropriate"]:
+            issues.append({
+                "work_item": idx,
+                "severity": "high",
+                "issue": f"Inappropriate pattern selection: {pattern_selection['reason']}",
+                "recommendation": pattern_selection["recommended_pattern"]
+            })
+        
+        # Check complexity decomposition
+        complexity = assess_work_item_complexity(item)
+        if complexity == "too_large":
+            issues.append({
+                "work_item": idx,
+                "severity": "medium",
+                "issue": "Work item too large for single implementation task",
+                "recommendation": "Decompose into smaller work items per Implementation-With-Review pattern"
+            })
+    
+    return issues
+
+
+def check_complexity_decomposition(work_items):
+    """
+    Check if work items are appropriately decomposed.
+    
+    A work item is appropriately sized if:
+    - Can be implemented in one focused session
+    - Has clear scope and boundaries
+    - Doesn't require multiple review cycles
+    
+    Returns:
+        List of decomposition issues
+    """
+    issues = []
+    
+    for idx, item in enumerate(work_items):
+        # Check estimated effort
+        effort = item.get("estimated_effort", "medium")
+        if effort == "large":
+            issues.append({
+                "work_item": idx,
+                "severity": "medium",
+                "issue": "Work item marked as 'large' effort - should be decomposed",
+                "recommendation": "Split into smaller work items, each following Implementation-With-Review"
+            })
+        
+        # Check file count
+        files = item.get("files", [])
+        if len(files) > 5:
+            issues.append({
+                "work_item": idx,
+                "severity": "low",
+                "issue": f"Work item touches {len(files)} files - may be too broad",
+                "recommendation": "Consider if files can be grouped into logical components"
+            })
+    
+    return issues
+
+
+def verify_core_first_ordering(work_items):
+    """
+    Verify work items follow Core-First dependency principle.
+    
+    Core types should have empty dependencies and be designed first.
+    Implementation work items should depend on their types.
+    Integration work items should depend on all components.
+    
+    Returns:
+        List of dependency ordering issues
+    """
+    issues = []
+    
+    for idx, item in enumerate(work_items):
+        deps = item.get("dependencies", [])
+        description = item.get("description", "").lower()
+        
+        # Core types should have no dependencies
+        if "types" in description or "core" in description:
+            if deps:
+                issues.append({
+                    "work_item": idx,
+                    "severity": "high",
+                    "issue": "Core type work item has dependencies - violates Core-First principle",
+                    "recommendation": "Core types should have empty dependencies [] and be designed first"
+                })
+        
+        # Check for circular dependencies (simplified check)
+        for dep_idx in deps:
+            if dep_idx >= len(work_items):
+                issues.append({
+                    "work_item": idx,
+                    "severity": "high",
+                    "issue": f"Invalid dependency index: {dep_idx}",
+                    "recommendation": "Dependency index out of range"
+                })
+    
+    return issues
+
+
+def assess_pattern_selection(work_item, requirements):
+    """
+    Assess if pattern selection is appropriate for this work item.
+    
+    Returns dict with:
+    - inappropriate: bool
+    - reason: str (if inappropriate)
+    - recommended_pattern: str (if inappropriate)
+    """
+    description = work_item.get("description", "").lower()
+    files = work_item.get("files", [])
+    
+    # Check if design phase is needed
+    needs_design = any([
+        "types" in description,
+        "api" in description,
+        "protocol" in description,
+        "architecture" in description,
+        "core" in description,
+        any("types.py" in f for f in files)
+    ])
+    
+    # If implementing core types without design phase, flag it
+    if needs_design and "implement" in description:
+        return {
+            "inappropriate": True,
+            "reason": "Core types/protocols should use Design-First pattern",
+            "recommended_pattern": "Design-First (separate design task before implementation)"
+        }
+    
+    return {"inappropriate": False}
+
+
+def make_design_review_decision(issues):
+    """
+    Make approve/escalate decision based on design review findings.
+    
+    Decision criteria:
+    
+    APPROVE if:
+    - No high-severity issues
+    - Pattern selection is appropriate
+    - Core-First principle is followed
+    - Work items are appropriately sized
+    
+    ESCALATE (require redesign) if:
+    - High-severity pattern violations
+    - Core-First principle violated
+    - Work items too large without decomposition plan
+    
+    Returns:
+        (decision, reasoning) tuple
+    """
+    high_severity = [i for i in issues if i.get("severity") == "high"]
+    
+    if high_severity:
+        return "escalate", f"{len(high_severity)} high-severity issues require redesign"
+    
+    medium_severity = [i for i in issues if i.get("severity") == "medium"]
+    if len(medium_severity) > 2:
+        return "escalate", f"{len(medium_severity)} medium-severity issues suggest redesign needed"
+    
+    return "approved", "Design work items are valid and ready for implementation"
+
+
+def format_design_review_content(decision, issues, reasoning):
+    """Format design review content for work log."""
+    pass
 ```
 
 ### Mode: REVIEW (phase=execute, sub_phase=review)
@@ -381,13 +664,19 @@ def review_mode(task_file):
     # See review.md for make_review_decision() details
     decision, work_items, reasoning = make_review_decision(issues, core_mods, compliance)
     
+    # Determine new state based on decision
+    # pass -> done (implementation approved)
+    # escalate -> escalated (needs fixes)
+    new_state = "done" if decision == "pass" else "escalated"
+    
     # Log result using log-task.py
     # See review.md for log_review_result() details
     execute_script(f"{skill_path}/scripts/log-task.py", {
         "command": "quick",
         "task": task_file,
         "title": f"Review {'Passed' if decision == 'pass' else 'Escalated'}",
-        "content": format_review_content(decision, issues, core_mods, compliance, work_items)
+        "content": format_review_content(decision, issues, core_mods, compliance, work_items),
+        "new_state": new_state
     })
     
     return decision
@@ -635,3 +924,12 @@ work_items:
 - **MUST write work log before completing** (see skills.md Work Logging Requirement)
   - Design mode: Log facts (what was designed), analysis (decisions made), conclusion (readiness), suggested work items
   - Review mode: Log facts (what was reviewed), analysis (issues found), conclusion (pass/escalate), suggested work items if escalation
+- **MUST set correct `new_state` when logging** (Architect controls state transitions):
+  - **Design mode** (completing design): Set `new_state: "review"` (ready for design review)
+  - **Design Review mode** (approving design): Set `new_state: "done"` (approved, ready for implementation)
+  - **Design Review mode** (escalating): Set `new_state: "escalated"` (needs redesign)
+  - **Review mode** (approving implementation): Set `new_state: "done"` (implementation approved)
+  - **Review mode** (escalating): Set `new_state: "escalated"` (needs fixes)
+  - **NEVER** set `new_state: "done"` from Design mode (must go through Design Review)
+  - **NEVER** skip setting `new_state` (always transition state when logging)
+```

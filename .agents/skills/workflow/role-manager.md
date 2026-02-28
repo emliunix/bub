@@ -192,6 +192,38 @@ def reconcile_tasks(kanban_file, done_task, tasks):
             "exploration_task": exploration_task
         })
 
+    elif task_meta.get("type") in ["design", "design-review"] and current_state == "done":
+        # Design review completed and approved
+        # Extract work items and create implementation tasks
+        task_meta["state"] = "done"
+        write(done_task, task_meta)
+        
+        for item in work_items:
+            if not has_adequate_information(item):
+                exploration_task = create_exploration_for_item(kanban_file, done_task, item)
+                new_tasks.append(exploration_task)
+                
+                log_plan_adjustment(kanban_file, "inadequate_information", {
+                    "work_item": item.get("description", "unknown"),
+                    "reason": "Missing information for planning",
+                    "action": "Created exploration task",
+                    "exploration_task": exploration_task
+                })
+            else:
+                item_tasks = create_tasks_from_work_item(item, done_task)
+                new_tasks.extend(item_tasks)
+                
+                log_plan_adjustment(kanban_file, "tasks_created", {
+                    "from_work_item": item.get("description", "unknown"),
+                    "tasks_created": item_tasks
+                })
+        
+        log_plan_adjustment(kanban_file, "design_review_approved", {
+            "task": done_task,
+            "work_items_count": len(work_items),
+            "action": "Design review approved. Creating implementation tasks from work items."
+        })
+
     elif escalations:
         # Escalation: Task needs review before continuing
         # Update task state to escalated
@@ -262,32 +294,50 @@ def reconcile_tasks(kanban_file, done_task, tasks):
 
     elif work_items:
         # Normal completion with work items (design/exploration tasks)
-        # Mark task as done
-        task_meta["state"] = "done"
-        write(done_task, task_meta)
+        
+        # Check if this is a design task that needs design review
+        if task_meta.get("type") == "design":
+            # Design task with work items - route to design review
+            task_meta["state"] = "review"
+            task_meta["assignee"] = "Architect"
+            write(done_task, task_meta)
+            
+            # Put task back in queue for design review
+            remaining.append(done_task)
+            
+            log_plan_adjustment(kanban_file, "design_ready_for_review", {
+                "task": done_task,
+                "work_items_count": len(work_items),
+                "action": "Design complete with work items. Assigned to Architect for design review (same file)",
+                "next_step": "Architect will validate work items against patterns.md and either approve or escalate"
+            })
+        else:
+            # Exploration or other task type - mark done and create tasks
+            task_meta["state"] = "done"
+            write(done_task, task_meta)
 
-        for item in work_items:
-            # Determine if we have enough info to create tasks
-            if not has_adequate_information(item):
-                # Need exploration first
-                exploration_task = create_exploration_for_item(kanban_file, done_task, item)
-                new_tasks.append(exploration_task)
+            for item in work_items:
+                # Determine if we have enough info to create tasks
+                if not has_adequate_information(item):
+                    # Need exploration first
+                    exploration_task = create_exploration_for_item(kanban_file, done_task, item)
+                    new_tasks.append(exploration_task)
 
-                log_plan_adjustment(kanban_file, "inadequate_information", {
-                    "work_item": item.get("description", "unknown"),
-                    "reason": "Missing information for planning",
-                    "action": "Created exploration task",
-                    "exploration_task": exploration_task
-                })
-            else:
-                # Create tasks from work item
-                item_tasks = create_tasks_from_work_item(item, done_task)
-                new_tasks.extend(item_tasks)
+                    log_plan_adjustment(kanban_file, "inadequate_information", {
+                        "work_item": item.get("description", "unknown"),
+                        "reason": "Missing information for planning",
+                        "action": "Created exploration task",
+                        "exploration_task": exploration_task
+                    })
+                else:
+                    # Create tasks from work item
+                    item_tasks = create_tasks_from_work_item(item, done_task)
+                    new_tasks.extend(item_tasks)
 
-                log_plan_adjustment(kanban_file, "tasks_created", {
-                    "from_work_item": item.get("description", "unknown"),
-                    "tasks_created": item_tasks
-                })
+                    log_plan_adjustment(kanban_file, "tasks_created", {
+                        "from_work_item": item.get("description", "unknown"),
+                        "tasks_created": item_tasks
+                    })
 
     else:
         # Task completed but no work items
@@ -697,6 +747,7 @@ Every significant decision is logged:
 |-----------|----------------|
 | `exploration` | `code-reading` |
 | `design` | `code-reading`, domain-specific |
+| `design-review` | `code-reading`, workflow |
 | `review` | `code-reading` |
 | `implement` | Skills from work item + `testing` if tests needed |
 | `redesign` | `code-reading`, domain-specific |
@@ -713,9 +764,13 @@ Every significant decision is logged:
 - `initial_task_exploration` - Started with exploration (unclear requirements)
 - `initial_task_direct` - Started with design/implement (clear requirements)
 - `blocker_detected` - Task blocked, exploration created
+- `design_ready_for_review` - Design task complete, assigned to Architect for design review
+- `design_review_approved` - Design review approved, creating implementation tasks
+- `design_review_escalated` - Design review found issues, redesign required
 - `escalation_for_review` - Task escalated, assigned to Architect for review (same task file)
 - `escalation_prerequisites_created` - Review completed, prerequisite tasks created from work items, original task dependencies updated
 - `inadequate_information` - Missing info for planning, exploration created
+- `ready_for_review` - Implementation complete, assigned to Architect for review (same file)
 - `tasks_created` - New tasks created from work items
 - `workflow_complete` - All tasks finished
 

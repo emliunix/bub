@@ -221,14 +221,15 @@ See `scripts/README.md` for full documentation.
 
 ## Workflow Patterns
 
-**Manager MUST consult `patterns.md` when creating tasks** to apply the correct workflow sequence.
+**Workflow patterns are encoded in algorithms** in `role-manager.md` and `role-architect.md`. See `patterns.md` for pattern documentation and reference.
 
 ### Pattern Quick Reference
 
 | Pattern | Trigger | Structure |
 |---------|---------|-----------|
 | **Discovery** | Missing information for planning | Exploration → Manager decides |
-| **Design-First** | New features, core types, architecture | Design → Implementation-With-Review |
+| **Design-First** | New features, core types, architecture | Design → **Design Review** → Implementation-With-Review |
+| **Design Review** | Design task complete with work items | Validate work items → Approve/Redesign |
 | **Implementation-With-Review** | **ALL implementation work** (universal) | Implement → Review (same file) → Done |
 | **Escalation Recovery** | Review finds issues | Review (escalate) → Prerequisites → Retry |
 | **Integration** | Multiple parallel streams converge | Parallel tasks → Integration task |

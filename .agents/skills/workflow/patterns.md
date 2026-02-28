@@ -2,7 +2,7 @@
 
 Task orchestration patterns for Manager. These patterns define how to decompose work into tasks and reconcile based on task outcomes using skill constructs.
 
-**Manager MUST consult this document when creating tasks** to ensure correct workflow sequencing.
+These patterns are **encoded in the algorithms** in `role-manager.md` and `role-architect.md`. This document describes the algorithm behavior for reference.
 
 ---
 
@@ -13,6 +13,7 @@ Task orchestration patterns for Manager. These patterns define how to decompose 
 3. [Detailed Patterns](#detailed-patterns)
    - [Discovery](#pattern-discovery) - When information is inadequate
    - [Design-First](#pattern-design-first) - New features and architecture
+   - [Design Review](#pattern-design-review) - Validate design before implementation
    - [Implementation-With-Review](#pattern-implementation-with-review) - Universal implementation pattern
    - [Escalation Recovery](#pattern-escalation-recovery) - When review fails
    - [Integration](#pattern-integration) - Multiple parallel streams
@@ -54,7 +55,8 @@ Task orchestration patterns for Manager. These patterns define how to decompose 
 | Pattern | Trigger | Structure |
 |---------|---------|-----------|
 | **Discovery** | Missing information for planning | Exploration → Manager decides |
-| **Design-First** | New features, core types, architecture | Design → Implementation-With-Review |
+| **Design-First** | New features, core types, architecture | Design → **Design Review** → Implementation-With-Review |
+| **Design Review** | Architect design task complete | Validate work items against patterns → Approved/Redesign |
 | **Implementation-With-Review** | ALL implementation work | Implement → Review (same file) → Done |
 | **Escalation Recovery** | Review finds issues | Review (escalate) → Prerequisites → Retry |
 | **Integration** | Multiple parallel work streams | Parallel tasks → Integration task |
@@ -65,9 +67,11 @@ Missing information? → Discovery
     ↓
 New feature/architecture? → Design-First
     ↓
-ALL cases → Implementation-With-Review
+Design task complete with work items? → Design Review
     ↓
-Review found issues? → Escalation Recovery
+Design approved? → Implementation-With-Review
+    ↓
+Implementation review found issues? → Escalation Recovery
     ↓
 Multiple streams? → Integration
 ```
@@ -171,6 +175,77 @@ Implementor builds to spec → Review validates → Done
 - Core type definitions
 - Public API design
 - Protocol specifications
+
+---
+
+## Pattern: Design Review
+
+**Use when:** Architect completes a design task with work items.
+
+**Trigger:** Design task state is `review` (design complete, needs validation).
+
+**Characteristics:**
+- Validates work items against workflow patterns before implementation
+- Checks if work items are correctly structured per patterns.md
+- Ensures appropriate pattern selection (Design-First vs direct implementation)
+- Verifies dependency ordering follows Core-First principle
+- Same task file continuity (appends review to design task)
+
+**Task Structure:**
+```yaml
+# Same task file from design phase
+---
+assignee: Architect
+type: design-review  # or design with state: review
+title: "Design Review - <Component>"
+dependencies: []
+skills: [code-reading]
+expertise: ["Pattern Matching", "Workflow Design"]
+state: review  # Design complete, in review phase
+---
+
+# Task: Design Review
+
+## Context
+Design task produced work items that need validation against patterns.
+
+## Work Items to Review
+- [List of work items from design phase]
+
+## Work Log
+
+### [timestamp] Design | ok
+**F:** Created types.py, defined work items...
+**A:** Design decisions...
+**C:** Design complete. State: review (ready for design review)
+
+### [timestamp] Design Review | ok/escalate
+**F:** Reviewed work items against patterns.md
+**A:** Pattern compliance analysis...
+**C:** APPROVED / REDESIGN REQUIRED
+```
+
+**Flow:**
+```
+Design task (state: review - design complete)
+    ↓
+Architect runs design_review_mode() algorithm:
+  - validate_work_items_against_patterns()
+  - check_complexity_decomposition()
+  - verify_core_first_ordering()
+    ↓
+IF approved → State: done → Manager creates implementation tasks
+IF escalated → State: escalated → Architect redesigns
+```
+
+**Algorithm:** See `role-architect.md` `design_review_mode()` for complete validation logic.
+
+**Manager Actions:**
+1. Detect design task state: `review` (via algorithm, not manual check)
+2. Assign SAME task file to Architect for design review
+3. After review:
+   - If approved: Create implementation tasks from work items
+   - If escalated: Create redesign task, queue original for retry
 
 ---
 
@@ -363,28 +438,33 @@ Integration Task → Review → Done
 
 ## Pattern Selection Guide
 
-**Step 1: Check for triggers**
-- Missing information? → **Discovery**
+Pattern selection is handled by algorithms in `role-manager.md` (`reconcile_tasks()`). This guide documents the algorithm logic:
+
+**Algorithm Decision Tree:**
+- Missing information? → **Discovery** (Manager creates exploration task)
+- Design task (type: design) with work items complete? → **Design Review** (Manager assigns to Architect)
+- New feature/architecture? → **Design-First** → **Design Review** → **Implementation-With-Review**
+- Any implementation work? → **Implementation-With-Review** (universal)
 - Multiple parallel streams converging? → **Integration**
 
-**Step 2: Evaluate work type**
-- New feature/architecture? → **Design-First** → **Implementation-With-Review**
-- Any implementation work? → **Implementation-With-Review** (universal)
+**Outcome Handling:**
+- Design review passed? → Manager creates implementation tasks
+- Design review escalated? → Manager creates redesign task, queues original for retry
+- Implementation review passed? → Manager marks `done`, creates next tasks
+- Implementation review escalated? → **Escalation Recovery**
 
-**Step 3: Handle outcomes**
-- Review passed? → Mark `done`, create next tasks
-- Review escalated? → **Escalation Recovery**
+**Common Algorithm Flows:**
 
-**Common Compositions:**
+These are the typical pattern sequences the algorithm produces:
 
 **New feature with core types:**
 ```
-Discovery (optional) → Design-First → Implementation-With-Review
+Discovery (optional) → Design-First → Design Review → Implementation-With-Review
 ```
 
 **API changes:**
 ```
-Design-First → Implementation-With-Review
+Design-First → Design Review → Implementation-With-Review
 ```
 
 **Bug fix:**
@@ -402,11 +482,11 @@ Design-First → Integration pattern with parallel Implementation-With-Review ta
 ## Pattern Constraints
 
 **Manager MUST:**
-- Read this file before creating tasks
+- Follow `reconcile_tasks()` algorithm in `role-manager.md` (patterns are encoded in algorithm)
 - Enforce universal constraints (no `todo → done`)
 - Use single-file continuity for review phases
 - Set `state: todo` when creating tasks
-- Log pattern choice in kanban plan adjustment log
+- Log plan adjustments in kanban (algorithms determine transitions)
 
 **Script Enforcement (Required):**
 - `log-task.py` MUST reject commits with `todo → done` transition
@@ -428,9 +508,13 @@ Design-First → Integration pattern with parallel Implementation-With-Review ta
 Patterns compose by chaining outputs to inputs:
 
 ```
-Discovery → Design-First → Implementation-With-Review
+Discovery → Design-First → Design Review → Implementation-With-Review
+                ↓              ↓
+      Design Redesign (if design review fails)
                 ↓
-      Escalation Recovery (if review fails)
+      Implementation Review (if implementation review fails)
+                ↓
+      Escalation Recovery
                 ↓
       Validate-Before-Continue (retry)
                 ↓
