@@ -164,6 +164,16 @@ class TypeChecker:
                 return self.primitive_types["String"]
 
             case PrimOp(name):
+                # Handle LLM primitives (e.g., "llm.xxx")
+                if name.startswith("llm."):
+                    # The type annotation should be set by the elaborator
+                    # and stored in the declaration, not here directly
+                    # For now, look up in global_types directly
+                    func_name = name[4:]  # Strip "llm." prefix
+                    if func_name in self.global_types:
+                        return self.global_types[func_name]
+                    raise TypeError(f"Unknown LLM function: {func_name}")
+
                 full_name = f"$prim.{name}"
                 if full_name not in self.global_types:
                     raise TypeError(f"Unknown primitive: {name}")

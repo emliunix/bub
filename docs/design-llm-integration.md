@@ -11,7 +11,8 @@
 
 This document presents the complete design for integrating LLM (Large Language Model) functions into System F, an experimental dependently-typed programming language. The design incorporates lessons from Idris2 and Lean4 compilers while keeping the implementation pragmatic for a REPL-first tool.
 
-**Key Innovation:** Parameter docstrings are embedded in type annotations (`-- ^`), enabling universal support across all type constructs (functions, data constructors, records) without special cases.
+!!! tip "Key Innovation"
+    Parameter docstrings are embedded in type annotations (`-- ^`), enabling universal support across all type constructs (functions, data constructors, records) without special cases.
 
 ---
 
@@ -53,7 +54,8 @@ This document presents the complete design for integrating LLM (Large Language M
 2. `prim_op` keyword: `prim_op func : Type` - aligns with primitives
 3. Special syntax: `@llm func : Type` - adds new keyword
 
-**Decision:** Use `prim_op` with `-- ^` for parameter docs
+!!! note "Decision"
+    Use `prim_op` with `-- ^` for parameter docs
 
 #### 1.1.3 AST Architecture
 
@@ -64,6 +66,7 @@ This document presents the complete design for integrating LLM (Large Language M
 - Lean4: Environment extensions (external maps)
 
 **Trade-offs:**
+
 | Aspect | AST-Embedded | Environment Extensions |
 |--------|--------------|----------------------|
 | Lookup Speed | O(1) dict | O(log n) tree |
@@ -71,7 +74,8 @@ This document presents the complete design for integrating LLM (Large Language M
 | Async Safety | Requires locks | Persistent structures |
 | REPL Use | Perfect fit | Overkill |
 
-**Decision:** AST-embedded (Idris2-style) for REPL-first design
+!!! note "Decision"
+    AST-embedded (Idris2-style) for REPL-first design
 
 #### 1.1.4 REPL Query Architecture
 
@@ -82,7 +86,8 @@ This document presents the complete design for integrating LLM (Large Language M
 - No cross-module loading in simple case
 - Sessions are ephemeral (no persistence needed)
 
-**Verdict:** O(1) hash map lookups are perfect. Lean4's O(log n) with persistence is overkill.
+!!! note "Verdict"
+    O(1) hash map lookups are perfect. Lean4's O(log n) with persistence is overkill.
 
 ### 1.2 Decisions Made
 
@@ -164,67 +169,44 @@ Locals (let bindings) are:
 
 ### 2.1 Component Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Source File (.sf)                      │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│    Lexer (Token Stream with Comment Tokens Preserved)      │
-│    - COMMENT("-- | function doc")                          │
-│    - COMMENT("-- ^ param doc")                             │
-│    - PRAGMA("{#- LLM model=gpt-4 #-}")                     │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│    Parser (Surface AST with Inline Docs)                   │
-│    - SurfaceTypeArrow.param_doc                            │
-│    - SurfaceTermDeclaration.docstring                      │
-│    - SurfacePrimOpDecl with type + docs                    │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│    Elaborator (Core AST, Name Resolution)                  │
-│    - Name -> de Bruijn indices                             │
-│    - prim_op -> PrimOp("llm.name")                         │
-│    - Pass docs through (don't extract yet)                 │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│    Type Checker (Validation)                               │
-│    - Validate all type constructors exist                  │
-│    - Unify type variables                                  │
-│    - Return validated global_types mapping                 │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│    Doc Extraction Pass (NEW)                               │
-│    - Walk Core AST declarations                            │
-│    - Extract function docs: "func" -> doc                  │
-│    - Extract param docs: "func.$1", "func.$2"              │
-│    - Populate Module.docstrings                            │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│    LLM Metadata Extraction (Module.llm_functions)          │
-│    - Find declarations with LLM pragma                     │
-│    - Build LLMMetadata with validated types                │
-│    - Extract arg docs from type_annotation                 │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│    REPL (Query Interface)                                  │
-│    - :doc name -> Module.docstrings[name]                  │
-│    - :t name -> Module.global_types[name]                  │
-│    - :llm name -> Module.llm_functions[name]               │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[Source File] --> B[Lexer]
+    B --> C[Parser]
+    C --> D[Elaborator]
+    D --> E[Type Checker]
+    E --> F[Doc Extraction]
+    F --> G[LLM Metadata]
+    G --> H[REPL Interface]
+    
+    B -. Token Stream .-> C
+    B -. Function doc comment .-> C
+    B -. Param doc comment .-> C
+    B -. LLM pragma .-> C
+    
+    C -. Type with param doc .-> D
+    C -. Declaration docstring .-> D
+    C -. PrimOp decl .-> D
+    
+    D -. Name resolution .-> E
+    D -. prim_op mapping .-> E
+    D -. Doc preservation .-> E
+    
+    E -. Type validation .-> F
+    E -. Type unification .-> F
+    E -. Validated types .-> F
+    
+    F -. Function docs .-> G
+    F -. Parameter docs .-> G
+    F -. Module docstrings .-> G
+    
+    G -. LLM pragma lookup .-> H
+    G -. LLMMetadata build .-> H
+    G -. Arg doc extraction .-> H
+    
+    H -. doc query .-> I[User]
+    H -. type query .-> I
+    H -. llm query .-> I
 ```
 
 **Data Flow Summary:**
@@ -1183,6 +1165,7 @@ prim_op name : Type
 - For primitives: generates `PrimOp("$prim.name")` body
 
 **Relationship to SurfaceTermDeclaration:**
+
 | Aspect | SurfaceTermDeclaration | SurfacePrimOpDecl |
 |--------|----------------------|-------------------|
 | Has body | Yes | No (implicit) |

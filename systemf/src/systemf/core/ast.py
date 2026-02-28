@@ -229,11 +229,20 @@ class DataDeclaration:
 
 @dataclass(frozen=True)
 class TermDeclaration:
-    """x : τ = e"""
+    """x : τ = e
+
+    Additional fields for LLM function support:
+    - pragma: Raw pragma parameters (e.g., "model=gpt-4 temperature=0.7")
+    - docstring: Function-level docstring (-- | style)
+    - param_docstrings: Parameter docstrings (-- ^ style)
+    """
 
     name: str
     type_annotation: Optional[Type]
     body: Term
+    pragma: Optional[str] = None
+    docstring: Optional[str] = None
+    param_docstrings: Optional[list[str]] = None
 
 
 Declaration = DataDeclaration | TermDeclaration

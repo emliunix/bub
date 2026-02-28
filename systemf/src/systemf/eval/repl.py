@@ -13,6 +13,8 @@ from systemf.surface.desugar import desugar
 from systemf.core.checker import TypeChecker
 from systemf.core.context import Context
 from systemf.core.types import Type
+from systemf.core.module import LLMMetadata
+from systemf.llm.extractor import extract_llm_metadata
 from systemf.eval.machine import Evaluator
 from systemf.eval.value import VClosure, VConstructor, VTypeClosure, Value
 
@@ -119,6 +121,9 @@ class REPL:
             module = self.elaborator.elaborate(surface_decls)
             types = self.checker.check_program(module.declarations)
             values = self.evaluator.evaluate_program(module.declarations)
+
+            # Extract LLM metadata after type checking
+            llm_functions = extract_llm_metadata(module, types)
 
             # Update environments with prelude definitions
             for name, value in values.items():
@@ -243,6 +248,9 @@ class REPL:
                 module = self.elaborator.elaborate(surface_decls)
                 types = self.checker.check_program(module.declarations)
                 values = self.evaluator.evaluate_program(module.declarations)
+
+                # Extract LLM metadata after type checking
+                llm_functions = extract_llm_metadata(module, types)
 
                 for name, value in values.items():
                     ty = types[name]

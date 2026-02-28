@@ -9,7 +9,7 @@ from typing import Optional
 
 from systemf.core import ast as core
 from systemf.core.errors import ElaborationError
-from systemf.core.module import LLMMetadata, Module
+from systemf.core.module import Module
 from systemf.core.types import PrimitiveType, Type as CoreType
 from systemf.core.types import TypeArrow, TypeConstructor, TypeForall, TypeVar
 from systemf.surface.ast import (
@@ -93,9 +93,6 @@ class Elaborator:
         # Optional evaluator for registering LLM closures
         self.evaluator = evaluator
 
-        # LLM function metadata registry
-        self.llm_functions: dict[str, LLMMetadata] = {}
-
     # =====================================================================
     # Environment Management
     # =====================================================================
@@ -175,7 +172,7 @@ class Elaborator:
             global_types=self.global_types,
             primitive_types=self.primitive_types,
             docstrings={},
-            llm_functions=self.llm_functions,
+            llm_functions={},  # Extracted after type checking
             errors=[],
             warnings=[],
         )
@@ -262,10 +259,16 @@ class Elaborator:
         # Elaborate the body (now recursive calls will find the name)
         core_body = self.elaborate_term(decl.body)
 
+        # Get pragma params for non-LLM declarations (None for regular functions)
+        pragma_params = None
+        if decl.pragma and "LLM" in decl.pragma:
+            pragma_params = decl.pragma["LLM"].strip() or None
+
         return core.TermDeclaration(
             name=decl.name,
             type_annotation=core_type,
             body=core_body,
+            pragma=pragma_params,
         )
 
     def _elaborate_llm_term_decl(
@@ -310,31 +313,27 @@ class Elaborator:
         if decl.pragma and "LLM" in decl.pragma:
             pragma_params = decl.pragma["LLM"].strip() or None
 
-        # Build LLMMetadata
-        metadata = LLMMetadata(
-            function_name=decl.name,
-            function_docstring=func_docstring,
-            arg_names=arg_names,
-            arg_types=arg_types,
-            arg_docstrings=arg_docstrings,
-            pragma_params=pragma_params,
-        )
-
-        # Register in llm_functions
-        self.llm_functions[decl.name] = metadata
-
-        # Register in evaluator if available
-        if self.evaluator is not None:
-            self.evaluator.register_llm_closure(decl.name, metadata)
+        # Extract parameter docstrings from lambda
+        param_docstrings: list[str] = []
+        if lambda_body.param_docstrings:
+            param_docstrings = [str(ds) if ds else "" for ds in lambda_body.param_docstrings]
 
         # Elaborate to PrimOp("$llm.{name}")
         # Add to global_terms
         self._add_global_term(decl.name)
 
+        # Register type in global_types for type checking
+        if core_type is not None:
+            self.global_types[decl.name] = core_type
+
+        # Pass metadata fields to Core - LLMMetadata will be extracted after type checking
         return core.TermDeclaration(
             name=decl.name,
             type_annotation=core_type,
             body=core.PrimOp(f"llm.{decl.name}"),
+            pragma=pragma_params,
+            docstring=func_docstring,
+            param_docstrings=param_docstrings if param_docstrings else None,
         )
 
     def _elaborate_prim_type_decl(self, name: str, location: Location) -> core.DataDeclaration:
