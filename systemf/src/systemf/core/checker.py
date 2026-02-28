@@ -173,7 +173,8 @@ class TypeChecker:
                         return self.global_types[func_name]
                     raise TypeError(f"Unknown LLM function: {func_name}")
 
-                full_name = f"$prim.{name}"
+                # Add $prim. prefix if not already present
+                full_name = name if name.startswith("$prim.") else f"$prim.{name}"
                 if full_name not in self.global_types:
                     raise TypeError(f"Unknown primitive: {name}")
                 return self.global_types[full_name]

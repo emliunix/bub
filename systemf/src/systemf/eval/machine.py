@@ -46,16 +46,16 @@ class Evaluator:
         self.pattern_matcher = PatternMatcher()
         self.global_env = global_env if global_env is not None else {}
         self.primitive_impls: dict[str, Callable[[Value, Value], Value]] = {
-            "int_plus": self._int_plus,
-            "int_minus": self._int_minus,
-            "int_multiply": self._int_multiply,
-            "int_divide": self._int_divide,
-            "int_negate": self._int_negate,
-            "int_eq": self._int_eq,
-            "int_lt": self._int_lt,
-            "int_gt": self._int_gt,
-            "string_concat": self._string_concat,
-            "string_length": self._string_length,
+            "$prim.int_plus": self._int_plus,
+            "$prim.int_minus": self._int_minus,
+            "$prim.int_multiply": self._int_multiply,
+            "$prim.int_divide": self._int_divide,
+            "$prim.int_negate": self._int_negate,
+            "$prim.int_eq": self._int_eq,
+            "$prim.int_lt": self._int_lt,
+            "$prim.int_gt": self._int_gt,
+            "$prim.string_concat": self._string_concat,
+            "$prim.string_length": self._string_length,
         }
         # Registry for LLM function closures: name -> (metadata, closure)
         self.llm_closures: dict[str, tuple[LLMMetadata, Callable[[Value], Value]]] = {}
