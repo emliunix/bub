@@ -95,8 +95,8 @@ Surface syntax provides infix operators that desugar to primitive operations:
 1. `*`, `/` (left-associative)
 2. `+`, `-` (left-associative)
 3. `==`, `/=`, `<`, `>`, `<=`, `>=` (non-associative)
-4. `&&` (right-associative)
-5. `||` (right-associative)
+4. `&&` (left-associative)
+5. `||` (left-associative)
 
 **Examples:**
 ```systemf
@@ -743,41 +743,64 @@ fst = Λa b. λp → case p of Pair x y → x
 
 ## 11. Parser Structure
 
-### 11.1 Tiered Architecture
+### 11.1 Module Architecture
+
+The parser is organized into focused modules following separation of concerns:
 
 ```
-Tier 1 (indentation.py):  Fundamental combinators
-  - indented_block
-  - indented_opt
-
-Tier 2 (parser.py):       Expression parsing
-  - atom_parser
-  - app_parser
-  - lambda_parser
-  - if_parser
-  - case_parser
-  - term_parser
-
-Tier 3 (parser.py):       Type parsing
-  - atom_type
-  - app_type
-  - arrow_type
-  - forall_type
-  - type_parser
-
-Tier 4 (parser.py):       Declarations
-  - data_decl_parser
-  - term_decl_parser
-  - program_parser
+src/systemf/surface/parser/
+├── types.py          # Token types, ValidIndent constraints
+├── lexer.py          # Lexer (raw tokens, no virtual INDENT/DEDENT)
+├── helpers.py        # Layout combinators (Idris2-style)
+│   ├── column()
+│   ├── block()
+│   ├── block_entries()
+│   ├── terminator()
+│   └── must_continue()
+├── type_parser.py    # Type parsing (separate module)
+│   ├── type_atom_parser()
+│   ├── type_app_parser()
+│   ├── type_arrow_parser()  # right-associative
+│   ├── type_forall_parser()
+│   └── type_tuple_parser()
+├── expressions.py    # Expression parsing
+│   ├── atom_parser()
+│   ├── app_parser()         # left-associative
+│   ├── lambda_parser()
+│   ├── type_abs_parser()
+│   ├── if_parser()
+│   ├── case_parser()
+│   ├── let_parser()
+│   └── op_parser()          # operator precedence
+└── declarations.py   # Declaration parsing
+    ├── data_parser()
+    ├── term_parser()
+    ├── prim_type_parser()
+    └── prim_op_parser()
 ```
 
-### 11.2 Design Principles
+### 11.2 Layout System (Idris2-Style)
+
+Unlike Python or Haskell's L-function approach, System F uses **parser-level constraint passing**:
+
+- **No virtual tokens:** The lexer emits only raw tokens with location info
+- **No INDENT/DEDENT tokens:** Layout is handled entirely by the parser
+- **Explicit constraints:** `ValidIndent = AnyIndent | AtPos(int) | AfterPos(int) | EndOfBlock`
+- **First-token reference:** Layout blocks use the first token's column as reference
+
+**Key combinators:**
+- `column()` - captures current token column for reference
+- `block(item)` - parses `{...}` or layout-indented items
+- `terminator(constraint, start_col)` - checks for block end
+
+### 11.3 Design Principles
 
 1. **Prelude-First:** The parser accepts valid `prelude.sf` syntax
-2. **DRY:** Common patterns use helpers from `indentation.py`
+2. **DRY:** Common patterns use helpers from `helpers.py`
 3. **Test Tiering:** Expressions tested separately from declarations
 4. **Explicit Over Implicit:** No wildcards, explicit constructors
 5. **Simple Precedence:** Type app > Value app > Operators
+6. **No Circular Dependencies:** Type parsing is independent, both expressions and declarations import from it
 
 ## 12. Future Extensions (Not Implemented)
 
