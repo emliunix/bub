@@ -194,3 +194,159 @@ class TestErrorCases:
         in_col = 0
 
         assert not check_valid(AfterPos(8), in_col)
+
+
+class TestParserShowcase:
+    """Showcase complete programs demonstrating parser capabilities.
+
+    These tests demonstrate the full range of System F syntax as defined
+    in syntax.md, showcasing layout-sensitive parsing, expressions, and
+    declarations working together.
+    """
+
+    def test_simple_function_definition(self):
+        """Parse a simple function with type signature."""
+        from systemf.surface.parser import parse_declaration
+
+        source = "identity : forall a. a -> a = λx -> x"
+        result = parse_declaration(source)
+
+        # Should successfully parse as a term declaration
+        assert result is not None
+
+    def test_data_declaration(self):
+        """Parse a data declaration with multiple constructors."""
+        from systemf.surface.parser import parse_declaration
+
+        source = """data Maybe a = Nothing | Just a"""
+        result = parse_declaration(source)
+
+        assert result is not None
+
+    def test_nested_case_expression(self):
+        """Parse nested case expressions with proper layout."""
+        from systemf.surface.parser import parse_expression
+
+        source = """case x of
+  True -> case y of
+    Just z -> z
+    Nothing -> 0
+  False -> 1"""
+
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_complex_let_expression(self):
+        """Parse let with multiple bindings and nested expressions."""
+        from systemf.surface.parser import parse_expression
+
+        source = """let
+  x = 1
+  y = 2
+  z = x + y
+in z * 2"""
+
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_polymorphic_type_application(self):
+        """Parse type application in expression."""
+        from systemf.surface.parser import parse_expression
+
+        source = "identity @Int 42"
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_type_abstraction(self):
+        """Parse type abstraction (Λ)."""
+        from systemf.surface.parser import parse_expression
+
+        source = "Λa. λx:a -> x"
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_if_then_else_expression(self):
+        """Parse if-then-else with layout."""
+        from systemf.surface.parser import parse_expression
+
+        source = """if x > 0 then
+  x
+else
+  negate x"""
+
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_operator_expression(self):
+        """Parse complex operator expressions."""
+        from systemf.surface.parser import parse_expression
+
+        source = "x + y * z == x + (y * z)"
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_primitive_declarations(self):
+        """Parse primitive type and operation declarations."""
+        from systemf.surface.parser import parse_declaration
+
+        prim_type = "prim_type Int"
+        prim_op = "prim_op int_plus : Int -> Int -> Int"
+
+        result1 = parse_declaration(prim_type)
+        result2 = parse_declaration(prim_op)
+
+        assert result1 is not None
+        assert result2 is not None
+
+    def test_recursion_with_let(self):
+        """Parse recursive function via let."""
+        from systemf.surface.parser import parse_expression
+
+        source = """let
+  factorial n =
+    if n == 0 then
+      1
+    else
+      n * factorial (n - 1)
+in factorial 5"""
+
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_list_data_type(self):
+        """Parse list-like recursive data type."""
+        from systemf.surface.parser import parse_declaration
+
+        source = """data List a =
+  Nil
+  | Cons a (List a)"""
+
+        result = parse_declaration(source)
+        assert result is not None
+
+    def test_pattern_matching_with_multiple_args(self):
+        """Parse function with multiple pattern matches."""
+        from systemf.surface.parser import parse_expression
+
+        source = """case pair of
+  Pair x y -> x + y
+  Single z -> z"""
+
+        result = parse_expression(source)
+        assert result is not None
+
+    def test_higher_order_function_type(self):
+        """Parse type with higher-order function."""
+        from systemf.surface.parser import parse_type
+
+        source = "forall a b. (a -> b) -> List a -> List b"
+        result = parse_type(source)
+        assert result is not None
+
+    def test_complex_forall_type(self):
+        """Parse complex rank-1 polymorphic type."""
+        from systemf.surface.parser import parse_type
+
+        source = "forall a b c. a -> b -> c -> a"
+        result = parse_type(source)
+        assert result is not None
