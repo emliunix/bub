@@ -47,7 +47,7 @@ class TestMultipleDeclarationsParsing:
         # Second declaration: toString function
         assert isinstance(result[1], SurfaceTermDeclaration)
         assert result[1].name == "toString"
-        assert result[1].docstring == 'Convert Bool to String Returns "true" or "false"'
+        assert result[1].docstring == 'Convert Bool to String\nReturns "true" or "false"'
 
     def test_rank2_const_function(self, rank2_const_function):
         """Parse rank-2 polymorphic const function."""
@@ -178,18 +178,18 @@ class TestDeclarationMetadata:
     """Test that docstrings and pragmas are correctly attached."""
 
     def test_multiline_docstring_concatenation(self):
-        """Multiple -- | lines should be concatenated."""
+        """Multiple -- | lines should be concatenated with newlines (Idris2-style)."""
         source = """-- | First line of doc
 -- | Second line of doc
 data Test = A | B"""
 
         result = parse_program(source)
-        assert result[0].docstring == "First line of doc Second line of doc"
+        assert result[0].docstring == "First line of doc\nSecond line of doc"
 
     def test_pragma_parsed_as_dict(self):
         """Pragma should be parsed into dict[str, str]."""
         source = """{-# LLM model=gpt-4 temperature=0.7 #-}
-term test : Int = 1"""
+test : Int = 1"""
 
         result = parse_program(source)
         assert result[0].pragma == {"LLM": "model=gpt-4 temperature=0.7"}
@@ -198,7 +198,7 @@ term test : Int = 1"""
         """Multiple pragmas should be merged."""
         source = """{-# INLINE #-}
 {-# LLM model=gpt-4 #-}
-term test : Int = 1"""
+test : Int = 1"""
 
         result = parse_program(source)
         assert "INLINE" in result[0].pragma

@@ -219,8 +219,23 @@ def constr_parser() -> P[SurfaceConstructorInfo]:
 
         # Parse type arguments greedily until no more type atoms
         # The topDecl parser sets boundaries, so we parse until the type atom parser fails
+        # But stop if we see a BAR (constructor separator) - that's not a type argument
+        # Also stop if we see what looks like a term declaration (identifier followed by :)
         args: list[SurfaceType] = []
         while i < len(tokens):
+            # Stop at constructor separator (|)
+            if isinstance(tokens[i], OperatorToken) and tokens[i].operator == "|":
+                break
+
+            # Stop if this looks like a term declaration (identifier : type)
+            # This prevents consuming identifiers that are actually function names
+            if isinstance(tokens[i], IdentifierToken):
+                # Check if next token is a colon - if so, this is likely a term declaration
+                if i + 1 < len(tokens):
+                    next_token = tokens[i + 1]
+                    if isinstance(next_token, OperatorToken) and next_token.operator == ":":
+                        break
+
             # Try to parse a type atom
             arg_result = type_atom_parser()(tokens, i)
             if not arg_result.status:
