@@ -10,18 +10,22 @@ Based on Idris2's parser design with explicit constraint passing.
 ```
 Program (Top Level)
 │
-├── Declarations
-│   ├── data_decl: data X = A | B
+├── Declarations (Section 7 of syntax.md)
+│   ├── data_decl: data CONSTRUCTOR params = constrs
 │   │   └── NOT layout-sensitive (| can be at any column)
 │   │
-│   ├── type_decl: name : type
-│   │   └── Type signatures
+│   ├── term_decl: ident : type = expr
+│   │   └── Function with type signature and definition
+│   │   └── This is: "x : Int = 42" or "add x y : Int = x + y"
 │   │
-│   ├── fn_decl: pattern = expr
-│   │   └── Function definition (equation)
+│   ├── prim_type_decl: prim_type CONSTRUCTOR
+│   │   └── Primitive type declaration
+│   │
+│   ├── prim_op_decl: prim_op ident : type
+│   │   └── Primitive operation declaration
 │   │
 │   └── top_decl: general top-level
-│       └── Combines: data_decl | type_decl | fn_decl
+│       └── Combines: data_decl | term_decl | prim_type_decl | prim_op_decl
 │       └── Used in: block(top_decl) for where clauses
 │
 └── Expressions (expr_parser)
@@ -291,8 +295,8 @@ src/systemf/surface/parser/
 ├── types.py             # Token types, ValidIndent
 ├── lexer.py             # Tokenizer
 ├── helpers.py           # Core combinators (DONE)
-├── declarations.py      # data_decl, type_decl, fn_decl, top_decl
-└── expressions.py       # expr_parser, case_expr, let_expr, etc.
+├── declarations.py      # data_decl, term_decl, prim_type_decl, prim_op_decl, top_decl
+└── expressions.py       # expr_parser, case_expr, let_expr, where_expr, etc.
 
 tests/test_surface/test_parser/
 ├── test_helpers.py      # Unit tests (DONE)
