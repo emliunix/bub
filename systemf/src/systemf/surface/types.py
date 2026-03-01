@@ -187,19 +187,28 @@ class SurfaceLet(SurfaceTerm):
 
     Syntax:
         let x : Int = 42 in x + 1
+        let
+          x = 1
+          y = 2
+        in x + y
 
     Note: type annotation is optional for locals since they can be inferred.
     """
 
-    var: str
-    value: SurfaceTerm
+    bindings: list[tuple[str, Optional[SurfaceType], SurfaceTerm]]  # (var_name, var_type, value)
     body: SurfaceTerm
     location: Location
-    var_type: Optional[SurfaceType] = None  # Optional explicit annotation
 
     def __str__(self) -> str:
-        type_part = f" : {self.var_type}" if self.var_type else ""
-        return f"let {self.var}{type_part} = {self.value} in {self.body}"
+        if len(self.bindings) == 1:
+            var_name, var_type, value = self.bindings[0]
+            type_part = f" : {var_type}" if var_type else ""
+            return f"let {var_name}{type_part} = {value} in {self.body}"
+        else:
+            bindings_str = "\n".join(
+                f"  {name}{f' : {t}' if t else ''} = {val}" for name, t, val in self.bindings
+            )
+            return f"let\n{bindings_str}\nin {self.body}"
 
 
 @dataclass(frozen=True)

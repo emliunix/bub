@@ -388,11 +388,36 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
         # Check column position
         col = token.column
 
-        # If column <= start_col, block ends
-        if col <= start_col:
-            return Result.success(index, EndOfBlock())
+        # Layout mode column handling (matching Idris2 behavior):
+        # AtPos(c): col == c -> continue with AtPos(c) (new item at same column)
+        #          col < c  -> EndOfBlock (dedented past reference)
+        # AfterPos(c): col <= c -> switch to AtPos(c) (back to exact column)
+        #             col > c  -> continue with AfterPos(c)
+        match constraint:
+            case AtPos(c):
+                if col < c:
+                    # Strictly dedented - block ends
+                    return Result.success(index, EndOfBlock())
+                elif col == c:
+                    # Same column - new item in block, continue with same constraint
+                    return Result.success(index, AtPos(c))
+                else:
+                    # Further indented - continuation, same constraint
+                    return Result.success(index, AtPos(c))
+            case AfterPos(c):
+                if col <= c:
+                    # At or before reference - switch back to exact column
+                    return Result.success(index, AtPos(c))
+                else:
+                    # After reference - continue with AfterPos
+                    return Result.success(index, AfterPos(c))
+            case AnyIndent():
+                # In braces mode, any column is fine
+                return Result.success(index, AnyIndent())
+            case EndOfBlock():
+                return Result.success(index, EndOfBlock())
 
-        # Otherwise, continue with same constraint
+        # Default: continue with same constraint
         return Result.success(index, constraint)
 
     return parser

@@ -216,13 +216,22 @@ def type_app_parser() -> P[SurfaceType]:
     Returns:
         SurfaceType - the parsed type application or atomic type
     """
+    from systemf.surface.types import SurfaceTypeApp
+
     # Parse first type atom
     first = yield type_atom_parser()
     loc = first.location
 
     # Parse additional type atoms for application
+    # Stop if we reach EOF or a token that can't start a type atom
     args: list[SurfaceType] = []
     while True:
+        # Check if we're at EOF - if so, stop gracefully
+        at_eof = yield parsy.peek(parsy.eof).optional()
+        if at_eof is not None:
+            break
+
+        # Try to parse a type atom
         arg = yield type_atom_parser().optional()
         if arg is None:
             break
@@ -231,8 +240,6 @@ def type_app_parser() -> P[SurfaceType]:
     # Build left-associative application chain
     if not args:
         return first
-
-    from systemf.surface.types import SurfaceTypeApp
 
     result = first
     for arg in args:
@@ -300,8 +307,37 @@ def type_forall_parser() -> P[SurfaceType]:
     return result
 
 
-def type_parser() -> P[SurfaceType]:
-    """Main type parser - tries forall types and arrow types.
+def _make_eof_compatible(inner: P[T]) -> P[T]:
+    """Wrap a parser to handle EOF token from lex().
+
+    Tests use lex() directly which includes EOF token, but the internal
+    parsers don't expect it. This wrapper strips EOF before parsing and
+    returns an index pointing past the EOF token to satisfy parsy's eof check.
+    """
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        # Filter out EOF tokens for parsing
+        filtered = [t for t in tokens if getattr(t, "type", None) != "EOF"]
+        result = inner(filtered, index)
+
+        if not result.status:
+            return result
+
+        # Check that we've consumed all non-EOF tokens
+        if result.index != len(filtered):
+            # There are unconsumed tokens - this is a parse error
+            return Result.failure(result.index, "expected EOF")
+
+        # Success - return index pointing to end of original stream
+        # This satisfies parsy's eof check which expects to be at the end
+        return Result.success(len(tokens), result.value)
+
+    return parser
+
+
+def _raw_type_parser() -> P[SurfaceType]:
+    """Raw type parser without EOF handling - for internal use.
 
     Returns:
         SurfaceType - the parsed type
@@ -312,32 +348,54 @@ def type_parser() -> P[SurfaceType]:
     )
 
 
+def type_parser() -> P[SurfaceType]:
+    """Main type parser - tries forall types and arrow types.
+
+    This is the public entry point that handles EOF tokens from lex().
+
+    Returns:
+        SurfaceType - the parsed type
+    """
+    return _make_eof_compatible(_raw_type_parser())
+
+
 # =============================================================================
 # Constructor Parser (for data declarations)
 # =============================================================================
 
 
-@generate
 def constr_parser() -> P[SurfaceConstructorInfo]:
     """Parse a data constructor: CONSTRUCTOR [type_atom*].
 
     Returns:
         SurfaceConstructorInfo with constructor name and type arguments
     """
-    con_token = yield match_constructor()
-    name = con_token.value
-    loc = con_token.location
 
-    # Parse type arguments greedily until no more type atoms
-    args: list[SurfaceType] = []
-    while _type_parser is not None:
-        # Try to parse a type atom
-        arg_result = yield _type_parser.optional()
-        if arg_result is None:
-            break
-        args.append(arg_result)
+    @generate
+    def parser():
+        con_token = yield match_constructor()
+        name = con_token.value
+        loc = con_token.location
 
-    return SurfaceConstructorInfo(name=name, args=args, docstring=None, location=loc)
+        # Parse type arguments greedily until no more type atoms
+        # Use type_atom_parser, not _type_parser, to avoid consuming too much
+        # (e.g., "a = Nothing" where "=" should stop parsing)
+        args: list[SurfaceType] = []
+        while True:
+            # Check if we're at EOF - if so, stop gracefully
+            at_eof = yield parsy.peek(parsy.eof).optional()
+            if at_eof is not None:
+                break
+
+            # Try to parse a type atom
+            arg_result = yield type_atom_parser().optional()
+            if arg_result is None:
+                break
+            args.append(arg_result)
+
+        return SurfaceConstructorInfo(name=name, args=args, docstring=None, location=loc)
+
+    return parser
 
 
 # =============================================================================
@@ -345,7 +403,6 @@ def constr_parser() -> P[SurfaceConstructorInfo]:
 # =============================================================================
 
 
-@generate
 def data_parser() -> P[SurfaceDataDeclaration]:
     """Parse a data declaration: data CONSTRUCTOR [ident*] = constr ("|" constr)*.
 
@@ -355,48 +412,52 @@ def data_parser() -> P[SurfaceDataDeclaration]:
     Returns:
         SurfaceDataDeclaration with type name, parameters, and constructors
     """
-    # Match "data" keyword
-    data_token = yield match_keyword("data")
-    loc = data_token.location
 
-    # Parse type constructor name
-    name_token = yield match_constructor()
-    name = name_token.value
+    @generate
+    def inner():
+        # Match "data" keyword
+        data_token = yield match_keyword("data")
+        loc = data_token.location
 
-    # Parse optional type parameters (identifiers)
-    params_tokens = yield match_ident().many()
-    params = [t.value for t in params_tokens]
+        # Parse type constructor name
+        name_token = yield match_constructor()
+        name = name_token.value
 
-    # Match "=" symbol
-    yield match_symbol("=")
+        # Parse optional type parameters (identifiers)
+        params_tokens = yield match_ident().many()
+        params = [t.value for t in params_tokens]
 
-    # Parse first constructor
-    first_constr = yield constr_parser
+        # Match "=" symbol
+        yield match_symbol("=")
 
-    # Parse additional constructors separated by "|"
-    rest_constrs: list[SurfaceConstructorInfo] = []
-    while True:
-        # Try to match "|"
-        pipe = yield (match_symbol("|")).optional()
-        if pipe is None:
-            break
+        # Parse first constructor
+        first_constr = yield constr_parser()
 
-        # Parse next constructor
-        constr = yield constr_parser
-        rest_constrs.append(constr)
+        # Parse additional constructors separated by "|"
+        rest_constrs: list[SurfaceConstructorInfo] = []
+        while True:
+            # Try to match "|"
+            pipe = yield (match_symbol("|")).optional()
+            if pipe is None:
+                break
 
-    constructors = [first_constr] + rest_constrs
+            # Parse next constructor
+            constr = yield constr_parser()
+            rest_constrs.append(constr)
 
-    return SurfaceDataDeclaration(
-        name=name,
-        params=params,
-        constructors=constructors,
-        location=loc,
-        docstring=None,
-    )
+        constructors = [first_constr] + rest_constrs
+
+        return SurfaceDataDeclaration(
+            name=name,
+            params=params,
+            constructors=constructors,
+            location=loc,
+            docstring=None,
+        )
+
+    return _make_eof_compatible(inner)
 
 
-@generate
 def term_parser() -> P[SurfaceTermDeclaration]:
     """Parse a term declaration: ident : type = expr.
 
@@ -406,85 +467,98 @@ def term_parser() -> P[SurfaceTermDeclaration]:
     Returns:
         SurfaceTermDeclaration with name, type annotation, and body
     """
-    # Parse identifier name
-    name_token = yield match_ident()
-    name = name_token.value
-    loc = name_token.location
 
-    # Match ":" for type annotation
-    yield match_symbol(":")
+    @generate
+    def parser():
+        # Parse identifier name
+        name_token = yield match_ident()
+        name = name_token.value
+        loc = name_token.location
 
-    # Parse type (requires type parser to be set)
-    if _type_parser is None:
-        raise RuntimeError("Type parser not set. Call set_type_parser() first.")
-    ty = yield _type_parser
+        # Match ":" for type annotation
+        yield match_symbol(":")
 
-    # Match "=" for definition
-    yield match_symbol("=")
+        # Parse type (requires type parser to be set)
+        if _type_parser is None:
+            raise RuntimeError("Type parser not set. Call set_type_parser() first.")
+        ty = yield _type_parser
 
-    # Parse expression body (requires expression parser to be set)
-    if _expr_parser is None:
-        raise RuntimeError("Expression parser not set. Call set_expr_parser() first.")
-    body = yield _expr_parser
+        # Match "=" for definition
+        yield match_symbol("=")
 
-    return SurfaceTermDeclaration(
-        name=name,
-        type_annotation=ty,
-        body=body,
-        location=loc,
-        docstring=None,
-        pragma=None,
-    )
+        # Parse expression body (requires expression parser to be set)
+        if _expr_parser is None:
+            raise RuntimeError("Expression parser not set. Call set_expr_parser() first.")
+        body = yield _expr_parser
+
+        return SurfaceTermDeclaration(
+            name=name,
+            type_annotation=ty,
+            body=body,
+            location=loc,
+            docstring=None,
+            pragma=None,
+        )
+
+    return _make_eof_compatible(parser)
 
 
-@generate
 def prim_type_parser() -> P[SurfacePrimTypeDecl]:
     """Parse a primitive type declaration: prim_type CONSTRUCTOR.
 
     Returns:
         SurfacePrimTypeDecl with the primitive type name
     """
-    # Match "prim_type" keyword
-    prim_token = yield match_keyword("prim_type")
-    loc = prim_token.location
 
-    # Parse constructor name
-    name_token = yield match_constructor()
-    name = name_token.value
+    @generate
+    def parser():
+        # Match "prim_type" keyword
+        prim_token = yield match_keyword("prim_type")
+        loc = prim_token.location
 
-    return SurfacePrimTypeDecl(name=name, location=loc, docstring=None)
+        # Parse constructor name
+        name_token = yield match_constructor()
+        name = name_token.value
+
+        return SurfacePrimTypeDecl(name=name, location=loc, docstring=None)
+
+    return _make_eof_compatible(parser)
 
 
-@generate
 def prim_op_parser() -> P[SurfacePrimOpDecl]:
     """Parse a primitive operation declaration: prim_op ident : type.
 
     Returns:
         SurfacePrimOpDecl with name and type annotation
     """
-    # Match "prim_op" keyword
-    prim_token = yield match_keyword("prim_op")
-    loc = prim_token.location
 
-    # Parse identifier name
-    name_token = yield match_ident()
-    name = name_token.value
+    @generate
+    def parser():
+        # Match "prim_op" keyword
+        prim_token = yield match_keyword("prim_op")
+        loc = prim_token.location
 
-    # Match ":" for type annotation
-    yield match_symbol(":")
+        # Parse identifier name
+        name_token = yield match_ident()
+        name = name_token.value
 
-    # Parse type (requires type parser to be set)
-    if _type_parser is None:
-        raise RuntimeError("Type parser not set. Call set_type_parser() first.")
-    ty = yield _type_parser
+        # Match ":" for type annotation
+        yield match_symbol(":")
 
-    return SurfacePrimOpDecl(
-        name=name,
-        type_annotation=ty,
-        location=loc,
-        docstring=None,
-        pragma=None,
-    )
+        # Parse type (requires type parser to be set)
+        if _type_parser is None:
+            raise RuntimeError("Type parser not set. Call set_type_parser() first.")
+        ty = yield _type_parser
+
+        return SurfacePrimOpDecl(
+            name=name,
+            type_annotation=ty,
+            location=loc,
+            docstring=None,
+            pragma=None,
+        )
+
+    return _make_eof_compatible(parser)
 
 
 # =============================================================================
@@ -504,12 +578,13 @@ def decl_parser() -> P[SurfaceDeclaration]:
     Returns:
         The parsed declaration
     """
-    return alt(
-        data_parser,
-        prim_type_parser,
-        prim_op_parser,
-        term_parser,
+    inner = alt(
+        data_parser(),
+        prim_type_parser(),
+        prim_op_parser(),
+        term_parser(),
     )
+    return _make_eof_compatible(inner)
 
 
 # =============================================================================

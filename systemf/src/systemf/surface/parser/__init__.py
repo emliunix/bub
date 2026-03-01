@@ -68,10 +68,12 @@ from systemf.surface.parser import expressions, declarations
 # - declarations needs expr_parser for term bodies
 # - expressions needs type_parser for annotations
 
-# Get the actual parser instance from type_parser() function
-type_parser_instance = declarations.type_parser()
+# Get the raw type parser (without EOF handling) for internal use
+# The public type_parser() wraps it with EOF handling for tests
+type_parser_instance = declarations._raw_type_parser()
 
 # Wire type parsers in both modules (they have separate forward declarations)
+# Use the raw parser for recursive calls so parenthesized types work correctly
 expressions.set_type_parser(type_parser_instance)
 declarations.set_type_parser(type_parser_instance)
 

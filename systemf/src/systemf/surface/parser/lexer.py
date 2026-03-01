@@ -145,8 +145,7 @@ class Lexer:
                 loc = Location(self.line, self.column, self.filename)
                 raise LexerError(f"Unexpected character: {self.source[self.pos]!r}", loc)
 
-        # Add EOF token
-        self.tokens.append(EOFToken(location=Location(self.line, self.column, self.filename)))
+        # Return tokens without explicit EOF - parsy expects stream to end naturally
         return self.tokens
 
     def _skip_whitespace(self) -> bool:

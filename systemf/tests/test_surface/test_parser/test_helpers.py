@@ -408,6 +408,20 @@ class TestTerminator:
         # Token should remain since we detected end of block
         assert len(remaining) == 1
 
+    def test_terminator_layout_mode_continues_at_same_column(self):
+        """Layout: token at same column means new item (continue, not end)."""
+        # This is the Idris2 behavior: same column = next item in block
+        # Token at col 4 when start_col is 4: continue with AtPos(4)
+        tokens = [
+            DummyIdent(name="next_item", location=Location(line=2, column=4)),
+        ]
+
+        result, remaining = terminator(AtPos(4), 4).parse_partial(tokens)
+        # Should continue with same constraint, NOT EndOfBlock
+        assert result == AtPos(4)
+        # Token should remain since it's a new block item
+        assert len(remaining) == 1
+
     def test_terminator_layout_mode_continues_when_further_indented(self):
         """Layout: token after start_col means continuation."""
         # Token at col 6 when start_col is 4: continue with same constraint

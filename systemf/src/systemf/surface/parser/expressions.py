@@ -15,13 +15,15 @@ from __future__ import annotations
 
 from typing import Optional, TypeVar
 import parsy
-from parsy import Parser as P, Result, generate, alt, fail
+from parsy import Parser as P, Result, generate, alt, fail, seq
 
 from systemf.surface.parser.helpers import (
+    AfterPos,
     AnyIndent,
     AtPos,
     ValidIndent,
     block_entries,
+    check_valid,
     column,
     must_continue,
 )
@@ -48,6 +50,7 @@ from systemf.surface.types import (
     SurfacePattern,
     SurfaceLet,
     SurfaceIf,
+    SurfaceOp,
 )
 
 # Type variable for generic parsers
@@ -124,6 +127,32 @@ def match_symbol(value: str) -> P[OperatorToken | DelimiterToken]:
         return Result.failure(index, f"expected symbol '{value}'")
 
     return parser
+
+
+# =============================================================================
+# Operator Token Matchers
+# =============================================================================
+
+# Arithmetic operators
+PLUS = match_token("PLUS")
+MINUS = match_token("MINUS")
+STAR = match_token("STAR")
+SLASH = match_token("SLASH")
+
+# Comparison operators
+EQ = match_token("EQ")  # ==
+NE = match_token("NE")  # /=
+LT = match_token("LT")  # <
+GT = match_token("GT")  # >
+LE = match_token("LE")  # <=
+GE = match_token("GE")  # >=
+
+# Logical operators
+AND = match_token("AND")  # &&
+OR = match_token("OR")  # ||
+
+# String concatenation
+APPEND = match_token("APPEND")  # ++
 
 
 # =============================================================================
@@ -353,6 +382,229 @@ def app_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     return parser
 
 
+def peek_column() -> P[int]:
+    """Peek at the column of the next token without consuming it.
+
+    Returns 0 if at end of input.
+    """
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        if index >= len(tokens):
+            return Result.success(index, 0)
+        return Result.success(index, tokens[index].column)
+
+    return parser
+
+
+# =============================================================================
+# Operator Expression Parsers
+# =============================================================================
+
+
+def multiplicative_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
+    """Parse multiplicative expressions: left (*|/) right.
+
+    Highest precedence among operators, just above application.
+
+    Args:
+        constraint: Layout constraint (passed through to operands)
+
+    Returns:
+        SurfaceOp tree for multiplicative operations or a single term
+    """
+
+    @generate
+    def parser():
+        # Parse left operand (application level)
+        left = yield app_parser(constraint)
+        loc = left.location
+
+        # Parse zero or more (*|/) right-operand pairs
+        ops_and_rights = []
+        while True:
+            # Try each operator
+            op = yield (STAR | SLASH).optional()
+            if op is None:
+                break
+            right = yield app_parser(constraint)
+            ops_and_rights.append((op, right))
+
+        # Build left-associative tree
+        result = left
+        for op, right in ops_and_rights:
+            result = SurfaceOp(result, op.value, right, loc)
+
+        return result
+
+    return parser
+
+
+def additive_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
+    """Parse additive expressions: left (+|-|++) right.
+
+    Lower precedence than multiplicative, higher than comparison.
+
+    Args:
+        constraint: Layout constraint (passed through to operands)
+
+    Returns:
+        SurfaceOp tree for additive operations or a single term
+    """
+
+    @generate
+    def parser():
+        # Parse left operand (multiplicative level)
+        left = yield multiplicative_parser(constraint)
+        loc = left.location
+
+        # Parse zero or more (+|-|++) right-operand pairs
+        ops_and_rights = []
+        while True:
+            # Try each operator
+            op = yield (PLUS | MINUS | APPEND).optional()
+            if op is None:
+                break
+            right = yield multiplicative_parser(constraint)
+            ops_and_rights.append((op, right))
+
+        # Build left-associative tree
+        result = left
+        for op, right in ops_and_rights:
+            result = SurfaceOp(result, op.value, right, loc)
+
+        return result
+
+    return parser
+
+
+def comparison_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
+    """Parse comparison expressions: left (==|/=|<|>|<=|>=) right.
+
+    Lower precedence than additive, higher than logical.
+
+    Args:
+        constraint: Layout constraint (passed through to operands)
+
+    Returns:
+        SurfaceOp tree for comparison operations or a single term
+    """
+
+    @generate
+    def parser():
+        # Parse left operand (additive level)
+        left = yield additive_parser(constraint)
+        loc = left.location
+
+        # Parse zero or more comparison-operator right-operand pairs
+        ops_and_rights = []
+        while True:
+            # Try each comparison operator
+            op = yield (EQ | NE | LT | GT | LE | GE).optional()
+            if op is None:
+                break
+            right = yield additive_parser(constraint)
+            ops_and_rights.append((op, right))
+
+        # Build left-associative tree
+        result = left
+        for op, right in ops_and_rights:
+            result = SurfaceOp(result, op.value, right, loc)
+
+        return result
+
+    return parser
+
+
+def logical_and_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
+    """Parse logical AND expressions: left && right.
+
+    Lower precedence than comparison, higher than logical OR.
+
+    Args:
+        constraint: Layout constraint (passed through to operands)
+
+    Returns:
+        SurfaceOp tree for logical AND or a single term
+    """
+
+    @generate
+    def parser():
+        # Parse left operand (comparison level)
+        left = yield comparison_parser(constraint)
+        loc = left.location
+
+        # Parse zero or more && right-operand pairs
+        ops_and_rights = []
+        while True:
+            op = yield AND.optional()
+            if op is None:
+                break
+            right = yield comparison_parser(constraint)
+            ops_and_rights.append((op, right))
+
+        # Build left-associative tree
+        result = left
+        for op, right in ops_and_rights:
+            result = SurfaceOp(result, op.value, right, loc)
+
+        return result
+
+    return parser
+
+
+def logical_or_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
+    """Parse logical OR expressions: left || right.
+
+    Lowest precedence among operators.
+
+    Args:
+        constraint: Layout constraint (passed through to operands)
+
+    Returns:
+        SurfaceOp tree for logical OR or a single term
+    """
+
+    @generate
+    def parser():
+        # Parse left operand (logical AND level)
+        left = yield logical_and_parser(constraint)
+        loc = left.location
+
+        # Parse zero or more || right-operand pairs
+        ops_and_rights = []
+        while True:
+            op = yield OR.optional()
+            if op is None:
+                break
+            right = yield logical_and_parser(constraint)
+            ops_and_rights.append((op, right))
+
+        # Build left-associative tree
+        result = left
+        for op, right in ops_and_rights:
+            result = SurfaceOp(result, op.value, right, loc)
+
+        return result
+
+    return parser
+
+
+def op_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
+    """Parse operator expressions with proper precedence.
+
+    Entry point for operator parsing. Handles all operator types
+    with correct precedence and left-associativity.
+
+    Args:
+        constraint: Layout constraint (passed through to operands)
+
+    Returns:
+        SurfaceTerm possibly wrapped in SurfaceOp nodes
+    """
+    return logical_or_parser(constraint)
+
+
 # =============================================================================
 # Lambda and Type Abstraction Parsers
 # =============================================================================
@@ -532,10 +784,15 @@ def case_parser(constraint: ValidIndent) -> P[SurfaceCase]:
 
 
 def let_binding(constraint: ValidIndent) -> P[tuple[str, Optional[SurfaceType], SurfaceTerm]]:
-    """Parse a single let binding: ident [: type] = expr.
+    """Parse a single let binding: ident [params] [: type] = expr.
+
+    Supports:
+    - Simple binding: x = 1
+    - Typed binding: x : Int = 1
+    - Function binding: f x y = x + y (desugared to lambda)
 
     Args:
-        constraint: Layout constraint for the binding expression
+        constraint: Layout constraint for the binding start column
 
     Returns:
         Tuple of (var_name, optional_type, value)
@@ -545,12 +802,39 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, Optional[SurfaceType], 
     def parser():
         var_token = yield match_token("IDENT")
         var_name = var_token.value
+        loc = var_token.location
 
-        # Optional type annotation
+        # Parse optional parameters (for function definitions like "f x y = ...")
+        params = []
+        while True:
+            param_token = yield match_token("IDENT").optional()
+            if param_token is None:
+                break
+            params.append(param_token.value)
+
+        # Optional type annotation (applies to the whole function if params present)
         var_type = yield (match_symbol(":") >> _type_parser).optional()
 
         yield match_symbol("=")
-        value = yield expr_parser(constraint)
+
+        # For expression value, use AfterPos to allow spanning multiple columns
+        # If constraint is AtPos(col), expression can use columns > col (not >=)
+        # This prevents consuming the next binding which is at column col
+        expr_constraint: ValidIndent
+        match constraint:
+            case AtPos(col):
+                expr_constraint = AfterPos(col + 1)  # Strictly greater than binding column
+            case _:
+                expr_constraint = constraint
+
+        value = yield expr_parser(expr_constraint)
+
+        # If we have parameters, build a lambda abstraction
+        # f x y = body  becomes  f = \x y -> body
+        if params:
+            # Build nested lambdas from right to left
+            for param in reversed(params):
+                value = SurfaceAbs(param, None, value, loc)
 
         return (var_name, var_type, value)
 
@@ -567,7 +851,7 @@ def let_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         constraint: Layout constraint (passed through to expressions)
 
     Returns:
-        SurfaceLet with bindings and body (nested for multiple bindings)
+        SurfaceLet with list of bindings and body
     """
 
     @generate
@@ -584,12 +868,7 @@ def let_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         yield match_keyword("in")
         body = yield expr_parser(constraint)
 
-        # Build nested let expressions for multiple bindings
-        result = body
-        for var_name, var_type, value in reversed(bindings):
-            result = SurfaceLet(var_name, value, result, loc, var_type)
-
-        return result
+        return SurfaceLet(bindings, body, loc)
 
     return parser
 
@@ -634,7 +913,10 @@ def expr_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     Tries in order:
     1. Lambda abstraction
     2. Type abstraction
-    3. Application (which includes atoms)
+    3. If-then-else
+    4. Case expression
+    5. Let expression
+    6. Operator expressions (includes application)
 
     Args:
         constraint: Layout constraint for layout-sensitive expressions
@@ -648,7 +930,7 @@ def expr_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         if_parser(constraint),
         case_parser(constraint),
         let_parser(constraint),
-        app_parser(constraint),
+        op_parser(constraint),
     )
 
 
