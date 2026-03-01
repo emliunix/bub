@@ -349,7 +349,7 @@ def app_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     applications: ((f x) y) z
 
     Args:
-        constraint: Layout constraint (passed through but not used for atoms)
+        constraint: Layout constraint for checking additional argument columns
 
     Returns:
         SurfaceApp tree or a single atom if only one parsed
@@ -361,9 +361,15 @@ def app_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         first = yield atom_parser()
         loc = first.location
 
-        # Parse additional atoms for application
+        # Parse additional atoms for application, respecting constraint
         args: list[SurfaceTerm] = []
         while True:
+            # Check constraint before parsing next argument
+            if not isinstance(constraint, AnyIndent):
+                next_col = yield peek_column()
+                if next_col > 0 and not check_valid(constraint, next_col):
+                    break
+
             arg = yield atom_parser().optional()
             if arg is None:
                 break
@@ -629,14 +635,19 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
         lam_token = yield match_token("LAMBDA")
         loc = lam_token.location
 
-        # Parse parameter name
-        var_token = yield match_token("IDENT")
-        var_name = var_token.value
+        # Parse one or more parameter names
+        var_tokens = yield match_token("IDENT").at_least(1)
 
-        # Optional type annotation
-        var_type = yield (match_symbol(":") >> _type_parser).optional()
+        # For each parameter, try to parse optional type annotation
+        # Build annotated_params: [(name, type_annotation), ...]
+        annotated_params: list[tuple[str, SurfaceType | None]] = []
+        for var_token in var_tokens:
+            var_name = var_token.value
+            # Optional type annotation for this parameter
+            var_type = yield (match_symbol(":") >> _type_parser).optional()
+            annotated_params.append((var_name, var_type))
 
-        # Optional parameter docstring (-- ^ style)
+        # Optional parameter docstring (-- ^ style) - applies to last param
         param_doc_token = yield match_token("DOCSTRING_INLINE").optional()
         param_docstrings: list[str | None] = []
         if param_doc_token is not None:
@@ -652,7 +663,16 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
         # Parse body (respecting layout constraint)
         body = yield expr_parser(constraint)
 
-        return SurfaceAbs(var_name, var_type, body, loc, param_docstrings)
+        # Nest lambdas from right to left
+        # λx y z → body  =>  λx → (λy → (λz → body))
+        result = body
+        # Reverse iterate to build nested structure
+        for var_name, var_type in reversed(annotated_params):
+            result = SurfaceAbs(
+                var_name, var_type, result, loc, param_docstrings if result is body else []
+            )
+
+        return result
 
     return parser
 
@@ -729,7 +749,7 @@ def pattern_parser() -> P[SurfacePattern]:
 
 
 def case_alt(constraint: ValidIndent) -> P[SurfaceBranch]:
-    """Parse a single case branch: pattern -> expr.
+    """Parse a single case branch: pattern → expr.
 
     Args:
         constraint: Layout constraint for the branch body
@@ -742,8 +762,18 @@ def case_alt(constraint: ValidIndent) -> P[SurfaceBranch]:
     def parser():
         pat = yield pattern_parser()
         loc = pat.location
-        yield match_symbol("->")
-        body = yield expr_parser(constraint)
+        yield match_token("ARROW")
+
+        # Transform constraint for the expression body (similar to let_binding)
+        # This prevents the expression from consuming subsequent branches
+        expr_constraint: ValidIndent
+        match constraint:
+            case AtPos(col):
+                expr_constraint = AfterPos(col + 1)
+            case _:
+                expr_constraint = constraint
+
+        body = yield expr_parser(expr_constraint)
         return SurfaceBranch(pat, body, loc)
 
     return parser
