@@ -205,26 +205,6 @@ def block(item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
     return parser
 
 
-def block_after(min_col: int, item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
-    """Parse a block indented at least min_col spaces.
-
-    Used when we need items to be indented past a specific column.
-    Falls back to empty list if not indented enough.
-
-    Args:
-        min_col: Minimum column for items (inclusive)
-        item: Parser for individual items
-
-    Returns:
-        Parser that returns list of items, or empty list if not indented
-
-    Example:
-        >>> block_after(4, binding_parser).parse("    x = 1\n    y = 2")
-        [Binding(...), Binding(...)]
-    """
-    raise NotImplementedError("block_after() not yet implemented")
-
-
 def block_entries(constraint: ValidIndent, item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
     """Parse zero or more items with the given column constraint.
 
@@ -457,46 +437,6 @@ def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> P[
     return parser
 
 
-# =============================================================================
-# Declarations (NOT helpers - stub only)
-# =============================================================================
-
-
-def top_decl(constraint: ValidIndent) -> P:
-    """Parse a top-level declaration. (STUB - not a helper)"""
-    raise NotImplementedError("top_decl() is not a helper - implement in parser module")
-
-
-def data_decl(constraint: ValidIndent) -> P:
-    """Parse a data declaration. (STUB - not a helper)"""
-    raise NotImplementedError("data_decl() is not a helper - implement in parser module")
-
-
-def let_decl(constraint: ValidIndent) -> P:
-    """Parse a let declaration. (STUB - not a helper)"""
-    raise NotImplementedError("let_decl() is not a helper - implement in parser module")
-
-
-# =============================================================================
-# Expressions (NOT helpers - stub only)
-# =============================================================================
-
-
-def case_expr(constraint: ValidIndent) -> P:
-    """Parse a case expression. (STUB - not a helper)"""
-    raise NotImplementedError("case_expr() is not a helper - implement in parser module")
-
-
-def expr_parser(constraint: ValidIndent) -> P:
-    """Parse an expression. (STUB - not a helper)"""
-    raise NotImplementedError("expr_parser() is not a helper - implement in parser module")
-
-
-def type_parser(constraint: ValidIndent) -> P:
-    """Parse a type expression. (STUB - not a helper)"""
-    raise NotImplementedError("type_parser() is not a helper - implement in parser module")
-
-
 __all__ = [
     # Core infrastructure
     "column",
@@ -505,18 +445,9 @@ __all__ = [
     "get_indent_info",
     # Block combinators
     "block",
-    "block_after",
     "block_entries",
     "block_entry",
     # Terminators
     "terminator",
     "must_continue",
-    # Declarations (stubs)
-    "top_decl",
-    "data_decl",
-    "let_decl",
-    # Expressions (stubs)
-    "case_expr",
-    "expr_parser",
-    "type_parser",
 ]

@@ -1,8 +1,8 @@
 # System F Surface Syntax Specification
 
-**Version:** 0.2  
+**Version:** 0.3  
 **Status:** Draft  
-**Last Updated:** 2024-02-28
+**Last Updated:** 2025-03-01
 
 This document defines the concrete syntax of the System F surface language. The surface syntax is what programmers write; it desugars to a simpler core language.
 
@@ -16,7 +16,7 @@ Constructors:  [A-Z][a-zA-Z0-9_]*
 Identifiers:   [a-z_][a-zA-Z0-9_]*
 Operators:     +, -, *, /, ==, /=, <, >, <=, >=, &&, ||, ++
 Reserved:      !! (list indexing - future), ! (reserved)
-Delimiters:    ( ) { } [ ] @ | → . = : ->
+Delimiters:    ( ) { } [ ] @ | → . = : -> ,
 Literals:      42, -7, "hello", 'c'
 Layout:        Parser-level constraint checking (no virtual tokens)
 ```
@@ -128,8 +128,11 @@ arrow_type  ::= app_type ("→" arrow_type)?
 app_type    ::= atom_type+
 
 atom_type   ::= "(" type ")"
+             |   tuple_type
              |   ident          -- type variable
              |   CONSTRUCTOR    -- type constructor
+
+tuple_type  ::= "(" type ("," type)+ ")"
 ```
 
 ### 2.2 Rank-2 Types
@@ -168,6 +171,35 @@ f @(List Int)             -- complex, requires parens
 f @(∀a. a → a)            -- higher-rank, requires parens
 ```
 
+### 2.4 Tuple Types
+
+Tuple types are syntactic sugar for nested `Pair` applications:
+
+```
+tuple_type ::= "(" type ("," type)+ ")"
+```
+
+**Desugaring:**
+
+```systemf
+(Int, Bool)              -- sugar for: Pair Int Bool
+(Int, Bool, String)      -- sugar for: Pair Int (Pair Bool String)
+(a, b, c, d)             -- sugar for: Pair a (Pair b (Pair c d))
+```
+
+**Note:** Single-element parentheses `(Int)` are just grouping, not tuples. Tuples require at least two elements.
+
+**Examples:**
+
+```systemf
+-- Function returning a pair
+swap : ∀a. ∀b. (a, b) → (b, a)
+
+-- Nested tuples
+type Point3D = (Float, Float, Float)
+type Color = (Int, Int, Int, Int)  -- RGBA
+```
+
 ## 3. Expressions
 
 ### 3.1 Expression Grammar
@@ -178,33 +210,8 @@ expr      ::= lambda_expr
            |  if_expr
            |  case_expr
            |  let_expr
+           |  tuple_expr
            |  op_expr
-
-lambda_expr ::= "λ" lambda_param+ "→" expr
-
-lambda_param ::= ident [":" type]
-
-type_abs_expr ::= "Λ" ident+ "." expr
-               |  "/\\" ident+ "." expr
-
-if_expr     ::= "if" expr "then" expr "else" expr
-
-case_expr   ::= "case" expr "of" case_body
-
-case_body   ::= "{" branch (";" branch)* "}"
-             |   INDENT branch (NEXT branch)* DEDENT
-
-branch      ::= pattern "→" expr
-
-pattern     ::= CONSTRUCTOR [ident*]
-
-let_expr    ::= "let" let_binding (";" let_binding)* "in" indented_body
-             |   "let" INDENT let_binding+ DEDENT "in" indented_body
-
-let_binding ::= ident [":" type] "=" expr
-
-indented_body ::= expr
-               |  INDENT expr DEDENT
 ```
 
 ### 3.2 Application
@@ -220,7 +227,41 @@ f @Int x y     -- parses as: (((f @Int) x) y)
 f x @Int       -- ERROR: use (f x) @Int if you really need this
 ```
 
-### 3.3 If-Then-Else (3 Layout Styles)
+### 3.3 Tuple Expressions
+
+Tuple expressions are syntactic sugar for nested `Pair` constructor applications:
+
+```
+tuple_expr  ::= "(" expr ("," expr)+ ")"
+```
+
+**Desugaring:**
+
+```systemf
+(x, y)                   -- sugar for: Pair x y
+(1, 2, 3)                -- sugar for: Pair 1 (Pair 2 3)
+(a, b, c, d)             -- sugar for: Pair a (Pair b (Pair c d))
+```
+
+**Note:** Single-element parentheses `(x)` are just grouping, not tuples.
+
+**Examples:**
+
+```systemf
+-- Returning multiple values
+swap : ∀a. ∀b. (a, b) → (b, a)
+swap p = case p of (x, y) → (y, x)
+
+-- Pattern matching on tuples
+fst : ∀a. ∀b. (a, b) → a
+fst p = case p of (x, _) → x
+
+-- Nested tuples
+point : (Float, (Float, Float))
+point = (1.0, (2.0, 3.0))
+```
+
+### 3.4 If-Then-Else (3 Layout Styles)
 
 **Style 1: All inline**
 ```systemf
@@ -263,6 +304,42 @@ case x of
 Branches separated by layout (NEXT tokens between items).
 
 **Note:** Unlike data declarations, case expressions use `;` not `|` in explicit mode. This follows Haskell's convention.
+
+#### Patterns
+
+Patterns support constructor patterns, variable patterns, and tuple patterns:
+
+```
+pattern     ::= tuple_pattern
+             |  CONSTRUCTOR [ident*]
+             |  ident           -- variable pattern
+
+tuple_pattern ::= "(" pattern ("," pattern)+ ")"
+```
+
+**Examples:**
+
+```systemf
+-- Constructor patterns
+case xs of
+  Nil → 0
+  Cons x xs → x + length xs
+
+-- Tuple patterns
+case p of
+  (x, y) → x + y
+  (a, b, c) → a + b + c
+
+-- Variable patterns (catch-all)
+case x of
+  0 → "zero"
+  n → "non-zero: " ++ show n
+
+-- Nested patterns
+case mp of
+  Nothing → 0
+  Just (x, y) → x + y
+```
 
 ### 3.5 Lambda (2 Layout Styles)
 

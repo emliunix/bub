@@ -433,12 +433,27 @@ class Elaborator:
                     return core_func
                 return core.TApp(core_func, core_type_arg)
 
-            case SurfaceLet(name, value, body, location):
-                core_value = self.elaborate_term(value)
-                self._add_term_binding(name)
+            case SurfaceLet(bindings=bindings, body=body, location=location):
+                # Handle multiple let bindings by nesting them
+                # let x = a in let y = b in body
+                # Process bindings: elaborate value, add binding, then build nested lets
+                core_values = []
+                for name, var_type, value in bindings:
+                    core_value = self.elaborate_term(value)
+                    core_values.append((name, core_value))
+
+                # Now add all bindings and elaborate body
+                for name, _ in core_values:
+                    self._add_term_binding(name)
+
                 core_body = self.elaborate_term(body)
-                # Don't remove - let binding stays in scope
-                return core.Let(name, core_value, core_body)
+
+                # Build nested lets from the inside out
+                result = core_body
+                for name, core_value in reversed(core_values):
+                    result = core.Let(name, core_value, result)
+
+                return result
 
             case SurfaceAnn(term_inner, type_ann, location):
                 # Elaborate the term (annotation is for type checking)

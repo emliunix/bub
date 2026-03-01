@@ -205,7 +205,10 @@ class StringToken(TokenBase):
 
 @dataclass(frozen=True)
 class KeywordToken(TokenBase):
-    """Keyword token (data, let, in, case, of, forall, type)."""
+    """Base class for keyword tokens (data, let, in, case, of, forall, type).
+
+    Subclasses should override the type property.
+    """
 
     keyword: str
 
@@ -215,13 +218,191 @@ class KeywordToken(TokenBase):
 
     @property
     def type(self) -> str:
+        """Default implementation returns uppercase keyword."""
         return self.keyword.upper()
 
     def __str__(self) -> str:
         return f"{self.type}({self.value!r})"
 
     def __repr__(self) -> str:
-        return f"KeywordToken({self.value!r}, {self.location})"
+        return f"{self.__class__.__name__}({self.value!r}, {self.location})"
+
+
+# Specific keyword token classes
+
+
+@dataclass(frozen=True)
+class LambdaToken(TokenBase):
+    """Lambda token (small lambda)."""
+
+    symbol: str
+
+    @property
+    def type(self) -> str:
+        return "LAMBDA"
+
+    @property
+    def value(self) -> str:
+        return self.symbol
+
+
+@dataclass(frozen=True)
+class TypeLambdaToken(TokenBase):
+    """Type lambda token (big lambda)."""
+
+    symbol: str
+
+    @property
+    def type(self) -> str:
+        return "TYPELAMBDA"
+
+    @property
+    def value(self) -> str:
+        return self.symbol
+
+
+@dataclass(frozen=True)
+class DataToken(KeywordToken):
+    """Data declaration keyword: data"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class LetToken(KeywordToken):
+    """Let binding keyword: let"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class InToken(KeywordToken):
+    """In keyword for let bindings"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class CaseToken(KeywordToken):
+    """Case expression keyword: case"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class OfToken(KeywordToken):
+    """Of keyword for case expressions"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class ForallToken(KeywordToken):
+    """Forall keyword (universal quantifier)."""
+
+    @property
+    def type(self) -> str:
+        return "FORALL"
+
+
+@dataclass(frozen=True)
+class TypeToken(KeywordToken):
+    """Type declaration keyword: type"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class IfToken(KeywordToken):
+    """If keyword: if"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class ThenToken(KeywordToken):
+    """Then keyword: then"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class ElseToken(KeywordToken):
+    """Else keyword: else"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class PrimTypeToken(KeywordToken):
+    """Primitive type keyword: prim_type"""
+
+    pass
+
+
+@dataclass(frozen=True)
+class PrimOpToken(KeywordToken):
+    """Primitive operator keyword: prim_op"""
+
+    pass
+
+
+class OperatorType:
+    """Operator types for OperatorToken.
+
+    This class uses class attributes to define operator type constants
+    for type safety and IDE support.
+    """
+
+    ARROW = "ARROW"  # ->
+    DARROW = "DARROW"  # =>
+    EQ = "EQ"  # ==
+    NEQ = "NEQ"  # /=
+    LT = "LT"  # <
+    GT = "GT"  # >
+    LE = "LE"  # <=
+    GE = "GE"  # >=
+    PLUS = "PLUS"  # +
+    MINUS = "MINUS"  # -
+    STAR = "STAR"  # *
+    SLASH = "SLASH"  # /
+    AND = "AND"  # &&
+    OR = "OR"  # ||
+    APPEND = "APPEND"  # ++
+    EQUALS = "EQUALS"  # =
+    COLON = "COLON"  # :
+    BAR = "BAR"  # |
+    AT = "AT"  # @
+    DOT = "DOT"  # .
+    LAMBDA = "LAMBDA"  # \ or λ
+    TYPELAMBDA = "TYPELAMBDA"  # /\ or Λ
+
+    ALL = frozenset(
+        [
+            ARROW,
+            DARROW,
+            EQ,
+            NEQ,
+            LT,
+            GT,
+            LE,
+            GE,
+            PLUS,
+            MINUS,
+            STAR,
+            SLASH,
+            AND,
+            OR,
+            APPEND,
+            EQUALS,
+            COLON,
+            BAR,
+            AT,
+            DOT,
+            LAMBDA,
+            TYPELAMBDA,
+        ]
+    )
 
 
 @dataclass(frozen=True)
@@ -229,7 +410,7 @@ class OperatorToken(TokenBase):
     """Operator token."""
 
     operator: str
-    op_type: str  # The token type name (ARROW, EQUALS, etc.)
+    op_type: str  # One of OperatorType constants
 
     @property
     def value(self) -> str:
@@ -246,12 +427,30 @@ class OperatorToken(TokenBase):
         return f"OperatorToken({self.value!r}, {self.location})"
 
 
+class DelimiterType:
+    """Delimiter types for DelimiterToken.
+
+    This class uses class attributes to define delimiter type constants
+    for type safety and IDE support.
+    """
+
+    LPAREN = "LPAREN"  # (
+    RPAREN = "RPAREN"  # )
+    LBRACKET = "LBRACKET"  # [
+    RBRACKET = "RBRACKET"  # ]
+    LBRACE = "LBRACE"  # {
+    RBRACE = "RBRACE"  # }
+    COMMA = "COMMA"  # ,
+
+    ALL = frozenset([LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE, COMMA])
+
+
 @dataclass(frozen=True)
 class DelimiterToken(TokenBase):
     """Delimiter token (parentheses, brackets, braces, comma)."""
 
     delimiter: str
-    delim_type: str  # The token type name (LPAREN, RPAREN, etc.)
+    delim_type: str  # One of DelimiterType constants
 
     @property
     def value(self) -> str:
@@ -341,162 +540,6 @@ class LexerError(Exception):
         self.location = location
 
 
-class TokenType:
-    """Token types for the System F surface language lexer.
-
-    This class uses class attributes instead of Enum for string compatibility
-    with the existing parser which expects token types as strings.
-    """
-
-    # Whitespace and comments (skipped during normal tokenization)
-    WHITESPACE = "WHITESPACE"
-    COMMENT = "COMMENT"
-
-    # Keywords
-    DATA = "DATA"
-    LET = "LET"
-    IN = "IN"
-    CASE = "CASE"
-    OF = "OF"
-    FORALL = "FORALL"
-    TYPE = "TYPE"
-    IF = "IF"
-    THEN = "THEN"
-    ELSE = "ELSE"
-    PRIM_TYPE = "PRIM_TYPE"
-    PRIM_OP = "PRIM_OP"
-
-    # Multi-character operators
-    ARROW = "ARROW"  # ->
-    DARROW = "DARROW"  # =>
-    LAMBDA = "LAMBDA"  # \
-    TYPELAMBDA = "TYPELAMBDA"  # /\
-
-    # Arithmetic operators
-    PLUS = "PLUS"  # +
-    MINUS = "MINUS"  # -
-    STAR = "STAR"  # *
-    SLASH = "SLASH"  # /
-
-    # Comparison operators
-    EQ = "EQ"  # ==
-    NEQ = "NEQ"  # /=
-    LT = "LT"  # <
-    GT = "GT"  # >
-    LE = "LE"  # <=
-    GE = "GE"  # >=
-
-    # Logical operators
-    AND = "AND"  # &&
-    OR = "OR"  # ||
-
-    # String operators
-    APPEND = "APPEND"  # ++
-
-    # Single-character operators
-    EQUALS = "EQUALS"  # =
-    COLON = "COLON"  # :
-    BAR = "BAR"  # |
-    AT = "AT"  # @
-    DOT = "DOT"  # .
-
-    # Delimiters
-    LPAREN = "LPAREN"  # (
-    RPAREN = "RPAREN"  # )
-    LBRACKET = "LBRACKET"  # [
-    RBRACKET = "RBRACKET"  # ]
-    LBRACE = "LBRACE"  # {
-    RBRACE = "RBRACE"  # }
-    COMMA = "COMMA"  # ,
-
-    # Identifiers and constructors
-    CONSTRUCTOR = "CONSTRUCTOR"  # Type/constructor names (Uppercase)
-    IDENT = "IDENT"  # Variables (lowercase or underscore)
-
-    # Literals
-    NUMBER = "NUMBER"  # Numeric literals
-    STRING = "STRING"  # String literals
-
-    # End of file
-    EOF = "EOF"
-
-    # Pragma tokens
-    PRAGMA_START = "PRAGMA_START"
-    PRAGMA_CONTENT = "PRAGMA_CONTENT"
-    PRAGMA_END = "PRAGMA_END"
-
-    # Docstring tokens
-    DOCSTRING_PRECEDING = "DOCSTRING_PRECEDING"
-    DOCSTRING_INLINE = "DOCSTRING_INLINE"
-
-    # All token types as a set for quick lookup
-    ALL = frozenset(
-        [
-            WHITESPACE,
-            COMMENT,
-            DATA,
-            LET,
-            IN,
-            CASE,
-            OF,
-            FORALL,
-            TYPE,
-            IF,
-            THEN,
-            ELSE,
-            PRIM_TYPE,
-            PRIM_OP,
-            ARROW,
-            DARROW,
-            LAMBDA,
-            TYPELAMBDA,
-            PLUS,
-            MINUS,
-            STAR,
-            SLASH,
-            EQ,
-            NEQ,
-            LT,
-            GT,
-            LE,
-            GE,
-            AND,
-            OR,
-            APPEND,
-            EQUALS,
-            COLON,
-            BAR,
-            AT,
-            DOT,
-            LPAREN,
-            RPAREN,
-            LBRACKET,
-            RBRACKET,
-            LBRACE,
-            RBRACE,
-            COMMA,
-            CONSTRUCTOR,
-            IDENT,
-            NUMBER,
-            STRING,
-            EOF,
-            PRAGMA_START,
-            PRAGMA_CONTENT,
-            PRAGMA_END,
-            DOCSTRING_PRECEDING,
-            DOCSTRING_INLINE,
-        ]
-    )
-
-    # Tokens that are skipped in normal output (whitespace, comments)
-    SKIPPABLE = frozenset([WHITESPACE, COMMENT])
-
-    # Keywords for syntax highlighting or validation
-    KEYWORDS = frozenset(
-        [DATA, LET, IN, CASE, OF, FORALL, TYPE, IF, THEN, ELSE, PRIM_TYPE, PRIM_OP]
-    )
-
-
 # Type alias for token type strings
 TokenTypeStr = str
 
@@ -521,11 +564,12 @@ __all__ = [
     "StringToken",
     "KeywordToken",
     "OperatorToken",
+    "OperatorType",
     "DelimiterToken",
+    "DelimiterType",
     "PragmaToken",
     "DocstringToken",
     "EOFToken",
     "LexerError",
-    "TokenType",
     "TokenTypeStr",
 ]

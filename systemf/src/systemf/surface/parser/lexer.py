@@ -9,19 +9,33 @@ from __future__ import annotations
 import re
 
 from systemf.surface.parser.types import (
+    CaseToken,
     ConstructorToken,
+    DataToken,
     DelimiterToken,
+    DelimiterType,
     DocstringToken,
     EOFToken,
+    ElseToken,
+    ForallToken,
     IdentifierToken,
-    KeywordToken,
+    IfToken,
+    InToken,
+    LambdaToken,
+    LetToken,
     LexerError,
     NumberToken,
+    OfToken,
     OperatorToken,
+    OperatorType,
     PragmaToken,
+    PrimOpToken,
+    PrimTypeToken,
     StringToken,
+    ThenToken,
     Token,
-    TokenType,
+    TypeLambdaToken,
+    TypeToken,
 )
 from systemf.utils.location import Location
 
@@ -89,6 +103,7 @@ class Lexer:
         ("RBRACKET", r"\]"),
         ("LBRACE", r"\{"),
         ("RBRACE", r"\}"),
+        ("COMMA", r","),
         # Literals
         ("STRING", r'"([^"\\]|\\.)*"'),
         ("NUMBER", r"\d+"),
@@ -205,85 +220,74 @@ class Lexer:
             # Remove quotes from string value
             string_value = value[1:-1]
             return StringToken(string=string_value, location=loc)
-        elif token_type in (
-            "DATA",
-            "LET",
-            "IN",
-            "CASE",
-            "OF",
-            "FORALL",
-            "TYPE",
-            "IF",
-            "THEN",
-            "ELSE",
-            "PRIM_TYPE",
-            "PRIM_OP",
-        ):
-            return KeywordToken(keyword=value, location=loc)
-        elif token_type in (
-            "ARROW",
-            "DARROW",
-            "LAMBDA",
-            "TYPELAMBDA",
-            "EQ",
-            "NEQ",
-            "PLUS",
-            "MINUS",
-            "STAR",
-            "SLASH",
-            "LT",
-            "GT",
-            "LE",
-            "GE",
-            "AND",
-            "OR",
-            "APPEND",
-            "EQUALS",
-            "COLON",
-            "BAR",
-            "AT",
-            "DOT",
-        ):
+        elif token_type == "DATA":
+            return DataToken(keyword=value, location=loc)
+        elif token_type == "LET":
+            return LetToken(keyword=value, location=loc)
+        elif token_type == "IN":
+            return InToken(keyword=value, location=loc)
+        elif token_type == "CASE":
+            return CaseToken(keyword=value, location=loc)
+        elif token_type == "OF":
+            return OfToken(keyword=value, location=loc)
+        elif token_type == "FORALL":
+            return ForallToken(keyword=value, location=loc)
+        elif token_type == "TYPE":
+            return TypeToken(keyword=value, location=loc)
+        elif token_type == "IF":
+            return IfToken(keyword=value, location=loc)
+        elif token_type == "THEN":
+            return ThenToken(keyword=value, location=loc)
+        elif token_type == "ELSE":
+            return ElseToken(keyword=value, location=loc)
+        elif token_type == "PRIM_TYPE":
+            return PrimTypeToken(keyword=value, location=loc)
+        elif token_type == "PRIM_OP":
+            return PrimOpToken(keyword=value, location=loc)
+        elif token_type == "LAMBDA":
+            return LambdaToken(symbol=value, location=loc)
+        elif token_type == "TYPELAMBDA":
+            return TypeLambdaToken(symbol=value, location=loc)
+        elif token_type in OperatorType.ALL:
             # Determine operator type
             op_map = {
-                "ARROW": TokenType.ARROW,
-                "DARROW": TokenType.DARROW,
-                "LAMBDA": TokenType.LAMBDA,
-                "TYPELAMBDA": TokenType.TYPELAMBDA,
-                "EQ": TokenType.EQ,
-                "NEQ": TokenType.NEQ,
-                "PLUS": TokenType.PLUS,
-                "MINUS": TokenType.MINUS,
-                "STAR": TokenType.STAR,
-                "SLASH": TokenType.SLASH,
-                "LT": TokenType.LT,
-                "GT": TokenType.GT,
-                "LE": TokenType.LE,
-                "GE": TokenType.GE,
-                "AND": TokenType.AND,
-                "OR": TokenType.OR,
-                "APPEND": TokenType.APPEND,
-                "EQUALS": TokenType.EQUALS,
-                "COLON": TokenType.COLON,
-                "BAR": TokenType.BAR,
-                "AT": TokenType.AT,
-                "DOT": TokenType.DOT,
+                "ARROW": OperatorType.ARROW,
+                "DARROW": OperatorType.DARROW,
+                "EQ": OperatorType.EQ,
+                "NEQ": OperatorType.NEQ,
+                "PLUS": OperatorType.PLUS,
+                "MINUS": OperatorType.MINUS,
+                "STAR": OperatorType.STAR,
+                "SLASH": OperatorType.SLASH,
+                "LT": OperatorType.LT,
+                "GT": OperatorType.GT,
+                "LE": OperatorType.LE,
+                "GE": OperatorType.GE,
+                "AND": OperatorType.AND,
+                "OR": OperatorType.OR,
+                "APPEND": OperatorType.APPEND,
+                "EQUALS": OperatorType.EQUALS,
+                "COLON": OperatorType.COLON,
+                "BAR": OperatorType.BAR,
+                "AT": OperatorType.AT,
+                "DOT": OperatorType.DOT,
+                "LAMBDA": OperatorType.LAMBDA,
+                "TYPELAMBDA": OperatorType.TYPELAMBDA,
             }
             return OperatorToken(operator=value, op_type=op_map[token_type], location=loc)
-        elif token_type in ("LPAREN", "RPAREN", "LBRACKET", "RBRACKET", "LBRACE", "RBRACE"):
+        elif token_type in DelimiterType.ALL:
             delim_map = {
-                "LPAREN": TokenType.LPAREN,
-                "RPAREN": TokenType.RPAREN,
-                "LBRACKET": TokenType.LBRACKET,
-                "RBRACKET": TokenType.RBRACKET,
-                "LBRACE": TokenType.LBRACE,
-                "RBRACE": TokenType.RBRACE,
+                "LPAREN": DelimiterType.LPAREN,
+                "RPAREN": DelimiterType.RPAREN,
+                "LBRACKET": DelimiterType.LBRACKET,
+                "RBRACKET": DelimiterType.RBRACKET,
+                "LBRACE": DelimiterType.LBRACE,
+                "RBRACE": DelimiterType.RBRACE,
+                "COMMA": DelimiterType.COMMA,
             }
             return DelimiterToken(delimiter=value, delim_type=delim_map[token_type], location=loc)
         elif token_type in ("PRAGMA_START", "PRAGMA_END"):
-            return PragmaToken(
-                pragma_type=getattr(TokenType, token_type), content=value, location=loc
-            )
+            return PragmaToken(pragma_type=token_type, content=value, location=loc)
         else:
             # Unknown token type - skip
             return None

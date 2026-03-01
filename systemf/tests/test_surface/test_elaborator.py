@@ -213,7 +213,7 @@ class TestElaborateLet:
         # let x = y in x
         value = SurfaceVar("y", DUMMY_LOC)
         body = SurfaceVar("x", DUMMY_LOC)
-        surface = SurfaceLet("x", value, body, DUMMY_LOC)
+        surface = SurfaceLet(bindings=[("x", None, value)], body=body, location=DUMMY_LOC)
         core_term = elab.elaborate_term(surface)
 
         assert isinstance(core_term, core.Let)

@@ -21,6 +21,8 @@ from systemf.surface.types import (
     SurfacePrimOpDecl,
     SurfaceTypeConstructor,
     SurfaceConstructorInfo,
+    SurfaceTypeApp,
+    SurfaceTypeTuple,
 )
 
 
@@ -242,7 +244,13 @@ class TestTypeParser:
         """Parse List Int."""
         tokens = lex("List Int")
         result = type_parser().parse(tokens)
-        assert isinstance(result, SurfaceTypeConstructor)
+        # Parser produces SurfaceTypeApp directly (normalization to SurfaceTypeConstructor
+        # with args happens during elaboration/desugaring)
+        assert isinstance(result, SurfaceTypeApp)
+        assert isinstance(result.func, SurfaceTypeConstructor)
+        assert result.func.name == "List"
+        assert isinstance(result.type_arg, SurfaceTypeConstructor)
+        assert result.type_arg.name == "Int"
 
     def test_nested_forall(self):
         """Parse forall a b c. a -> b -> c -> a."""
@@ -261,7 +269,12 @@ class TestTypeParser:
         """Parse (Int, Bool) tuple."""
         tokens = lex("(Int, Bool)")
         result = type_parser().parse(tokens)
-        assert result is not None
+        assert isinstance(result, SurfaceTypeTuple)
+        assert len(result.elements) == 2
+        assert isinstance(result.elements[0], SurfaceTypeConstructor)
+        assert result.elements[0].name == "Int"
+        assert isinstance(result.elements[1], SurfaceTypeConstructor)
+        assert result.elements[1].name == "Bool"
 
     def test_rank2_type(self):
         """Parse rank-2 type (forall a. a -> a) -> Int."""

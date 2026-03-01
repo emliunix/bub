@@ -192,6 +192,30 @@ class TestCaseParser:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
 
+    def test_case_with_tuple_pattern(self):
+        """Parse case with tuple pattern."""
+        from systemf.surface.types import SurfacePatternTuple
+
+        source = """case p of
+  (x, y) → x + y"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert isinstance(result.branches[0].pattern, SurfacePatternTuple)
+        assert len(result.branches[0].pattern.elements) == 2
+
+    def test_case_with_triple_pattern(self):
+        """Parse case with triple pattern."""
+        from systemf.surface.types import SurfacePatternTuple
+
+        source = """case t of
+  (a, b, c) → a"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert isinstance(result.branches[0].pattern, SurfacePatternTuple)
+        assert len(result.branches[0].pattern.elements) == 3
+
 
 class TestLetParser:
     """Test let expression parser."""
@@ -311,3 +335,52 @@ in head mylist"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceLet)
+
+
+class TestTupleParser:
+    """Test tuple expression parser."""
+
+    def test_tuple_pair(self):
+        """Parse a pair tuple."""
+        from systemf.surface.types import SurfaceTuple
+
+        tokens = lex("(x, y)")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceTuple)
+        assert len(result.elements) == 2
+        assert isinstance(result.elements[0], SurfaceVar)
+        assert result.elements[0].name == "x"
+        assert isinstance(result.elements[1], SurfaceVar)
+        assert result.elements[1].name == "y"
+
+    def test_tuple_triple(self):
+        """Parse a triple tuple."""
+        from systemf.surface.types import SurfaceTuple
+
+        tokens = lex("(1, 2, 3)")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceTuple)
+        assert len(result.elements) == 3
+        assert isinstance(result.elements[0], SurfaceIntLit)
+        assert result.elements[0].value == 1
+
+    def test_tuple_mixed(self):
+        """Parse tuple with mixed elements."""
+        from systemf.surface.types import SurfaceTuple, SurfaceIntLit, SurfaceConstructor
+
+        tokens = lex("(1, True)")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceTuple)
+        assert isinstance(result.elements[0], SurfaceIntLit)
+        assert isinstance(result.elements[1], SurfaceConstructor)
+
+    def test_nested_tuple(self):
+        """Parse nested tuples."""
+        from systemf.surface.types import SurfaceTuple
+
+        tokens = lex("((1, 2), 3)")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceTuple)
+        assert len(result.elements) == 2
+        assert isinstance(result.elements[0], SurfaceTuple)
+        assert isinstance(result.elements[1], SurfaceIntLit)

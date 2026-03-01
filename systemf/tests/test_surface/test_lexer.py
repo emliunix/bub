@@ -19,29 +19,28 @@ class TestBasicTokens:
     """Tests for basic token recognition."""
 
     def test_empty_source(self):
-        """Empty source should return just EOF."""
+        """Empty source should return empty list (no EOF token)."""
         tokens = lex("")
-        assert len(tokens) == 1
-        assert tokens[0].type == "EOF"
+        assert len(tokens) == 0
 
     def test_simple_tokens(self):
         """Tokenize simple identifiers."""
         tokens = lex("x y z")
         types = [t.type for t in tokens]
-        assert types == ["IDENT", "IDENT", "IDENT", "EOF"]
+        assert types == ["IDENT", "IDENT", "IDENT"]
 
     def test_keywords(self):
         """Tokenize keywords."""
         source = "data let in case of forall type if then else"
         tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        types = [t.type for t in tokens]
         assert types == ["DATA", "LET", "IN", "CASE", "OF", "FORALL", "TYPE", "IF", "THEN", "ELSE"]
 
     def test_operators(self):
         """Tokenize operators."""
         source = "-> => = : | @ . ++ && || /="
         tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        types = [t.type for t in tokens]
         assert types == [
             "ARROW",
             "DARROW",
@@ -60,21 +59,21 @@ class TestBasicTokens:
         """Tokenize arithmetic operators."""
         source = "+ - * /"
         tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        types = [t.type for t in tokens]
         assert types == ["PLUS", "MINUS", "STAR", "SLASH"]
 
     def test_comparison_operators(self):
         """Tokenize comparison operators."""
         source = "== < > <= >="
         tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        types = [t.type for t in tokens]
         assert types == ["EQ", "LT", "GT", "LE", "GE"]
 
     def test_delimiters(self):
         """Tokenize delimiters."""
         source = "( ) [ ] { }"
         tokens = lex(source)
-        types = [t.type for t in tokens[:-1]]  # Exclude EOF
+        types = [t.type for t in tokens]
         assert types == ["LPAREN", "RPAREN", "LBRACKET", "RBRACKET", "LBRACE", "RBRACE"]
 
 
@@ -135,7 +134,6 @@ class TestComplexExamples:
             "CONSTRUCTOR",
             "ARROW",
             "NUMBER",
-            "EOF",
         ]
         assert types == expected
 
@@ -161,7 +159,7 @@ in x + y"""
         tokens = lex(source)
         types = [t.type for t in tokens]
 
-        expected = ["DATA", "CONSTRUCTOR", "EQUALS", "CONSTRUCTOR", "BAR", "CONSTRUCTOR", "EOF"]
+        expected = ["DATA", "CONSTRUCTOR", "EQUALS", "CONSTRUCTOR", "BAR", "CONSTRUCTOR"]
         assert types == expected
 
 
@@ -204,3 +202,127 @@ def test_column_tracking():
 
     # y at col 5 (second line)
     assert cols[4] == ("IDENT", 5)
+
+
+# =============================================================================
+# Unicode Token Tests
+# =============================================================================
+
+
+class TestUnicodeTokens:
+    """Tests for unicode token recognition (TYPELAMBDA, LAMBDA, ARROW)."""
+
+    def test_type_lambda_ascii(self):
+        """Tokenize /\\ as TYPELAMBDA."""
+        tokens = lex("/\\")
+        assert len(tokens) == 1  # TYPELAMBDA only (no EOF)
+        assert tokens[0].type == "TYPELAMBDA"
+        assert tokens[0].value == "/\\"
+
+    def test_type_lambda_unicode(self):
+        """Tokenize Λ as TYPELAMBDA."""
+        tokens = lex("Λ")
+        assert len(tokens) == 1  # TYPELAMBDA only (no EOF)
+        assert tokens[0].type == "TYPELAMBDA"
+        assert tokens[0].value == "Λ"
+
+    def test_lambda_ascii(self):
+        """Tokenize \\ as LAMBDA."""
+        tokens = lex("\\")
+        assert len(tokens) == 1  # LAMBDA only (no EOF)
+        assert tokens[0].type == "LAMBDA"
+        assert tokens[0].value == "\\"
+
+    def test_lambda_unicode(self):
+        """Tokenize λ as LAMBDA."""
+        tokens = lex("λ")
+        assert len(tokens) == 1  # LAMBDA only (no EOF)
+        assert tokens[0].type == "LAMBDA"
+        assert tokens[0].value == "λ"
+
+    def test_arrow_ascii(self):
+        """Tokenize -> as ARROW."""
+        tokens = lex("->")
+        assert len(tokens) == 1  # ARROW only (no EOF)
+        assert tokens[0].type == "ARROW"
+        assert tokens[0].value == "->"
+
+    def test_arrow_unicode(self):
+        """Tokenize → as ARROW."""
+        tokens = lex("→")
+        assert len(tokens) == 1  # ARROW only (no EOF)
+        assert tokens[0].type == "ARROW"
+        assert tokens[0].value == "→"
+
+    def test_forall_unicode(self):
+        """Tokenize ∀ as FORALL (preserves unicode in keyword field)."""
+        tokens = lex("∀")
+        assert len(tokens) == 1  # FORALL only (no EOF)
+        assert tokens[0].type == "FORALL"
+        assert tokens[0].value == "∀"  # Preserves original unicode
+
+    def test_type_abstraction_tokens(self):
+        """Tokenize complete type abstraction."""
+        tokens = lex("Λa. x")
+        types = [t.type for t in tokens]
+        assert types == ["TYPELAMBDA", "IDENT", "DOT", "IDENT"]
+
+    def test_lambda_with_type_annotation_tokens(self):
+        """Tokenize lambda with type annotation."""
+        tokens = lex("λx:Int -> x")
+        types = [t.type for t in tokens]
+        assert types == ["LAMBDA", "IDENT", "COLON", "CONSTRUCTOR", "ARROW", "IDENT"]
+
+    def test_mixed_unicode_ascii(self):
+        """Tokenize mix of unicode and ASCII symbols."""
+        # Using unicode lambda but ASCII arrow
+        tokens = lex("λx -> x")
+        types = [t.type for t in tokens]
+        assert types == ["LAMBDA", "IDENT", "ARROW", "IDENT"]
+
+        # Using ASCII lambda but unicode arrow
+        tokens = lex("\\x → x")
+        types = [t.type for t in tokens]
+        assert types == ["LAMBDA", "IDENT", "ARROW", "IDENT"]
+
+
+class TestTokenIdentity:
+    """Tests to ensure token types are correctly identified."""
+
+    def test_token_types_are_not_generic_operators(self):
+        """Critical tokens should have specific types, not generic OPERATOR."""
+        # These should NOT be tokenized as generic OPERATOR
+        critical_tokens = {
+            "Λ": "TYPELAMBDA",
+            "/\\": "TYPELAMBDA",
+            "λ": "LAMBDA",
+            "\\": "LAMBDA",
+            "->": "ARROW",
+            "→": "ARROW",
+            "∀": "FORALL",
+        }
+
+        for source, expected_type in critical_tokens.items():
+            tokens = lex(source)
+            actual_type = tokens[0].type
+            assert actual_type == expected_type, (
+                f"Expected {expected_type} for '{source}', got {actual_type}"
+            )
+
+    def test_lambda_doesnt_match_type_lambda(self):
+        """λ and Λ should be different token types."""
+        lambda_token = lex("λ")[0]
+        type_lambda_token = lex("Λ")[0]
+
+        assert lambda_token.type == "LAMBDA"
+        assert type_lambda_token.type == "TYPELAMBDA"
+        assert lambda_token.type != type_lambda_token.type
+
+    def test_arrow_variants_equivalent(self):
+        """-> and → should both be ARROW type."""
+        ascii_arrow = lex("->")[0]
+        unicode_arrow = lex("→")[0]
+
+        assert ascii_arrow.type == "ARROW"
+        assert unicode_arrow.type == "ARROW"
+        assert ascii_arrow.type == unicode_arrow.type

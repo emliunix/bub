@@ -166,6 +166,38 @@ _expr_parser: P[SurfaceTerm] | None = None
 # =============================================================================
 
 
+@generate
+def type_tuple_parser() -> P[SurfaceType]:
+    """Parse a tuple type: (t1, t2, ..., tn).
+
+    Sugar for nested Pair types: Pair t1 (Pair t2 (... tn))
+
+    Returns:
+        SurfaceTypeTuple containing the elements
+    """
+    from systemf.surface.types import SurfaceTypeTuple
+
+    open_paren = yield match_symbol("(")
+    loc = open_paren.location
+
+    # Parse first element
+    first = yield _type_parser
+    elements = [first]
+
+    # Parse comma-separated elements
+    while True:
+        yield match_symbol(",")
+        elem = yield _type_parser
+        elements.append(elem)
+
+        # Check if we're at the closing paren
+        close_paren = yield match_symbol(")").optional()
+        if close_paren is not None:
+            break
+
+    return SurfaceTypeTuple(elements, loc)
+
+
 def type_atom_parser() -> P[SurfaceType]:
     """Parse a type atom (base type without arrows).
 
@@ -218,8 +250,17 @@ def type_app_parser() -> P[SurfaceType]:
     """
     from systemf.surface.types import SurfaceTypeApp
 
-    # Parse first type atom
+    # Try tuple first (it starts with '('), then regular atom
+    tuple_result = yield type_tuple_parser.optional()
+    if tuple_result is not None:
+        return tuple_result
+
+    # Parse first type atom (constructor or variable)
     first = yield type_atom_parser()
+    if first is None:
+        yield fail("expected type")
+        return None  # Unreachable, but satisfies type checker
+
     loc = first.location
 
     # Parse additional type atoms for application

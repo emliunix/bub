@@ -30,13 +30,28 @@ from systemf.surface.parser.types import (
     NumberToken,
     StringToken,
     KeywordToken,
+    LambdaToken,
+    TypeLambdaToken,
+    DataToken,
+    LetToken,
+    InToken,
+    CaseToken,
+    OfToken,
+    ForallToken,
+    TypeToken,
+    IfToken,
+    ThenToken,
+    ElseToken,
+    PrimTypeToken,
+    PrimOpToken,
     OperatorToken,
+    OperatorType,
     DelimiterToken,
+    DelimiterType,
     PragmaToken,
     DocstringToken,
     EOFToken,
     LexerError,
-    TokenType,
 )
 
 # Re-export lexer
@@ -47,7 +62,6 @@ from systemf.surface.parser.helpers import (
     column,
     check_valid,
     block,
-    block_after,
     block_entries,
     terminator,
     must_continue,
@@ -177,6 +191,123 @@ def parse_type(source: str):
     return type_parser_instance.parse(tokens)
 
 
+# Legacy API compatibility aliases
+parse_term = parse_expression
+
+
+def parse_program(source: str, filename: str = "<stdin>") -> list:
+    """Parse a complete program from source code.
+
+    Convenience function that lexes and parses source code into a list
+    of surface declarations.
+
+    Args:
+        source: The source code string to parse
+        filename: Optional filename for error reporting
+
+    Returns:
+        List of parsed surface declarations
+
+    Raises:
+        ParseError: If parsing fails
+    """
+    tokens = list(lex(source, filename))
+    parser = Parser(tokens)
+    return parser.parse()
+
+
+class ParseError(Exception):
+    """Error during parsing."""
+
+    def __init__(self, message: str, location=None):
+        from systemf.utils.location import Location
+
+        loc_str = f"{location}" if location else "unknown location"
+        super().__init__(f"{loc_str}: {message}")
+        self.location = location
+
+
+class Parser:
+    """Compatibility wrapper for old Parser API.
+
+    Provides the same interface as the old Parser class:
+    - Parser(tokens) - initialize with token list
+    - parse() - parse declarations
+    - parse_term() - parse a single term
+    - parse_type() - parse a single type
+    """
+
+    def __init__(self, tokens: list):
+        """Initialize parser with token list.
+
+        Args:
+            tokens: List of tokens from lexer
+        """
+        self.tokens = tokens
+
+    def parse(self):
+        """Parse token stream into declarations.
+
+        Returns:
+            List of parsed surface declarations
+
+        Raises:
+            ParseError: If parsing fails
+        """
+        from systemf.surface.types import SurfaceDeclaration
+
+        # Filter EOF tokens for compatibility
+        filtered = [t for t in self.tokens if getattr(t, "type", None) != "EOF"]
+        try:
+            result = decl_parser().parse(filtered)
+            # Ensure we return a list
+            if isinstance(result, list):
+                return result
+            return [result]
+        except Exception as e:
+            # Extract location from error if possible
+            loc = None
+            if hasattr(e, "index") and e.index < len(self.tokens):
+                loc = getattr(self.tokens[e.index], "location", None)
+            raise ParseError(str(e), loc)
+
+    def parse_term(self):
+        """Parse a single term.
+
+        Returns:
+            Parsed surface term
+
+        Raises:
+            ParseError: If parsing fails
+        """
+        filtered = [t for t in self.tokens if getattr(t, "type", None) != "EOF"]
+        try:
+            return (expr_parser(AnyIndent()) << eof).parse(filtered)
+        except Exception as e:
+            loc = None
+            if hasattr(e, "index") and e.index < len(self.tokens):
+                loc = getattr(self.tokens[e.index], "location", None)
+            raise ParseError(str(e), loc)
+
+    def parse_type(self):
+        """Parse a single type.
+
+        Returns:
+            Parsed surface type
+
+        Raises:
+            ParseError: If parsing fails
+        """
+        filtered = [t for t in self.tokens if getattr(t, "type", None) != "EOF"]
+        try:
+            return type_parser_instance.parse(filtered)
+        except Exception as e:
+            loc = None
+            if hasattr(e, "index") and e.index < len(self.tokens):
+                loc = getattr(self.tokens[e.index], "location", None)
+            raise ParseError(str(e), loc)
+
+
 __all__ = [
     # Layout constraints and locations
     "ValidIndent",
@@ -193,13 +324,28 @@ __all__ = [
     "NumberToken",
     "StringToken",
     "KeywordToken",
+    "LambdaToken",
+    "TypeLambdaToken",
+    "DataToken",
+    "LetToken",
+    "InToken",
+    "CaseToken",
+    "OfToken",
+    "ForallToken",
+    "TypeToken",
+    "IfToken",
+    "ThenToken",
+    "ElseToken",
+    "PrimTypeToken",
+    "PrimOpToken",
     "OperatorToken",
+    "OperatorType",
     "DelimiterToken",
+    "DelimiterType",
     "PragmaToken",
     "DocstringToken",
     "EOFToken",
     "LexerError",
-    "TokenType",
     # Lexer
     "Lexer",
     "lex",
@@ -207,7 +353,6 @@ __all__ = [
     "column",
     "check_valid",
     "block",
-    "block_after",
     "block_entries",
     "terminator",
     "must_continue",
@@ -245,4 +390,9 @@ __all__ = [
     "parse_expression",
     "parse_declaration",
     "parse_type",
+    "parse_program",
+    # Legacy compatibility
+    "parse_term",
+    "Parser",
+    "ParseError",
 ]

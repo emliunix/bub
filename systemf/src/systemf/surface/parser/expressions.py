@@ -17,6 +17,7 @@ from typing import Optional, TypeVar
 import parsy
 from parsy import Parser as P, Result, generate, alt, fail, seq
 
+from systemf.surface.parser.declarations import type_atom_parser
 from systemf.surface.parser.helpers import (
     AfterPos,
     AnyIndent,
@@ -237,11 +238,47 @@ def literal_parser() -> P[SurfaceIntLit | SurfaceStringLit]:
     return parser
 
 
-def paren_parser() -> P[SurfaceTerm]:
-    """Parse a parenthesized expression: ( expr ).
+def tuple_parser() -> P[SurfaceTerm]:
+    """Parse a tuple expression: (e1, e2, ..., en).
+
+    Sugar for nested Pair constructors: Pair e1 (Pair e2 (... en))
 
     Returns:
-        The parsed expression inside the parentheses
+        SurfaceTuple containing the elements
+    """
+
+    @generate
+    def parser():
+        from systemf.surface.types import SurfaceTuple
+
+        open_paren = yield match_symbol("(")
+        loc = open_paren.location
+
+        # Parse first element
+        first = yield expr_parser(AnyIndent())
+        elements = [first]
+
+        # Parse comma-separated elements
+        while True:
+            yield match_symbol(",")
+            elem = yield expr_parser(AnyIndent())
+            elements.append(elem)
+
+            # Check if we're at the closing paren
+            close_paren = yield match_symbol(")").optional()
+            if close_paren is not None:
+                break
+
+        return SurfaceTuple(elements, loc)
+
+    return parser
+
+
+def paren_parser() -> P[SurfaceTerm]:
+    """Parse a parenthesized expression: ( expr ) or tuple: (e1, e2, ..., en).
+
+    Returns:
+        The parsed expression inside the parentheses, or a tuple if commas are present
 
     Note: This parser requires the type parser to be set via set_type_parser()
     before it can parse expressions inside parentheses.
@@ -249,6 +286,12 @@ def paren_parser() -> P[SurfaceTerm]:
 
     @generate
     def parser():
+        # Try tuple first (it requires a comma)
+        tuple_result = yield tuple_parser().optional()
+        if tuple_result is not None:
+            return tuple_result
+
+        # Regular parenthesized expression
         yield match_symbol("(")
         # Parse expression with AnyIndent constraint inside parens
         expr = yield expr_parser(AnyIndent())
@@ -644,7 +687,8 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
         for var_token in var_tokens:
             var_name = var_token.value
             # Optional type annotation for this parameter
-            var_type = yield (match_symbol(":") >> _type_parser).optional()
+            # Use type_atom_parser to avoid consuming '->' as part of a type arrow
+            var_type = yield (match_symbol(":") >> type_atom_parser()).optional()
             annotated_params.append((var_name, var_type))
 
         # Optional parameter docstring (-- ^ style) - applies to last param
@@ -717,28 +761,100 @@ def type_abs_parser(constraint: ValidIndent) -> P[SurfaceTypeAbs]:
 # =============================================================================
 
 
-def pattern_parser() -> P[SurfacePattern]:
-    """Parse a pattern: CONSTRUCTOR [ident*].
+def pattern_base_parser() -> P[SurfacePattern]:
+    """Parse a base pattern (variable or constructor).
+
+    A base pattern is either:
+    - A variable pattern: just an identifier
+    - A constructor pattern: Constructor [var1 var2 ...]
 
     Returns:
-        SurfacePattern with constructor name and variable bindings
+        SurfacePattern for constructor or SurfacePattern for variable
     """
 
     @generate
     def parser():
-        token = yield match_token("CONSTRUCTOR")
-        constructor = token.value
-        loc = token.location
+        # Try constructor pattern first (CONSTRUCTOR followed by optional vars)
+        con_token = yield match_token("CONSTRUCTOR").optional()
+        if con_token is not None:
+            constructor = con_token.value
+            loc = con_token.location
 
-        # Parse variable bindings (identifiers)
-        vars = []
+            # Parse variable bindings (identifiers)
+            vars = []
+            while True:
+                var_result = yield match_token("IDENT").optional()
+                if var_result is None:
+                    break
+                vars.append(var_result.value)
+
+            return SurfacePattern(constructor, vars, loc)
+
+        # Try variable pattern (just an identifier)
+        var_token = yield match_token("IDENT").optional()
+        if var_token is not None:
+            # Variable pattern is just a constructor with no args
+            # (treated as a catch-all variable)
+            return SurfacePattern(var_token.value, [], var_token.location)
+
+        # No match
+        yield fail("expected pattern")
+
+    return parser
+
+
+def pattern_tuple_parser() -> P[SurfacePattern]:
+    """Parse a tuple pattern: (p1, p2, ..., pn).
+
+    Sugar for nested Pair patterns: Pair p1 (Pair p2 (... pn))
+
+    Returns:
+        SurfacePatternTuple containing the elements
+    """
+
+    @generate
+    def parser():
+        from systemf.surface.types import SurfacePatternTuple
+
+        open_paren = yield match_symbol("(")
+        loc = open_paren.location
+
+        # Parse first element using pattern_parser (handles nested tuples, constructors, vars)
+        first = yield pattern_parser()
+        elements = [first]
+
+        # Parse comma-separated elements
         while True:
-            var_result = yield match_token("IDENT").optional()
-            if var_result is None:
-                break
-            vars.append(var_result.value)
+            yield match_symbol(",")
+            elem = yield pattern_parser()
+            elements.append(elem)
 
-        return SurfacePattern(constructor, vars, loc)
+            # Check if we're at the closing paren
+            close_paren = yield match_symbol(")").optional()
+            if close_paren is not None:
+                break
+
+        return SurfacePatternTuple(elements, loc)
+
+    return parser
+
+
+def pattern_parser() -> P[SurfacePattern]:
+    """Parse a pattern: CONSTRUCTOR [ident*], variable, or tuple pattern.
+
+    Returns:
+        SurfacePattern with constructor name and variable bindings, or tuple pattern
+    """
+
+    @generate
+    def parser():
+        # Try tuple pattern first (starts with '(')
+        tuple_result = yield pattern_tuple_parser().optional()
+        if tuple_result is not None:
+            return tuple_result
+
+        # Try base pattern (constructor or variable)
+        return (yield pattern_base_parser())
 
     return parser
 

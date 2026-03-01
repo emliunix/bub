@@ -99,7 +99,24 @@ class SurfaceTypeConstructor(SurfaceType):
         return f"{self.name} {args_str}"
 
 
-SurfaceTypeRepr = Union[SurfaceTypeVar, SurfaceTypeArrow, SurfaceTypeForall, SurfaceTypeConstructor]
+@dataclass(frozen=True)
+class SurfaceTypeTuple(SurfaceType):
+    """Tuple type: (t1, t2, ..., tn) - desugars to nested Pairs.
+
+    Sugar for: Pair t1 (Pair t2 (... tn))
+    """
+
+    elements: list[SurfaceType]
+    location: Location
+
+    def __str__(self) -> str:
+        elems_str = ", ".join(str(e) for e in self.elements)
+        return f"({elems_str})"
+
+
+SurfaceTypeRepr = Union[
+    SurfaceTypeVar, SurfaceTypeArrow, SurfaceTypeForall, SurfaceTypeConstructor, SurfaceTypeTuple
+]
 
 
 # =============================================================================
@@ -294,6 +311,21 @@ class SurfaceOp(SurfaceTerm):
 
 
 @dataclass(frozen=True)
+class SurfaceTuple(SurfaceTerm):
+    """Tuple expression: (e1, e2, ..., en) - desugars to nested Pairs.
+
+    Sugar for: Pair e1 (Pair e2 (... en))
+    """
+
+    elements: list[SurfaceTerm]
+    location: Location
+
+    def __str__(self) -> str:
+        elems_str = ", ".join(str(e) for e in self.elements)
+        return f"({elems_str})"
+
+
+@dataclass(frozen=True)
 class SurfacePattern:
     """Pattern in a case branch: Con vars."""
 
@@ -305,6 +337,21 @@ class SurfacePattern:
         if self.vars:
             return f"{self.constructor} {' '.join(self.vars)}"
         return self.constructor
+
+
+@dataclass(frozen=True)
+class SurfacePatternTuple:
+    """Tuple pattern: (p1, p2, ..., pn) - desugars to nested Pairs.
+
+    Sugar for: Pair p1 (Pair p2 (... pn))
+    """
+
+    elements: list[SurfacePattern]
+    location: Location
+
+    def __str__(self) -> str:
+        elems_str = ", ".join(str(e) for e in self.elements)
+        return f"({elems_str})"
 
 
 @dataclass(frozen=True)
