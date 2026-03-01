@@ -7,17 +7,22 @@ Key design:
 - No global state - constraints passed explicitly
 - Column-aware token parsing
 - Block handling with layout or explicit braces
-
-NOTE: These are skeleton implementations for type checking.
-Actual implementations will be added later.
 """
 
 from __future__ import annotations
 
 from typing import TypeVar, Callable, List, Tuple, Optional
-from parsy import Parser
+from parsy import Parser as P, Result, generate, eof, peek, success, fail
 
-from .types import TokenBase, ValidIndent, AnyIndent, AtPos, AfterPos, EndOfBlock
+from .types import (
+    TokenBase,
+    ValidIndent,
+    AnyIndent,
+    AtPos,
+    AfterPos,
+    EndOfBlock,
+    DelimiterToken,
+)
 
 # Type variable for parsed items
 T = TypeVar("T")
@@ -28,7 +33,7 @@ T = TypeVar("T")
 # =============================================================================
 
 
-def column() -> Parser[int]:
+def column() -> P[int]:
     """Get the column of the current token.
 
     Returns a parser that succeeds with the current token's start column.
@@ -38,7 +43,15 @@ def column() -> Parser[int]:
         After parsing `case x of`, call `column()` to get the column
         of the first branch token.
     """
-    raise NotImplementedError("column() not yet implemented")
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        if index >= len(tokens):
+            return Result.failure(index, "expected token")
+        token = tokens[index]
+        return Result.success(index, token.column)
+
+    return parser
 
 
 def check_valid(constraint: ValidIndent, col: int) -> bool:
@@ -59,7 +72,63 @@ def check_valid(constraint: ValidIndent, col: int) -> bool:
         >>> check_valid(AtPos(4), 5)
         False
     """
-    raise NotImplementedError("check_valid() not yet implemented")
+    match constraint:
+        case AnyIndent():
+            return True
+        case AtPos(c):
+            return col == c
+        case AfterPos(c):
+            return col >= c
+        case EndOfBlock():
+            return False
+    return False
+
+
+def is_at_constraint(constraint: ValidIndent, col: int) -> bool:
+    """Check if a column is exactly at the constraint position.
+
+    Like check_valid but specifically for exact match.
+    Useful for determining if we're at a new item vs continuation.
+
+    Args:
+        constraint: The layout constraint
+        col: Column to check
+
+    Returns:
+        True if col matches constraint's exact position
+
+    Example:
+        >>> is_at_constraint(AtPos(4), 4)
+        True
+        >>> is_at_constraint(AtPos(4), 5)
+        False
+    """
+    match constraint:
+        case AnyIndent():
+            return True
+        case AtPos(c):
+            return col == c
+        case AfterPos(c):
+            return col == c
+        case EndOfBlock():
+            return False
+    return False
+
+
+def get_indent_info(token: TokenBase) -> int:
+    """Extract column (indentation info) from a token.
+
+    Args:
+        token: Any token with location info
+
+    Returns:
+        The token's start column
+
+    Example:
+        >>> get_indent_info(ident_token)
+        4
+    """
+    return token.column
 
 
 # =============================================================================
@@ -67,7 +136,7 @@ def check_valid(constraint: ValidIndent, col: int) -> bool:
 # =============================================================================
 
 
-def block(item: Callable[[ValidIndent], Parser[T]]) -> Parser[List[T]]:
+def block(item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
     """Parse a block that can be either explicit braces or layout-indented.
 
     Tries to parse:
@@ -95,7 +164,7 @@ def block(item: Callable[[ValidIndent], Parser[T]]) -> Parser[List[T]]:
     raise NotImplementedError("block() not yet implemented")
 
 
-def block_after(min_col: int, item: Callable[[ValidIndent], Parser[T]]) -> Parser[List[T]]:
+def block_after(min_col: int, item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
     """Parse a block indented at least min_col spaces.
 
     Used when we need items to be indented past a specific column.
@@ -115,9 +184,7 @@ def block_after(min_col: int, item: Callable[[ValidIndent], Parser[T]]) -> Parse
     raise NotImplementedError("block_after() not yet implemented")
 
 
-def block_entries(
-    constraint: ValidIndent, item: Callable[[ValidIndent], Parser[T]]
-) -> Parser[List[T]]:
+def block_entries(constraint: ValidIndent, item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
     """Parse zero or more items with the given column constraint.
 
     Continues parsing items until:
@@ -140,8 +207,8 @@ def block_entries(
 
 
 def block_entry(
-    constraint: ValidIndent, item: Callable[[ValidIndent], Parser[T]]
-) -> Parser[Tuple[T, ValidIndent]]:
+    constraint: ValidIndent, item: Callable[[ValidIndent], P[T]]
+) -> P[Tuple[T, ValidIndent]]:
     """Parse a single item and check its column against constraint.
 
     Args:
@@ -166,16 +233,15 @@ def block_entry(
 # =============================================================================
 
 
-def terminator(constraint: ValidIndent, start_col: int) -> Parser[ValidIndent]:
+def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
     """Check for block terminators and return updated constraint.
 
     In braces mode:
-    - `;` found: continue with same constraint
+    - `;` found: continue with AfterPos constraint
     - `}` found: return EndOfBlock
 
     In layout mode:
-    - Token at column == start_col: new item (return same constraint)
-    - Token at column < start_col: end block (return EndOfBlock)
+    - Token at column <= start_col: end block (return EndOfBlock)
     - Token at column > start_col: continuation (return same constraint)
 
     Args:
@@ -195,7 +261,7 @@ def terminator(constraint: ValidIndent, start_col: int) -> Parser[ValidIndent]:
     raise NotImplementedError("terminator() not yet implemented")
 
 
-def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> Parser[None]:
+def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> P[None]:
     """Verify we're still within the block and haven't hit a terminator.
 
     Used after keywords or between items to ensure layout hasn't ended
@@ -216,195 +282,51 @@ def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> Pa
 
 
 # =============================================================================
-# Declarations
+# Declarations (NOT helpers - stub only)
 # =============================================================================
 
 
-def top_decl(constraint: ValidIndent) -> Parser:
-    """Parse a top-level declaration.
-
-    Handles:
-    - Data declarations: data X = A | B
-    - Let declarations: let ... in ...
-    - Type declarations
-
-    Uses greedy parsing - declaration ends when next token at
-    column <= constraint start is found.
-
-    Args:
-        constraint: ValidIndent constraint (usually from top-level block)
-
-    Returns:
-        Parser for declaration AST node
-    """
-    raise NotImplementedError("top_decl() not yet implemented")
+def top_decl(constraint: ValidIndent) -> P:
+    """Parse a top-level declaration. (STUB - not a helper)"""
+    raise NotImplementedError("top_decl() is not a helper - implement in parser module")
 
 
-def data_decl(constraint: ValidIndent) -> Parser:
-    """Parse a data declaration: data X = A | B | ...
-
-    Data declarations are NOT layout-sensitive. The `|` separator
-    can appear at any column. Declaration ends greedily when
-    next top-level token is encountered.
-
-    Args:
-        constraint: Parent constraint for determining where decl ends
-
-    Returns:
-        Parser for DataDecl AST node
-
-    Examples:
-        >>> data_decl(AnyIndent()).parse("data Bool = True | False")
-        DataDecl(name='Bool', constructors=[...])
-
-        >>> data_decl(AnyIndent()).parse("data X =\n  A\n  | B")
-        DataDecl(name='X', constructors=[...])
-    """
-    raise NotImplementedError("data_decl() not yet implemented")
+def data_decl(constraint: ValidIndent) -> P:
+    """Parse a data declaration. (STUB - not a helper)"""
+    raise NotImplementedError("data_decl() is not a helper - implement in parser module")
 
 
-def let_decl(constraint: ValidIndent) -> Parser:
-    """Parse a let declaration: let bindings in expr
-
-    Let declarations ARE layout-sensitive:
-    1. Parse 'let'
-    2. Read column of first binding -> reference column
-    3. Parse all bindings at reference column (layout block)
-    4. Check 'in' is at column >= 'let' column
-    5. Parse body expression
-
-    Args:
-        constraint: Parent constraint
-
-    Returns:
-        Parser for LetDecl AST node
-
-    Example:
-        >>> let_decl(AnyIndent()).parse("let x = 1 in x + 2")
-        LetDecl(bindings=[...], body=...)
-
-        >>> let_decl(AnyIndent()).parse("let\n  x = 1\n  y = 2\nin x + y")
-        LetDecl(bindings=[...], body=...)
-    """
-    raise NotImplementedError("let_decl() not yet implemented")
+def let_decl(constraint: ValidIndent) -> P:
+    """Parse a let declaration. (STUB - not a helper)"""
+    raise NotImplementedError("let_decl() is not a helper - implement in parser module")
 
 
 # =============================================================================
-# Expressions
+# Expressions (NOT helpers - stub only)
 # =============================================================================
 
 
-def case_expr(constraint: ValidIndent) -> Parser:
-    """Parse a case expression: case scrutinee of branches
-
-    Case expressions ARE layout-sensitive:
-    1. Parse 'case', scrutinee, 'of'
-    2. Read column of first branch -> reference column
-    3. Parse branches at reference column
-    4. Each branch: pattern -> expression
-
-    Args:
-        constraint: Parent constraint
-
-    Returns:
-        Parser for CaseExpr AST node
-
-    Example:
-        >>> case_expr(AnyIndent()).parse("case x of True -> 1 | False -> 0")
-        CaseExpr(scrutinee=..., branches=[...])
-
-        >>> case_expr(AnyIndent()).parse("case x of\n  True -> 1\n  False -> 0")
-        CaseExpr(scrutinee=..., branches=[...])
-    """
-    raise NotImplementedError("case_expr() not yet implemented")
+def case_expr(constraint: ValidIndent) -> P:
+    """Parse a case expression. (STUB - not a helper)"""
+    raise NotImplementedError("case_expr() is not a helper - implement in parser module")
 
 
-def expr_parser(constraint: ValidIndent) -> Parser:
-    """Parse an expression with layout awareness.
-
-    Handles:
-    - Variables, constructors
-    - Applications
-    - Lambdas: \\x -> expr
-    - Case expressions (layout)
-    - Let expressions (layout)
-    - Literals
-
-    Args:
-        constraint: Layout constraint for nested expressions
-
-    Returns:
-        Parser for expression AST node
-    """
-    raise NotImplementedError("expr_parser() not yet implemented")
+def expr_parser(constraint: ValidIndent) -> P:
+    """Parse an expression. (STUB - not a helper)"""
+    raise NotImplementedError("expr_parser() is not a helper - implement in parser module")
 
 
-def type_parser(constraint: ValidIndent) -> Parser:
-    """Parse a type expression.
-
-    Handles:
-    - Type variables
-    - Type constructors
-    - Forall: forall a. type or ∀a. type
-    - Arrows: A -> B
-    - Applications: F A
-
-    Args:
-        constraint: Layout constraint (usually AnyIndent for types)
-
-    Returns:
-        Parser for type AST node
-    """
-    raise NotImplementedError("type_parser() not yet implemented")
-
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
-
-def is_at_constraint(constraint: ValidIndent, col: int) -> bool:
-    """Check if a column is exactly at the constraint position.
-
-    Like check_valid but specifically for exact match.
-    Useful for determining if we're at a new item vs continuation.
-
-    Args:
-        constraint: The layout constraint
-        col: Column to check
-
-    Returns:
-        True if col matches constraint's exact position
-
-    Example:
-        >>> is_at_constraint(AtPos(4), 4)
-        True
-        >>> is_at_constraint(AtPos(4), 5)
-        False
-    """
-    raise NotImplementedError("is_at_constraint() not yet implemented")
-
-
-def get_indent_info(token: TokenBase) -> int:
-    """Extract column (indentation info) from a token.
-
-    Args:
-        token: Any token with location info
-
-    Returns:
-        The token's start column
-
-    Example:
-        >>> get_indent_info(ident_token)
-        4
-    """
-    raise NotImplementedError("get_indent_info() not yet implemented")
+def type_parser(constraint: ValidIndent) -> P:
+    """Parse a type expression. (STUB - not a helper)"""
+    raise NotImplementedError("type_parser() is not a helper - implement in parser module")
 
 
 __all__ = [
     # Core infrastructure
     "column",
     "check_valid",
+    "is_at_constraint",
+    "get_indent_info",
     # Block combinators
     "block",
     "block_after",
@@ -413,15 +335,12 @@ __all__ = [
     # Terminators
     "terminator",
     "must_continue",
-    # Declarations
+    # Declarations (stubs)
     "top_decl",
     "data_decl",
     "let_decl",
-    # Expressions
+    # Expressions (stubs)
     "case_expr",
     "expr_parser",
     "type_parser",
-    # Helpers
-    "is_at_constraint",
-    "get_indent_info",
 ]

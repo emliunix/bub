@@ -173,6 +173,24 @@ class TestColumnExtraction:
         assert tokens[0].column == 1
         assert tokens[3].column == 3  # Indented on line 2
 
+    def test_column_parser_returns_current_token_column(self):
+        """column() parser returns column of current token without consuming it."""
+        tokens = [
+            DummyIdent(name="x", location=Location(line=1, column=4)),
+            DummyIdent(name="y", location=Location(line=1, column=8)),
+        ]
+
+        # column() should return 4 (column of first token) and NOT consume it
+        result = column().parse(tokens)
+        assert result == 4
+
+    def test_column_parser_fails_at_eof(self):
+        """column() parser fails at end of token stream."""
+        tokens = []
+
+        with pytest.raises(Exception):  # ParseError or similar
+            column().parse(tokens)
+
 
 class TestBlockEntry:
     """Test block_entry combinator."""
@@ -261,22 +279,50 @@ class TestLayoutScenarios:
 class TestEdgeCases:
     """Test edge cases and error conditions."""
 
-    def test_empty_block(self):
-        """Empty layout block is valid."""
-        # Source: case x of
-        #   -- nothing
-        # y = 1
-        # After 'of', if next token (y) is at col 0 < reference (would be)
-        # block ends immediately
-        pass  # Would be handled by block_entries returning []
+    def test_empty_block_returns_empty_list(self):
+        """block() returns empty list when no items at expected column."""
+        # Tokens at wrong column - block should return empty list
+        tokens = [
+            DummyIdent(name="y", location=Location(line=2, column=0)),  # Column 0, not indented
+        ]
 
-    def test_single_item_block(self):
-        """Block with single item."""
-        # Source: case x of
-        #   A -> 1
-        # No other branches
-        # Valid - single item is okay
-        pass
+        # Create a simple item parser
+        def item_parser(constraint):
+            from parsy import Parser as P, Result
+
+            @P
+            def p(stream, idx):
+                if idx >= len(stream):
+                    return Result.failure(idx, "expected item")
+                tok = stream[idx]
+                return Result.success(idx + 1, tok.value)
+
+            return p
+
+        # Block at column 4, but token is at column 0 - should return empty list
+        result = block(item_parser).parse(tokens)
+        assert result == []
+
+    def test_single_item_block_returns_list_with_item(self):
+        """block() parses single item correctly."""
+        tokens = [
+            DummyIdent(name="item", location=Location(line=1, column=4)),
+        ]
+
+        def item_parser(constraint):
+            from parsy import Parser as P, Result
+
+            @P
+            def p(stream, idx):
+                if idx >= len(stream):
+                    return Result.failure(idx, "expected item")
+                tok = stream[idx]
+                return Result.success(idx + 1, tok.value)
+
+            return p
+
+        result = block(item_parser).parse(tokens)
+        assert result == ["item"]
 
     def test_mixed_indentation_fails(self):
         """Mixed indentation in layout block fails."""
@@ -332,49 +378,100 @@ class TestIsAtConstraint:
 class TestTerminator:
     """Test terminator combinator."""
 
-    def test_terminator_layout_mode_continues_at_same_col(self):
-        """Layout: token at start_col means continue with same constraint."""
-        # When we see a token at the exact reference column, block continues
-        # This test documents expected behavior - will raise NotImplementedError
-        # until terminator() is implemented
-        pass  # Placeholder for when we have parser infrastructure
+    def test_terminator_at_eof_returns_end_of_block(self):
+        """terminator returns EndOfBlock at end of token stream."""
+        tokens = []
+
+        result = terminator(AtPos(4), 4).parse(tokens)
+        assert isinstance(result, EndOfBlock)
 
     def test_terminator_layout_mode_ends_when_dedent(self):
-        """Layout: token before start_col means EndOfBlock."""
-        # Token at col 1 when start_col is 3 means block ended
-        pass  # Placeholder
+        """Layout: token at column <= start_col means EndOfBlock."""
+        # Token at col 1 when start_col is 4 means block ended
+        tokens = [
+            DummyIdent(name="end", location=Location(line=2, column=1)),
+        ]
+
+        result = terminator(AtPos(4), 4).parse(tokens)
+        assert isinstance(result, EndOfBlock)
 
     def test_terminator_layout_mode_continues_when_further_indented(self):
-        """Layout: token after start_col is continuation (same constraint)."""
-        # Token at col 5 when start_col is 3: part of current item, continue
-        pass  # Placeholder
+        """Layout: token after start_col means continuation."""
+        # Token at col 6 when start_col is 4: continue with same constraint
+        tokens = [
+            DummyIdent(name="continuation", location=Location(line=1, column=6)),
+        ]
 
-    def test_terminator_braces_semicolon_continues(self):
-        """Braces: semicolon means continue with same constraint."""
-        pass  # Placeholder
+        result = terminator(AtPos(4), 4).parse(tokens)
+        assert result == AtPos(4)
 
-    def test_terminator_braces_close_brace_ends(self):
-        """Braces: close brace means EndOfBlock."""
-        pass  # Placeholder
+    def test_terminator_braces_semicolon_continues_with_afterpos(self):
+        """Braces: semicolon switches AtPos to AfterPos."""
+        from systemf.surface.parser.types import OperatorToken
+
+        # Semicolon after AtPos(4) should become AfterPos(4)
+        tokens = [
+            OperatorToken(operator=";", op_type="SEMICOLON", location=Location(line=1, column=10)),
+        ]
+
+        result = terminator(AtPos(4), 4).parse(tokens)
+        assert result == AfterPos(4)
+
+    def test_terminator_braces_close_brace_returns_end_of_block(self):
+        """Braces: close brace returns EndOfBlock."""
+        from systemf.surface.parser.types import DelimiterToken
+
+        tokens = [
+            DelimiterToken(
+                delimiter="}", delim_type="RBRACE", location=Location(line=1, column=10)
+            ),
+        ]
+
+        result = terminator(AnyIndent(), 4).parse(tokens)
+        assert isinstance(result, EndOfBlock)
 
 
 class TestMustContinue:
     """Test must_continue validation."""
 
-    def test_must_continue_succeeds_when_not_end_of_block(self):
-        """must_continue succeeds when constraint is not EndOfBlock."""
-        # AtPos, AfterPos, AnyIndent should all succeed
-        pass  # Placeholder
+    def test_must_continue_succeeds_with_atpos(self):
+        """must_continue succeeds when constraint is AtPos."""
+        tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
+
+        result = must_continue(AtPos(4), "binding").parse(tokens)
+        assert result is None
+
+    def test_must_continue_succeeds_with_afterpos(self):
+        """must_continue succeeds when constraint is AfterPos."""
+        tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
+
+        result = must_continue(AfterPos(4), "item").parse(tokens)
+        assert result is None
+
+    def test_must_continue_succeeds_with_anyindent(self):
+        """must_continue succeeds when constraint is AnyIndent."""
+        tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
+
+        result = must_continue(AnyIndent(), "declaration").parse(tokens)
+        assert result is None
 
     def test_must_continue_fails_at_end_of_block(self):
         """must_continue raises ParseError when constraint is EndOfBlock."""
-        # Should raise with helpful message including 'expected' parameter
-        pass  # Placeholder
+        tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
+
+        with pytest.raises(Exception) as exc_info:
+            must_continue(EndOfBlock(), None).parse(tokens)
+
+        assert "end of expression" in str(exc_info.value).lower()
 
     def test_must_continue_error_includes_expected_description(self):
         """Error message includes the expected item description."""
-        # must_continue(EndOfBlock(), "binding") should mention "binding"
-        pass  # Placeholder
+        tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
+
+        with pytest.raises(Exception) as exc_info:
+            must_continue(EndOfBlock(), "binding").parse(tokens)
+
+        assert "binding" in str(exc_info.value)
 
 
 # =============================================================================
