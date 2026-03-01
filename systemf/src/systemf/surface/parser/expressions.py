@@ -17,7 +17,7 @@ from typing import Optional, TypeVar
 import parsy
 from parsy import Parser as P, Result, generate, alt, fail, seq
 
-from systemf.surface.parser.type_parser import type_atom_parser
+from systemf.surface.parser.type_parser import type_atom_parser, type_parser
 from systemf.surface.parser.helpers import (
     AfterPos,
     AnyIndent,
@@ -157,13 +157,6 @@ APPEND = match_token("APPEND")  # ++
 
 
 # =============================================================================
-# Forward Declarations for Recursive Parsers
-# =============================================================================
-
-# Forward declaration for the type parser (for type annotations)
-_type_parser: P[SurfaceType] = parsy.forward_declaration()
-
-
 # =============================================================================
 # Atom Parsers (no constraint needed)
 # =============================================================================
@@ -280,8 +273,7 @@ def paren_parser() -> P[SurfaceTerm]:
     Returns:
         The parsed expression inside the parentheses, or a tuple if commas are present
 
-    Note: This parser requires the type parser to be set via set_type_parser()
-    before it can parse expressions inside parentheses.
+    This parser uses type_parser() directly for parsing types.
     """
 
     @generate
@@ -356,19 +348,21 @@ def atom_parser() -> P[SurfaceTerm]:
         # Apply post-fix operators greedily
         while True:
             # Type application with @
-            type_app = yield (match_symbol("@") >> _type_parser).optional()
+            type_app = yield (match_symbol("@") >> type_parser()).optional()
             if type_app is not None:
                 atom = SurfaceTypeApp(atom, type_app, atom.location)
                 continue
 
             # Type application with brackets
-            type_bracket = yield (match_symbol("[") >> _type_parser << match_symbol("]")).optional()
+            type_bracket = yield (
+                match_symbol("[") >> type_parser() << match_symbol("]")
+            ).optional()
             if type_bracket is not None:
                 atom = SurfaceTypeApp(atom, type_bracket, atom.location)
                 continue
 
             # Type annotation
-            type_ann = yield (match_symbol(":") >> _type_parser).optional()
+            type_ann = yield (match_symbol(":") >> type_parser()).optional()
             if type_ann is not None:
                 atom = SurfaceAnn(atom, type_ann, atom.location)
                 continue
@@ -959,7 +953,7 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, Optional[SurfaceType], 
             params.append(param_token.value)
 
         # Optional type annotation (applies to the whole function if params present)
-        var_type = yield (match_symbol(":") >> _type_parser).optional()
+        var_type = yield (match_symbol(":") >> type_parser()).optional()
 
         yield match_symbol("=")
 
@@ -1085,20 +1079,6 @@ def expr_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 # =============================================================================
 
 
-# Type parser setter (for use by declarations.py or type parser module)
-def set_type_parser(parser: P[SurfaceType]) -> None:
-    """Set the type parser for type annotations and applications.
-
-    This should be called by the module that implements type parsing
-    to allow mutual recursion between expression and type parsers.
-
-    Args:
-        parser: The type parser to use
-    """
-    global _type_parser
-    _type_parser.become(parser)
-
-
 __all__ = [
     # Token matching
     "match_token",
@@ -1123,6 +1103,4 @@ __all__ = [
     "let_binding",
     "case_alt",
     "expr_parser",
-    # Type parser setup
-    "set_type_parser",
 ]

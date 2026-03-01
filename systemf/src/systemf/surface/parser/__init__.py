@@ -70,28 +70,8 @@ from systemf.surface.parser.helpers import (
 # Import expression and declaration modules
 from systemf.surface.parser import expressions, declarations
 
-# Wire parsers together to resolve circular dependencies:
-# - declarations.type_parser provides the type parser
-# - expressions.expr_parser provides the expression parser
-# - declarations needs expr_parser for term bodies
-# - expressions needs type_parser for annotations
-
-# Wire parsers together to resolve circular dependencies:
-# - expressions.expr_parser provides the expression parser (takes ValidIndent)
-# - declarations.type_parser() returns the type parser
-# - declarations needs expr_parser for term bodies
-# - expressions needs type_parser for annotations
-
-# Get the raw type parser (without EOF handling) for internal use
-# The public type_parser() wraps it with EOF handling for tests
-type_parser_instance = declarations._raw_type_parser()
-
-# Wire type parser in expressions module
-# Use the raw parser for recursive calls so parenthesized types work correctly
-expressions.set_type_parser(type_parser_instance)
-
-# Create an expression parser with AnyIndent constraint for use in declarations
-# We use parsy's generate to create a parser that calls expr_parser(AnyIndent())
+# Wire expression parser to declarations module
+# declarations needs expr_parser for parsing term declaration bodies
 from parsy import generate as parsy_generate
 
 
@@ -189,7 +169,7 @@ def parse_type(source: str):
         ParseError: If parsing fails
     """
     tokens = [t for t in lex(source) if t.type != "EOF"]
-    return type_parser_instance.parse(tokens)
+    return (type_parser() << eof).parse(tokens)
 
 
 # Legacy API compatibility aliases
@@ -301,7 +281,7 @@ class Parser:
         """
         filtered = [t for t in self.tokens if getattr(t, "type", None) != "EOF"]
         try:
-            return type_parser_instance.parse(filtered)
+            return (type_parser() << eof).parse(filtered)
         except Exception as e:
             loc = None
             if hasattr(e, "index") and e.index < len(self.tokens):

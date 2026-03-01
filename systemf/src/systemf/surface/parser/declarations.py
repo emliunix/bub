@@ -37,7 +37,7 @@ from systemf.surface.types import (
 )
 from systemf.surface.parser.type_parser import (
     type_atom_parser,
-    _raw_type_parser,
+    type_parser,
     _make_eof_compatible,
 )
 
@@ -292,8 +292,8 @@ def term_parser() -> P[SurfaceTermDeclaration]:
         # Match ":" for type annotation
         yield match_symbol(":")
 
-        # Parse type (use raw parser since term_parser has its own EOF handling)
-        ty = yield _raw_type_parser()
+        # Parse type (type_parser has no EOF handling, term_parser handles it)
+        ty = yield type_parser()
 
         # Match "=" for definition
         yield match_symbol("=")
@@ -357,8 +357,8 @@ def prim_op_parser() -> P[SurfacePrimOpDecl]:
         # Match ":" for type annotation
         yield match_symbol(":")
 
-        # Parse type (use raw parser since prim_op_parser has its own EOF handling)
-        ty = yield _raw_type_parser()
+        # Parse type (type_parser has no EOF handling, prim_op_parser handles it)
+        ty = yield type_parser()
 
         return SurfacePrimOpDecl(
             name=name,

@@ -328,8 +328,11 @@ def _make_eof_compatible(inner: P[T]) -> P[T]:
     return parser
 
 
-def _raw_type_parser() -> P[SurfaceType]:
-    """Raw type parser without EOF handling - for internal use.
+def type_parser() -> P[SurfaceType]:
+    """Type parser - parses forall types and arrow types.
+
+    This parser does NOT handle EOF - it's designed for use within
+    other parsers. Entry points should handle EOF at the top level.
 
     Returns:
         SurfaceType - the parsed type
@@ -340,19 +343,8 @@ def _raw_type_parser() -> P[SurfaceType]:
     )
 
 
-def type_parser() -> P[SurfaceType]:
-    """Main type parser - tries forall types and arrow types.
-
-    This is the public entry point that handles EOF tokens from lex().
-
-    Returns:
-        SurfaceType - the parsed type
-    """
-    return _make_eof_compatible(_raw_type_parser())
-
-
 # Initialize the forward declaration with the actual parser
-_type_parser.become(_raw_type_parser())
+_type_parser.become(type_parser())
 
 
 __all__ = [
@@ -366,7 +358,6 @@ __all__ = [
     "type_arrow_parser",
     "type_forall_parser",
     "type_tuple_parser",
-    # Main entry points
+    # Main parser (internal use, no EOF handling)
     "type_parser",
-    "_raw_type_parser",
 ]
