@@ -86,10 +86,9 @@ from systemf.surface.parser import expressions, declarations
 # The public type_parser() wraps it with EOF handling for tests
 type_parser_instance = declarations._raw_type_parser()
 
-# Wire type parsers in both modules (they have separate forward declarations)
+# Wire type parser in expressions module
 # Use the raw parser for recursive calls so parenthesized types work correctly
 expressions.set_type_parser(type_parser_instance)
-declarations.set_type_parser(type_parser_instance)
 
 # Create an expression parser with AnyIndent constraint for use in declarations
 # We use parsy's generate to create a parser that calls expr_parser(AnyIndent())
@@ -135,11 +134,13 @@ from systemf.surface.parser.declarations import (
     term_parser,
     prim_type_parser,
     prim_op_parser,
-    type_parser,
     constr_parser,
     match_ident,
     match_constructor,
 )
+
+# Re-export type parser
+from systemf.surface.parser.type_parser import type_parser
 
 
 # Convenience function for parsing expressions

@@ -17,7 +17,7 @@ from typing import Optional, TypeVar
 import parsy
 from parsy import Parser as P, Result, generate, alt, fail, seq
 
-from systemf.surface.parser.declarations import type_atom_parser
+from systemf.surface.parser.type_parser import type_atom_parser
 from systemf.surface.parser.helpers import (
     AfterPos,
     AnyIndent,
