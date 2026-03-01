@@ -23,10 +23,10 @@
 
 ### Remaining Technical Debt (Priority Order)
 
-#### Medium Priority
-1. **Extract mapping dictionaries** - `op_map`/`delim_map` recreated fresh every call to `_create_token()` in lexer.py
-2. **Simplify Parser class** - "Old API" compatibility wrapper in `__init__.py` needs review
-3. **Add bounds checking** - Relies on `hasattr(e, "index")` parsy internals for error location extraction
+#### Medium Priority - ALL COMPLETED
+1. ~~**Extract mapping dictionaries**~~ ✅ **ALREADY OPTIMAL** - `OperatorType.ALL` and `DelimiterType.ALL` are class constants, not recreated per call
+2. ~~**Simplify Parser class**~~ ✅ **COMPLETED** - Removed duplicate `parse_program()` method, simplified error handling, `parse_program()` function no longer creates Parser wrapper
+3. ~~**Add bounds checking**~~ ✅ **COMPLETED** - Added `_extract_parse_error()` helper with proper bounds checking (`0 <= idx < len(tokens)`), replaced `hasattr(e, "index")` duck typing
 
 #### Low Priority
 7. **Unify parsing strategies** - Consider using parsy combinators in `top_decl_parser()`
