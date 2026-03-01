@@ -469,25 +469,33 @@ class DelimiterToken(TokenBase):
 
 @dataclass(frozen=True)
 class PragmaToken:
-    """Pragma token (START, CONTENT, or END)."""
+    """Pragma token capturing parsed content between {-# and #-}.
 
-    pragma_type: str  # "PRAGMA_START", "PRAGMA_CONTENT", or "PRAGMA_END"
-    content: str
+    The pragma content is parsed into a key-value pair:
+    - First word (alphanumeric/underscore) is the key
+    - Rest of the content is the value
+    Example: {-# LLM model=gpt-4 #-} -> key="LLM", value="model=gpt-4"
+    """
+
+    key: str
+    value: str
+    raw_content: str
     location: Location
 
     @property
-    def value(self) -> str:
-        return self.content
+    def content(self) -> str:
+        """Return raw content for backwards compatibility."""
+        return self.raw_content
 
     @property
     def type(self) -> str:
-        return self.pragma_type
+        return "PRAGMA"
 
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
+        return f"{self.type}({self.key}={self.value!r})"
 
     def __repr__(self) -> str:
-        return f"PragmaToken({self.value!r}, {self.location})"
+        return f"PragmaToken({self.key!r}, {self.value!r}, {self.location})"
 
 
 @dataclass(frozen=True)
@@ -511,6 +519,27 @@ class DocstringToken:
 
     def __repr__(self) -> str:
         return f"DocstringToken({self.value!r}, {self.location})"
+
+
+@dataclass(frozen=True)
+class CommentToken(TokenBase):
+    """Regular comment token (-- ...)."""
+
+    content: str
+
+    @property
+    def value(self) -> str:
+        return self.content
+
+    @property
+    def type(self) -> str:
+        return "COMMENT"
+
+    def __str__(self) -> str:
+        return f"{self.type}({self.value!r})"
+
+    def __repr__(self) -> str:
+        return f"CommentToken({self.value!r}, {self.location})"
 
 
 @dataclass(frozen=True)
@@ -569,6 +598,7 @@ __all__ = [
     "DelimiterType",
     "PragmaToken",
     "DocstringToken",
+    "CommentToken",
     "EOFToken",
     "LexerError",
     "TokenTypeStr",

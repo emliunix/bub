@@ -466,6 +466,7 @@ class SurfaceDataDeclaration(SurfaceDeclaration):
     constructors: list[SurfaceConstructorInfo]
     location: Location
     docstring: str | None = None
+    pragma: dict[str, str] | None = None
 
     def __str__(self) -> str:
         params_str = " ".join(self.params) if self.params else ""
@@ -514,6 +515,7 @@ class SurfacePrimTypeDecl(SurfaceDeclaration):
     name: str
     location: Location
     docstring: str | None = None
+    pragma: dict[str, str] | None = None
 
     def __str__(self) -> str:
         return f"prim_type {self.name}"

@@ -177,10 +177,13 @@ def variable_parser() -> P[SurfaceVar]:
     return parser
 
 
-def constructor_parser() -> P[SurfaceConstructor]:
+def constructor_parser(constraint: ValidIndent | None = None) -> P[SurfaceConstructor]:
     """Parse a constructor application or nullary constructor.
 
     Tries to parse arguments greedily until no more atoms can be parsed.
+
+    Args:
+        constraint: Optional layout constraint for checking argument columns
 
     Returns:
         SurfaceConstructor with the constructor name and arguments
@@ -195,6 +198,12 @@ def constructor_parser() -> P[SurfaceConstructor]:
         # Parse arguments greedily (constructor application)
         args: list[SurfaceTerm] = []
         while True:
+            # Check constraint before parsing next argument
+            if constraint is not None and not isinstance(constraint, AnyIndent):
+                next_col = yield peek_column()
+                if next_col > 0 and not check_valid(constraint, next_col):
+                    break
+
             # Try to parse an atom argument
             arg_result = yield atom_parser().optional()
             if arg_result is None:
@@ -293,10 +302,13 @@ def paren_parser() -> P[SurfaceTerm]:
     return parser
 
 
-def atom_base_parser() -> P[SurfaceTerm]:
+def atom_base_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
     """Parse a base atom (no post-fix operators).
 
     Tries paren, constructor, literal, or variable in that order.
+
+    Args:
+        constraint: Optional layout constraint for constructor arguments
 
     Returns:
         The parsed atomic term
@@ -310,7 +322,7 @@ def atom_base_parser() -> P[SurfaceTerm]:
             return paren
 
         # Try constructor (includes nullary constructors)
-        con = yield constructor_parser().optional()
+        con = yield constructor_parser(constraint).optional()
         if con is not None:
             return con
 
@@ -330,12 +342,15 @@ def atom_base_parser() -> P[SurfaceTerm]:
     return parser
 
 
-def atom_parser() -> P[SurfaceTerm]:
+def atom_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
     """Parse an atom with optional post-fix operators.
 
     Post-fix operators include:
     - @T or [T]: Type application
     - :T: Type annotation
+
+    Args:
+        constraint: Optional layout constraint for constructor arguments
 
     Returns:
         The parsed atom, possibly wrapped in post-fix operators
@@ -343,7 +358,7 @@ def atom_parser() -> P[SurfaceTerm]:
 
     @generate
     def parser():
-        atom = yield atom_base_parser()
+        atom = yield atom_base_parser(constraint)
 
         # Apply post-fix operators greedily
         while True:
@@ -394,8 +409,8 @@ def app_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 
     @generate
     def parser():
-        # Parse first atom
-        first = yield atom_parser()
+        # Parse first atom with constraint
+        first = yield atom_parser(constraint)
         loc = first.location
 
         # Parse additional atoms for application, respecting constraint
@@ -407,7 +422,7 @@ def app_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
                 if next_col > 0 and not check_valid(constraint, next_col):
                     break
 
-            arg = yield atom_parser().optional()
+            arg = yield atom_parser(constraint).optional()
             if arg is None:
                 break
             args.append(arg)

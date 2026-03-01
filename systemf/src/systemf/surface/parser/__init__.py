@@ -70,20 +70,6 @@ from systemf.surface.parser.helpers import (
 # Import expression and declaration modules
 from systemf.surface.parser import expressions, declarations
 
-# Wire expression parser to declarations module
-# declarations needs expr_parser for parsing term declaration bodies
-from parsy import generate as parsy_generate
-
-
-@parsy_generate
-def _expr_parser_for_declarations():
-    """Expression parser with AnyIndent constraint for declarations."""
-    result = yield expressions.expr_parser(AnyIndent())
-    return result
-
-
-declarations.set_expr_parser(_expr_parser_for_declarations)
-
 # Re-export expression parsers
 from systemf.surface.parser.expressions import (
     expr_parser,
@@ -110,6 +96,7 @@ from systemf.surface.parser.expressions import (
 # Re-export declaration parsers
 from systemf.surface.parser.declarations import (
     decl_parser,
+    top_decl_parser,
     data_parser,
     term_parser,
     prim_type_parser,
@@ -136,7 +123,7 @@ def parse_expression(source: str):
     Raises:
         ParseError: If parsing fails
     """
-    tokens = [t for t in lex(source) if t.type != "EOF"]
+    tokens = list(lex(source))
     return (expressions.expr_parser(AnyIndent()) << eof).parse(tokens)
 
 
@@ -152,8 +139,8 @@ def parse_declaration(source: str):
     Raises:
         ParseError: If parsing fails
     """
-    tokens = [t for t in lex(source) if t.type != "EOF"]
-    return declarations.decl_parser().parse(tokens)
+    tokens = list(lex(source))
+    return (declarations.decl_parser() << eof).parse(tokens)
 
 
 def parse_type(source: str):
@@ -168,7 +155,7 @@ def parse_type(source: str):
     Raises:
         ParseError: If parsing fails
     """
-    tokens = [t for t in lex(source) if t.type != "EOF"]
+    tokens = list(lex(source))
     return (type_parser() << eof).parse(tokens)
 
 
@@ -237,10 +224,8 @@ class Parser:
         """
         from systemf.surface.types import SurfaceDeclaration
 
-        # Filter EOF tokens for compatibility
-        filtered = [t for t in self.tokens if getattr(t, "type", None) != "EOF"]
         try:
-            result = decl_parser().parse(filtered)
+            result = top_decl_parser().parse(self.tokens)
             # Ensure we return a list
             if isinstance(result, list):
                 return result
@@ -261,9 +246,8 @@ class Parser:
         Raises:
             ParseError: If parsing fails
         """
-        filtered = [t for t in self.tokens if getattr(t, "type", None) != "EOF"]
         try:
-            return (expr_parser(AnyIndent()) << eof).parse(filtered)
+            return (expr_parser(AnyIndent()) << eof).parse(self.tokens)
         except Exception as e:
             loc = None
             if hasattr(e, "index") and e.index < len(self.tokens):
@@ -279,10 +263,33 @@ class Parser:
         Raises:
             ParseError: If parsing fails
         """
-        filtered = [t for t in self.tokens if getattr(t, "type", None) != "EOF"]
         try:
-            return (type_parser() << eof).parse(filtered)
+            return (type_parser() << eof).parse(self.tokens)
         except Exception as e:
+            loc = None
+            if hasattr(e, "index") and e.index < len(self.tokens):
+                loc = getattr(self.tokens[e.index], "location", None)
+            raise ParseError(str(e), loc)
+
+    def parse_program(self):
+        """Parse multiple declarations from the token stream.
+
+        Returns:
+            List of parsed surface declarations
+
+        Raises:
+            ParseError: If parsing fails
+        """
+        from systemf.surface.types import SurfaceDeclaration
+
+        try:
+            result = top_decl_parser().parse(self.tokens)
+            # Ensure we return a list
+            if isinstance(result, list):
+                return result
+            return [result]
+        except Exception as e:
+            # Extract location from error if possible
             loc = None
             if hasattr(e, "index") and e.index < len(self.tokens):
                 loc = getattr(self.tokens[e.index], "location", None)
@@ -359,6 +366,7 @@ __all__ = [
     "atom_base_parser",
     # Declaration parsers
     "decl_parser",
+    "top_decl_parser",
     "data_parser",
     "term_parser",
     "prim_type_parser",

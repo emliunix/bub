@@ -326,3 +326,67 @@ class TestTokenIdentity:
         assert ascii_arrow.type == "ARROW"
         assert unicode_arrow.type == "ARROW"
         assert ascii_arrow.type == unicode_arrow.type
+
+
+# =============================================================================
+# Docstring Tests (Whitespace Tolerance)
+# =============================================================================
+
+
+class TestDocstringWhitespaceTolerance:
+    """Tests for docstring whitespace tolerance edge cases."""
+
+    def test_docstring_no_space_after_dashes(self):
+        """Docstring --| should be recognized without space."""
+        from systemf.surface.parser.types import DocstringToken
+
+        tokens = lex("--| This is a docstring")
+        assert len(tokens) == 1
+        assert isinstance(tokens[0], DocstringToken)
+        assert tokens[0].content == "This is a docstring"
+
+    def test_docstring_with_space_after_dashes(self):
+        """Docstring -- | should be recognized with space."""
+        from systemf.surface.parser.types import DocstringToken
+
+        tokens = lex("-- | This is a docstring")
+        assert len(tokens) == 1
+        assert isinstance(tokens[0], DocstringToken)
+        assert tokens[0].content == "This is a docstring"
+
+    def test_inline_docstring_no_space_after_dashes(self):
+        """Inline docstring --^ should be recognized without space."""
+        from systemf.surface.parser.types import DocstringToken
+
+        tokens = lex("x --^ inline doc")
+        assert len(tokens) == 2  # IDENT and DOCSTRING
+        assert isinstance(tokens[1], DocstringToken)
+        assert tokens[1].content == "inline doc"
+
+    def test_inline_docstring_with_space_after_dashes(self):
+        """Inline docstring -- ^ should be recognized with space."""
+        from systemf.surface.parser.types import DocstringToken
+
+        tokens = lex("x -- ^ inline doc")
+        assert len(tokens) == 2  # IDENT and DOCSTRING
+        assert isinstance(tokens[1], DocstringToken)
+        assert tokens[1].content == "inline doc"
+
+    def test_docstring_merging_with_mixed_whitespace(self):
+        """Docstring merging should work with mixed whitespace patterns."""
+        from systemf.surface.parser.types import DocstringToken
+
+        # First line has space, continuation doesn't
+        source = """-- | First line
+-- continuation"""
+        tokens = lex(source)
+        assert len(tokens) == 1
+        assert isinstance(tokens[0], DocstringToken)
+        assert "First line" in tokens[0].content
+        assert "continuation" in tokens[0].content
+
+    def test_regular_comment_not_docstring(self):
+        """Regular comments should not be tokenized."""
+        tokens = lex("x -- regular comment")
+        assert len(tokens) == 1
+        assert tokens[0].type == "IDENT"

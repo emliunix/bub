@@ -299,30 +299,25 @@ def type_forall_parser() -> P[SurfaceType]:
     return result
 
 
-def _make_eof_compatible(inner: P[T]) -> P[T]:
-    """Wrap a parser to handle EOF token from lex().
+def _ensure_consumed(inner: P[T]) -> P[T]:
+    """Wrap a parser to ensure all tokens are consumed.
 
-    Tests use lex() directly which includes EOF token, but the internal
-    parsers don't expect it. This wrapper strips EOF before parsing and
-    returns an index pointing past the EOF token to satisfy parsy's eof check.
+    Returns an index pointing past the last token to satisfy parsy's eof check.
     """
 
     @P
     def parser(tokens: list, index: int) -> Result:
-        # Filter out EOF tokens for parsing
-        filtered = [t for t in tokens if getattr(t, "type", None) != "EOF"]
-        result = inner(filtered, index)
+        result = inner(tokens, index)
 
         if not result.status:
             return result
 
-        # Check that we've consumed all non-EOF tokens
-        if result.index != len(filtered):
+        # Check that we've consumed all tokens
+        if result.index != len(tokens):
             # There are unconsumed tokens - this is a parse error
             return Result.failure(result.index, "expected EOF")
 
-        # Success - return index pointing to end of original stream
-        # This satisfies parsy's eof check which expects to be at the end
+        # Success - return index pointing to end of stream
         return Result.success(len(tokens), result.value)
 
     return parser
@@ -331,8 +326,9 @@ def _make_eof_compatible(inner: P[T]) -> P[T]:
 def type_parser() -> P[SurfaceType]:
     """Type parser - parses forall types and arrow types.
 
-    This parser does NOT handle EOF - it's designed for use within
-    other parsers. Entry points should handle EOF at the top level.
+    This parser does NOT ensure all tokens are consumed - it's designed
+    for use within other parsers. Entry points should use `<< eof` to
+    ensure complete consumption.
 
     Returns:
         SurfaceType - the parsed type
