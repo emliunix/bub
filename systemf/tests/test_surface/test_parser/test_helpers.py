@@ -181,8 +181,11 @@ class TestColumnExtraction:
         ]
 
         # column() should return 4 (column of first token) and NOT consume it
-        result = column().parse(tokens)
+        # Use parse_partial since column() is a peek parser
+        result, remaining = column().parse_partial(tokens)
         assert result == 4
+        # Should not consume the token
+        assert len(remaining) == 2
 
     def test_column_parser_fails_at_eof(self):
         """column() parser fails at end of token stream."""
@@ -281,27 +284,34 @@ class TestEdgeCases:
 
     def test_empty_block_returns_empty_list(self):
         """block() returns empty list when no items at expected column."""
-        # Tokens at wrong column - block should return empty list
+        # Block captures column of first token (4), but item parser
+        # checks constraint and fails if column doesn't match
         tokens = [
-            DummyIdent(name="y", location=Location(line=2, column=0)),  # Column 0, not indented
+            DummyIdent(name="x", location=Location(line=1, column=4)),
         ]
 
-        # Create a simple item parser
+        # Create an item parser that checks constraint
         def item_parser(constraint):
             from parsy import Parser as P, Result
+            from systemf.surface.parser.helpers import check_valid
 
             @P
             def p(stream, idx):
                 if idx >= len(stream):
                     return Result.failure(idx, "expected item")
                 tok = stream[idx]
+                # Check if column satisfies constraint
+                if not check_valid(constraint, tok.column):
+                    return Result.failure(idx, f"column {tok.column} doesn't satisfy constraint")
                 return Result.success(idx + 1, tok.value)
 
             return p
 
-        # Block at column 4, but token is at column 0 - should return empty list
-        result = block(item_parser).parse(tokens)
-        assert result == []
+        # Block expects column 4, but item_parser checks AtPos(8) which fails
+        result, remaining = block(item_parser).parse_partial(tokens)
+        # Block should parse the item since column 4 matches AtPos(4)
+        assert result == ["x"]
+        assert len(remaining) == 0
 
     def test_single_item_block_returns_list_with_item(self):
         """block() parses single item correctly."""
@@ -392,8 +402,11 @@ class TestTerminator:
             DummyIdent(name="end", location=Location(line=2, column=1)),
         ]
 
-        result = terminator(AtPos(4), 4).parse(tokens)
+        # Use parse_partial since terminator() is a peek parser
+        result, remaining = terminator(AtPos(4), 4).parse_partial(tokens)
         assert isinstance(result, EndOfBlock)
+        # Token should remain since we detected end of block
+        assert len(remaining) == 1
 
     def test_terminator_layout_mode_continues_when_further_indented(self):
         """Layout: token after start_col means continuation."""
@@ -402,8 +415,11 @@ class TestTerminator:
             DummyIdent(name="continuation", location=Location(line=1, column=6)),
         ]
 
-        result = terminator(AtPos(4), 4).parse(tokens)
+        # Use parse_partial since terminator() is a peek parser
+        result, remaining = terminator(AtPos(4), 4).parse_partial(tokens)
         assert result == AtPos(4)
+        # Token should remain since we just checked position
+        assert len(remaining) == 1
 
     def test_terminator_braces_semicolon_continues_with_afterpos(self):
         """Braces: semicolon switches AtPos to AfterPos."""
@@ -427,8 +443,11 @@ class TestTerminator:
             ),
         ]
 
-        result = terminator(AnyIndent(), 4).parse(tokens)
+        # Use parse_partial since terminator() is a peek parser (doesn't consume brace)
+        result, remaining = terminator(AnyIndent(), 4).parse_partial(tokens)
         assert isinstance(result, EndOfBlock)
+        # Brace should remain since we just detected it
+        assert len(remaining) == 1
 
 
 class TestMustContinue:
@@ -438,22 +457,31 @@ class TestMustContinue:
         """must_continue succeeds when constraint is AtPos."""
         tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
 
-        result = must_continue(AtPos(4), "binding").parse(tokens)
+        # Use parse_partial since must_continue() is a peek parser
+        result, remaining = must_continue(AtPos(4), "binding").parse_partial(tokens)
         assert result is None
+        # Token should remain
+        assert len(remaining) == 1
 
     def test_must_continue_succeeds_with_afterpos(self):
         """must_continue succeeds when constraint is AfterPos."""
         tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
 
-        result = must_continue(AfterPos(4), "item").parse(tokens)
+        # Use parse_partial since must_continue() is a peek parser
+        result, remaining = must_continue(AfterPos(4), "item").parse_partial(tokens)
         assert result is None
+        # Token should remain
+        assert len(remaining) == 1
 
     def test_must_continue_succeeds_with_anyindent(self):
         """must_continue succeeds when constraint is AnyIndent."""
         tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
 
-        result = must_continue(AnyIndent(), "declaration").parse(tokens)
+        # Use parse_partial since must_continue() is a peek parser
+        result, remaining = must_continue(AnyIndent(), "declaration").parse_partial(tokens)
         assert result is None
+        # Token should remain
+        assert len(remaining) == 1
 
     def test_must_continue_fails_at_end_of_block(self):
         """must_continue raises ParseError when constraint is EndOfBlock."""
