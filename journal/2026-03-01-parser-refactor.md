@@ -209,3 +209,77 @@ Refactored docstring processing to use Idris2-style whitespace handling and remo
 2. **Debug term parser** - case expressions not fully consumed
 3. **Remove dead lexer patterns** - `PRAGMA_START`/`PRAGMA_END` regex
 4. **Document manual token inspection** - explain why `top_decl_parser()` doesn't use parsy combinators
+
+
+---
+
+# 2026-03-01 Night - Technical Debt Cleanup Complete
+
+## Summary
+
+All medium priority technical debt items completed:
+- Token type constants implemented
+- Parser class simplified  
+- Bounds checking added
+- Documentation updated
+
+## Work Completed
+
+### Token Type Constants
+- Added `DocstringType` class with `PRECEDING` and `INLINE` constants
+- Added `TokenType` class with `PRAGMA`, `LAMBDA`, `TYPELAMBDA` constants
+- Replaced 10+ string literals across 4 files with type-safe constants
+- Benefits: IDE autocompletion, typo prevention, clearer intent
+
+### Parser Class Simplification
+- Removed duplicate `parse_program()` method (identical to `parse()`)
+- Simplified `parse_program()` function to work without Parser wrapper
+- Reduced code by 23 lines while maintaining same functionality
+- All Parser methods now use shared error handling
+
+### Bounds Checking
+- Created `_extract_parse_error()` helper with proper bounds checking
+- Validates: `idx is not None`, `isinstance(idx, int)`, `0 <= idx < len(tokens)`
+- Replaced 4 occurrences of `hasattr(e, "index")` duck typing
+- Safer error location extraction from parsy exceptions
+
+### Documentation Updates
+- Updated technical debt document with all completed items marked
+- Documented why `top_decl_parser()` uses manual scanning
+- Marked mapping dictionaries as "already optimal" (class constants, not recreated per call)
+
+## Technical Debt Status
+
+**ALL CRITICAL/HIGH/MEDIUM PRIORITY ITEMS COMPLETED**
+
+Only 4 low priority items remain (optional cleanup).
+
+## Test Results
+
+**183/183 parser tests passing**
+
+All previous issues resolved:
+- ✅ Pragma parsing now working
+- ✅ Multiple declarations parsing correctly
+- ✅ Nested forall types: `forall a. forall b. type`
+- ✅ Type abstraction syntax: `Λa. expr`
+- ✅ Constructor termination at boundaries
+- ✅ Token location access (`.location.column`)
+
+## Files Modified
+
+- `src/systemf/surface/parser/types.py` - Added constant classes
+- `src/systemf/surface/parser/declarations.py` - Use constants, match statements
+- `src/systemf/surface/parser/expressions.py` - Use constants
+- `src/systemf/surface/parser/lexer.py` - Use constants
+- `src/systemf/surface/parser/__init__.py` - Simplified Parser, bounds checking
+- `docs/parser-technical-debt.md` - Updated status
+- `tests/test_surface/test_parser/test_decl_docstrings.py` - Updated Parser usage
+
+## Commits
+
+Multiple commits:
+- Token type constants refactoring
+- Parser class simplification
+- Bounds checking implementation
+- Documentation updates
