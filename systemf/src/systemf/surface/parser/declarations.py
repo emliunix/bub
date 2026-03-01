@@ -24,6 +24,7 @@ from systemf.surface.parser.types import (
     ConstructorToken,
     DocstringToken,
     PragmaToken,
+    DocstringType,
 )
 from systemf.surface.types import (
     SurfaceDeclaration,
@@ -57,7 +58,7 @@ def skip_inline_docstrings() -> P[None]:
         i = index
         while i < len(tokens):
             token = tokens[i]
-            if isinstance(token, DocstringToken) and token.docstring_type == "DOCSTRING_INLINE":
+            if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.INLINE:
                 i += 1
             else:
                 break
@@ -498,7 +499,7 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
 
             # Accumulate metadata (docstrings and pragmas) before declarations
             match token:
-                case DocstringToken(docstring_type="DOCSTRING_PRECEDING"):
+                case DocstringToken(docstring_type=DocstringType.PRECEDING):
                     current_docstrings.append(token.content)
                     i += 1
                     continue

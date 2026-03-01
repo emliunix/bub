@@ -405,6 +405,21 @@ class OperatorType:
     )
 
 
+class DocstringType:
+    """Docstring type constants."""
+
+    PRECEDING = "DOCSTRING_PRECEDING"
+    INLINE = "DOCSTRING_INLINE"
+
+
+class TokenType:
+    """General token type constants."""
+
+    PRAGMA = "PRAGMA"
+    LAMBDA = "LAMBDA"
+    TYPELAMBDA = "TYPELAMBDA"
+
+
 @dataclass(frozen=True)
 class OperatorToken(TokenBase):
     """Operator token."""

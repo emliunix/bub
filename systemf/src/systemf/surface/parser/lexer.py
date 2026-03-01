@@ -16,6 +16,7 @@ from systemf.surface.parser.types import (
     DelimiterToken,
     DelimiterType,
     DocstringToken,
+    DocstringType,
     ElseToken,
     ForallToken,
     IdentifierToken,
@@ -56,8 +57,8 @@ class Lexer:
         ("WHITESPACE", r"[ \t]+"),
         ("NEWLINE", r"\n|\r\n?"),
         # Docstrings (-- | or -- ^) - single line only, no merging
-        ("DOCSTRING_PRECEDING", r"--\s*\|([^\n]*)"),
-        ("DOCSTRING_INLINE", r"--\s*\^([^\n]*)"),
+        (DocstringType.PRECEDING, r"--\s*\|([^\n]*)"),
+        (DocstringType.INLINE, r"--\s*\^([^\n]*)"),
         # Regular comments
         ("COMMENT", r"--[^\n]*"),
         # Keywords
@@ -210,12 +211,12 @@ class Lexer:
             key = parts[0] if parts else ""
             val = parts[1] if len(parts) > 1 else ""
             return PragmaToken(key=key, value=val, raw_content=raw_content, location=loc)
-        elif token_type == "DOCSTRING_PRECEDING":
+        elif token_type == DocstringType.PRECEDING:
             # Keep the full content including '|' marker - post-pass will handle it
             # value is like "-- | some content", keep "| some content"
             content = value[2:].strip() if len(value) > 2 else ""
             return DocstringToken(docstring_type=token_type, content=content, location=loc)
-        elif token_type == "DOCSTRING_INLINE":
+        elif token_type == DocstringType.INLINE:
             # Keep the full content including '^' marker - post-pass will handle it
             content = value[2:].strip() if len(value) > 2 else ""
             return DocstringToken(docstring_type=token_type, content=content, location=loc)
@@ -377,7 +378,7 @@ def process_comments(tokens: list[Token]) -> list[Token]:
 
                 # Create the docstring token
                 content = "\n".join(lines)
-                doc_type = "DOCSTRING_PRECEDING" if marker == "|" else "DOCSTRING_INLINE"
+                doc_type = DocstringType.PRECEDING if marker == "|" else DocstringType.INLINE
                 result.append(
                     DocstringToken(docstring_type=doc_type, content=content, location=location)
                 )
@@ -411,6 +412,6 @@ def strip_comments_and_whitespace(tokens: list[Token]) -> list[Token]:
         if not isinstance(t, CommentToken)
         and (
             not isinstance(t, DocstringToken)
-            or t.docstring_type in ("DOCSTRING_PRECEDING", "DOCSTRING_INLINE")
+            or t.docstring_type in (DocstringType.PRECEDING, DocstringType.INLINE)
         )
     ]

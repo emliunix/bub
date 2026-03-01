@@ -33,6 +33,7 @@ from systemf.surface.parser.types import (
     KeywordToken,
     OperatorToken,
     DelimiterToken,
+    DocstringType,
 )
 from systemf.surface.types import (
     SurfaceTerm,
@@ -701,7 +702,7 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
             annotated_params.append((var_name, var_type))
 
         # Optional parameter docstring (-- ^ style) - applies to last param
-        param_doc_token = yield match_token("DOCSTRING_INLINE").optional()
+        param_doc_token = yield match_token(DocstringType.INLINE).optional()
         param_docstrings: list[str | None] = []
         if param_doc_token is not None:
             content = param_doc_token.value
