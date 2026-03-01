@@ -10,12 +10,12 @@ import re
 
 from systemf.surface.parser.types import (
     CaseToken,
+    CommentToken,
     ConstructorToken,
     DataToken,
     DelimiterToken,
     DelimiterType,
     DocstringToken,
-    EOFToken,
     ElseToken,
     ForallToken,
     IdentifierToken,
@@ -48,16 +48,17 @@ class Lexer:
     """
 
     # Token specifications as regex patterns
+    # Unicode characters used directly (not escapes) for readability
     TOKEN_PATTERNS = [
-        # Pragma syntax (must come before other patterns to catch {-# before comments)
-        ("PRAGMA_START", r"\{-#"),
-        ("PRAGMA_END", r"#-\}"),
+        # Pragma: matches entire block {-# ... #-} including multiline
+        ("PRAGMA", r"\{-#(?:(?!#-\}).)*#-\}"),
         # Whitespace
         ("WHITESPACE", r"[ \t]+"),
         ("NEWLINE", r"\n|\r\n?"),
-        # Docstrings
-        ("DOCSTRING_PRECEDING", r"--\s*\|[^\n]*"),
-        ("DOCSTRING_INLINE", r"--\s*\^\s*(.*?)(?=\s*-\u003e|\s*\||\n|$)"),
+        # Docstrings (-- | or -- ^) - single line only, no merging
+        ("DOCSTRING_PRECEDING", r"--\s*\|([^\n]*)"),
+        ("DOCSTRING_INLINE", r"--\s*\^([^\n]*)"),
+        # Regular comments
         ("COMMENT", r"--[^\n]*"),
         # Keywords
         ("DATA", r"\bdata\b"),
@@ -73,24 +74,24 @@ class Lexer:
         ("PRIM_TYPE", r"\bprim_type\b"),
         ("PRIM_OP", r"\bprim_op\b"),
         # Multi-character operators
-        ("ARROW", r"-\u003e|\u2192"),
-        ("DARROW", r"=\u003e"),
+        ("ARROW", r"->|→"),
+        ("DARROW", r"=>"),
         ("NEQ", r"/="),
-        ("LE", r"\u003c="),
-        ("GE", r"\u003e="),
-        ("AND", r"\u0026\u0026"),
+        ("LE", r"<="),
+        ("GE", r">="),
+        ("AND", r"&&"),
         ("OR", r"\|\|"),
         ("APPEND", r"\+\+"),
-        ("LAMBDA", r"\\|\u03bb"),
-        ("TYPELAMBDA", r"/\\|\u039b"),
+        ("LAMBDA", r"\\|λ"),
+        ("TYPELAMBDA", r"/\\|Λ"),
         # Single-character operators (after multi-char)
         ("EQ", r"=="),
         ("PLUS", r"\+"),
         ("MINUS", r"-"),
         ("STAR", r"\*"),
         ("SLASH", r"/"),
-        ("LT", r"\u003c"),
-        ("GT", r"\u003e"),
+        ("LT", r"<"),
+        ("GT", r">"),
         ("EQUALS", r"="),
         ("COLON", r":"),
         ("BAR", r"\|"),
@@ -128,7 +129,8 @@ class Lexer:
 
         # Compile regex for efficiency
         self._pattern = re.compile(
-            "|".join(f"(?P<{name}>{pattern})" for name, pattern in self.TOKEN_PATTERNS)
+            "|".join(f"(?P<{name}>{pattern})" for name, pattern in self.TOKEN_PATTERNS),
+            re.DOTALL,  # Allow . to match newlines for pragma multiline matching
         )
 
     def tokenize(self) -> list[Token]:
@@ -143,7 +145,7 @@ class Lexer:
         self.tokens = []
 
         while self.pos < len(self.source):
-            # Skip whitespace and comments (but not newlines)
+            # Skip whitespace (but not newlines, comments, docstrings, or pragmas)
             if self._skip_whitespace():
                 continue
 
@@ -160,32 +162,18 @@ class Lexer:
                 loc = Location(self.line, self.column, self.filename)
                 raise LexerError(f"Unexpected character: {self.source[self.pos]!r}", loc)
 
-        # Return tokens without explicit EOF - parsy expects stream to end naturally
         return self.tokens
 
     def _skip_whitespace(self) -> bool:
-        """Skip whitespace and comments (except newlines).
+        """Skip whitespace (spaces and tabs only, not newlines).
 
         Returns:
             True if skipped anything, False otherwise
         """
         skipped = False
-        while self.pos < len(self.source):
-            char = self.source[self.pos]
-
-            # Skip spaces and tabs
-            if char in " \t":
-                self._advance(char)
-                skipped = True
-            # Skip comments
-            elif self.source.startswith("--", self.pos):
-                # Skip to end of line
-                while self.pos < len(self.source) and self.source[self.pos] != "\n":
-                    self.pos += 1
-                skipped = True
-            else:
-                break
-
+        while self.pos < len(self.source) and self.source[self.pos] in " \t":
+            self._advance(self.source[self.pos])
+            skipped = True
         return skipped
 
     def _advance(self, text: str) -> None:
@@ -204,12 +192,33 @@ class Lexer:
         value = match.group()
         loc = Location(self.line, self.column, self.filename)
 
-        if token_type in ("WHITESPACE", "COMMENT", "DOCSTRING_PRECEDING", "DOCSTRING_INLINE"):
-            # Skip these (but we already skipped them in _skip_whitespace)
+        if token_type == "WHITESPACE":
+            # Skip whitespace
             return None
+        elif token_type == "COMMENT":
+            # Emit comment token (content after --)
+            content = value[2:].strip() if len(value) > 2 else ""
+            return CommentToken(content=content, location=loc)
         elif token_type == "NEWLINE":
             # Track newlines for location, but don't emit token
             return None
+        elif token_type == "PRAGMA":
+            # Extract raw content between {-# and #-}
+            raw_content = value[3:-3].strip()  # Remove {-# and #-}
+            # Parse into key-value pair: first word is key, rest is value
+            parts = raw_content.split(None, 1)
+            key = parts[0] if parts else ""
+            val = parts[1] if len(parts) > 1 else ""
+            return PragmaToken(key=key, value=val, raw_content=raw_content, location=loc)
+        elif token_type == "DOCSTRING_PRECEDING":
+            # Keep the full content including '|' marker - post-pass will handle it
+            # value is like "-- | some content", keep "| some content"
+            content = value[2:].strip() if len(value) > 2 else ""
+            return DocstringToken(docstring_type=token_type, content=content, location=loc)
+        elif token_type == "DOCSTRING_INLINE":
+            # Keep the full content including '^' marker - post-pass will handle it
+            content = value[2:].strip() if len(value) > 2 else ""
+            return DocstringToken(docstring_type=token_type, content=content, location=loc)
         elif token_type == "IDENT":
             return IdentifierToken(name=value, location=loc)
         elif token_type == "CONSTRUCTOR":
@@ -249,45 +258,9 @@ class Lexer:
         elif token_type == "TYPELAMBDA":
             return TypeLambdaToken(symbol=value, location=loc)
         elif token_type in OperatorType.ALL:
-            # Determine operator type
-            op_map = {
-                "ARROW": OperatorType.ARROW,
-                "DARROW": OperatorType.DARROW,
-                "EQ": OperatorType.EQ,
-                "NEQ": OperatorType.NEQ,
-                "PLUS": OperatorType.PLUS,
-                "MINUS": OperatorType.MINUS,
-                "STAR": OperatorType.STAR,
-                "SLASH": OperatorType.SLASH,
-                "LT": OperatorType.LT,
-                "GT": OperatorType.GT,
-                "LE": OperatorType.LE,
-                "GE": OperatorType.GE,
-                "AND": OperatorType.AND,
-                "OR": OperatorType.OR,
-                "APPEND": OperatorType.APPEND,
-                "EQUALS": OperatorType.EQUALS,
-                "COLON": OperatorType.COLON,
-                "BAR": OperatorType.BAR,
-                "AT": OperatorType.AT,
-                "DOT": OperatorType.DOT,
-                "LAMBDA": OperatorType.LAMBDA,
-                "TYPELAMBDA": OperatorType.TYPELAMBDA,
-            }
-            return OperatorToken(operator=value, op_type=op_map[token_type], location=loc)
+            return OperatorToken(operator=value, op_type=token_type, location=loc)
         elif token_type in DelimiterType.ALL:
-            delim_map = {
-                "LPAREN": DelimiterType.LPAREN,
-                "RPAREN": DelimiterType.RPAREN,
-                "LBRACKET": DelimiterType.LBRACKET,
-                "RBRACKET": DelimiterType.RBRACKET,
-                "LBRACE": DelimiterType.LBRACE,
-                "RBRACE": DelimiterType.RBRACE,
-                "COMMA": DelimiterType.COMMA,
-            }
-            return DelimiterToken(delimiter=value, delim_type=delim_map[token_type], location=loc)
-        elif token_type in ("PRAGMA_START", "PRAGMA_END"):
-            return PragmaToken(pragma_type=token_type, content=value, location=loc)
+            return DelimiterToken(delimiter=value, delim_type=token_type, location=loc)
         else:
             # Unknown token type - skip
             return None
@@ -297,12 +270,147 @@ def lex(source: str, filename: str | None = None) -> list[Token]:
     """Tokenize source code.
 
     Convenience function that creates a Lexer and tokenizes the source.
+    Also processes comments in a post-lexer pass to join consecutive lines
+    and classify docstrings.
 
     Args:
         source: Source code to tokenize
         filename: Optional filename for error reporting
 
     Returns:
-        List of tokens
+        List of tokens with comments processed
     """
-    return Lexer(source, filename).tokenize()
+    tokens = Lexer(source, filename).tokenize()
+    tokens = process_comments(tokens)
+    tokens = strip_comments_and_whitespace(tokens)
+    return tokens
+
+
+def process_comments(tokens: list[Token]) -> list[Token]:
+    """Process comments: join consecutive lines and classify docstrings.
+
+    This is a post-lexer pass with nested while loop style:
+    1. Outer loop finds potential docstring start
+    2. Inner loop (when marker | or ^ found) consumes all consecutive comment lines
+    3. First line: strip leading space (Idris2-style) then marker
+    4. Subsequent lines: strip leading space only (marker already stripped by lexer)
+    5. Classifies as DOCSTRING_PRECEDING (|) or DOCSTRING_INLINE (^)
+    6. Stops at new docstring (| or ^) or blank line or non-comment
+
+    Args:
+        tokens: Raw tokens from lexer
+
+    Returns:
+        Tokens with docstrings processed, regular comments filtered
+    """
+    if not tokens:
+        return tokens
+
+    def strip_first_space(s: str) -> str:
+        """Strip first leading space if present (Idris2-style)."""
+        return s[1:] if s.startswith(" ") else s
+
+    def has_marker(content: str) -> tuple[bool, str]:
+        """Check if content has docstring marker after optional space.
+        Returns (has_marker, marker_char) where marker_char is '|', '^', or ''.
+        """
+        stripped = strip_first_space(content)
+        if stripped.startswith("|"):
+            return True, "|"
+        elif stripped.startswith("^"):
+            return True, "^"
+        return False, ""
+
+    result: list[Token] = []
+    i = 0
+
+    while i < len(tokens):
+        token = tokens[i]
+
+        # Check if this is a potential docstring
+        if isinstance(token, (DocstringToken, CommentToken)):
+            has_marker_flag, marker = has_marker(token.content)
+
+            if has_marker_flag:
+                # Docstring found - enter inner loop to consume consecutive lines
+                location = token.location
+                # First line: strip leading space then marker
+                first_content = strip_first_space(token.content)
+                if first_content.startswith(marker):
+                    first_content = strip_first_space(first_content[1:])
+                lines = [first_content]
+                last_line = token.location.line
+                j = i + 1
+
+                # Inner while: consume all consecutive comment lines
+                # Stop at blank line, non-comment, or new marker after non-marker comments
+                saw_non_marker = False
+                while j < len(tokens):
+                    next_token = tokens[j]
+
+                    # Check for line gap (blank line means end of docstring)
+                    if hasattr(next_token, "location"):
+                        if next_token.location.line - last_line > 1:
+                            break
+                        last_line = next_token.location.line
+
+                    # Only accept comment tokens
+                    if not isinstance(next_token, (DocstringToken, CommentToken)):
+                        break
+
+                    # Process this line: strip leading space, then check for marker
+                    content = strip_first_space(next_token.content)
+                    has_marker_now = content.startswith("|") or content.startswith("^")
+
+                    # If we see a marker after non-marker comments, stop (new docstring)
+                    if has_marker_now and saw_non_marker:
+                        break
+
+                    # Strip marker if present and continue
+                    if has_marker_now:
+                        content = strip_first_space(content[1:])
+                    else:
+                        saw_non_marker = True
+
+                    lines.append(content)
+                    j += 1
+
+                # Create the docstring token
+                content = "\n".join(lines)
+                doc_type = "DOCSTRING_PRECEDING" if marker == "|" else "DOCSTRING_INLINE"
+                result.append(
+                    DocstringToken(docstring_type=doc_type, content=content, location=location)
+                )
+                i = j
+            else:
+                # Regular comment - skip it
+                i += 1
+        else:
+            # Non-comment token - keep it
+            result.append(token)
+            i += 1
+
+    return result
+
+
+def strip_comments_and_whitespace(tokens: list[Token]) -> list[Token]:
+    """Filter out remaining comments and whitespace tokens.
+
+    After processing docstrings, remove any leftover comment tokens
+    and other non-semantic tokens before parsing.
+
+    Args:
+        tokens: Tokens after docstring processing
+
+    Returns:
+        Clean tokens ready for parsing
+    """
+    return [
+        t
+        for t in tokens
+        if not isinstance(t, CommentToken)
+        and (
+            not isinstance(t, DocstringToken)
+            or t.docstring_type in ("DOCSTRING_PRECEDING", "DOCSTRING_INLINE")
+        )
+    ]

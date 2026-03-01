@@ -143,13 +143,6 @@ NUMBER = match_token("NUMBER").map(lambda t: t.value)
 STRING = match_token("STRING").map(lambda t: t.value)
 EOF = match_token("EOF")
 
-# Pragma tokens
-PRAGMA_START = match_token("PRAGMA_START")
-PRAGMA_END = match_token("PRAGMA_END")
-PRAGMA_CONTENT = match_token("PRAGMA_CONTENT").map(lambda t: t.value)
-LLM = match_token("LLM").map(lambda t: t.value)
-TOOL = match_token("TOOL").map(lambda t: t.value)
-
 # Primitive declaration tokens
 PRIM_TYPE = match_token("PRIM_TYPE")
 PRIM_OP = match_token("PRIM_OP")
