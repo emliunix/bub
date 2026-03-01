@@ -9,11 +9,13 @@
 ## Current Status
 
 ### Recently Fixed
-- ✅ **Removed dead pragma token patterns** - `PRAGMA_START`, `PRAGMA_END`, `PRAGMA_CONTENT` removed from `parser.py` (lines 147-151)
+- ✅ **Removed dead pragma token patterns** - `PRAGMA_START`, `PRAGMA_END`, `PRAGMA_CONTENT` removed from `parser.py` (lines 147-151), verified not in lexer
 - ✅ **Refactored docstring processing** - `process_comments()` now uses nested while loop with Idris2-style whitespace stripping
 - ✅ **Pragma parsing** - `top_decl_parser()` now properly accumulates pragmas before declarations
 - ✅ **Multiple declarations** - Parser now handles multiple declarations in one file correctly
 - ✅ **Constructor termination** - Fixed data parser to stop at `|` separator and `ident :` patterns
+- ✅ **Nested forall types** - `forall a. forall b. type` now parses correctly
+- ✅ **Token location access** - Fixed `.column` -> `.location.column` in 5 locations
 
 ### Still Broken / Needs Work (Feature Goals, Not Bugs)
 - 🔵 **Type abstraction syntax** - `Λa. expr` not yet supported (feature goal)
@@ -22,14 +24,13 @@
 ### Remaining Technical Debt (Priority Order)
 
 #### High Priority
-1. **Remove dead token patterns from lexer** - `PRAGMA_START`/`PRAGMA_END` regex still defined but never matched (line 52-53)
-2. **Document manual token inspection** - `top_decl_parser()` uses manual scanning instead of parsy combinators
+1. **Document manual token inspection** - `top_decl_parser()` uses manual scanning instead of parsy combinators. Explain why: backtracking complexity, lookahead ambiguity, metadata attachment requires stateful accumulation that doesn't fit parsy's pure functional model
 
 #### Medium Priority
-3. **Create token type constants** - Still using string literals (`"DOCSTRING_PRECEDING"`)
-4. **Extract mapping dictionaries** - `op_map`/`delim_map` recreated fresh every call
-5. **Simplify Parser class** - "Old API" compatibility wrapper in `__init__.py`
-6. **Add bounds checking** - Relies on `hasattr(e, "index")` parsy internals
+2. **Create token type constants** - Still using string literals (`"DOCSTRING_PRECEDING"`)
+3. **Extract mapping dictionaries** - `op_map`/`delim_map` recreated fresh every call
+4. **Simplify Parser class** - "Old API" compatibility wrapper in `__init__.py`
+5. **Add bounds checking** - Relies on `hasattr(e, "index")` parsy internals
 
 #### Low Priority
 7. **Unify parsing strategies** - Consider using parsy combinators in `top_decl_parser()`
