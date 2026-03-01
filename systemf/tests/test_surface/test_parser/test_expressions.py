@@ -77,14 +77,14 @@ class TestLambdaParser:
         tokens = lex("λx → x")
         result = lambda_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceAbs)
-        assert result.param == "x"
+        assert result.var == "x"
 
     def test_lambda_with_type_annotation(self):
         """Parse λx:Int → x."""
         tokens = lex("λx:Int → x")
         result = lambda_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceAbs)
-        assert result.param == "x"
+        assert result.var == "x"
 
     def test_lambda_multiple_params(self):
         """Parse λx y → x."""

@@ -75,7 +75,7 @@ class TestDataDeclaration:
         assert isinstance(result, SurfaceDataDeclaration)
         cons = result.constructors[0]
         # Constructor should have 2 arguments
-        assert len(cons.arg_types) == 2
+        assert len(cons.args) == 2
 
 
 class TestTermDeclaration:
