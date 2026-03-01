@@ -113,7 +113,7 @@ data Maybe a = Nothing | Just a
 fromMaybe : forall a. a -> Maybe a -> a = Λa. \\default ma ->
   case ma of
     Nothing -> default
-    | Just x -> x
+    Just x -> x
 
 -- | Natural numbers
 data Nat = Zero | Succ Nat

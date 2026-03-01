@@ -496,54 +496,51 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
         while i < len(tokens):
             token = tokens[i]
 
-            # Accumulate docstrings (only DOCSTRING_PRECEDING, not DOCSTRING_INLINE)
-            if isinstance(token, DocstringToken) and token.docstring_type == "DOCSTRING_PRECEDING":
-                current_docstrings.append(token.content)
-                i += 1
-                continue
-
-            # Accumulate pragmas
-            if isinstance(token, PragmaToken):
-                # PragmaToken now has key and value fields directly
-                if token.key:
-                    current_pragmas[token.key] = token.value
-                i += 1
-                continue
+            # Accumulate metadata (docstrings and pragmas) before declarations
+            match token:
+                case DocstringToken(docstring_type="DOCSTRING_PRECEDING"):
+                    current_docstrings.append(token.content)
+                    i += 1
+                    continue
+                case PragmaToken(key=key) if key:
+                    current_pragmas[key] = token.value
+                    i += 1
+                    continue
 
             # Check if this token can start a declaration
             can_start_decl = False
             decl_result = None
             decl_type = None
 
-            if isinstance(token, KeywordToken):
-                if token.keyword == "data":
+            match token:
+                case KeywordToken(keyword="data"):
                     can_start_decl = True
                     result = data_p(tokens, i)
                     if result.status:
                         decl_result = result.value
                         decl_type = "data"
                         i = result.index
-                elif token.keyword == "prim_type":
+                case KeywordToken(keyword="prim_type"):
                     can_start_decl = True
                     result = prim_type_p(tokens, i)
                     if result.status:
                         decl_result = result.value
                         decl_type = "prim_type"
                         i = result.index
-                elif token.keyword == "prim_op":
+                case KeywordToken(keyword="prim_op"):
                     can_start_decl = True
                     result = prim_op_p(tokens, i)
                     if result.status:
                         decl_result = result.value
                         decl_type = "prim_op"
                         i = result.index
-            elif isinstance(token, IdentifierToken):
-                can_start_decl = True
-                result = term_p(tokens, i)
-                if result.status:
-                    decl_result = result.value
-                    decl_type = "term"
-                    i = result.index
+                case IdentifierToken():
+                    can_start_decl = True
+                    result = term_p(tokens, i)
+                    if result.status:
+                        decl_result = result.value
+                        decl_type = "term"
+                        i = result.index
 
             if decl_result is not None:
                 # Attach accumulated metadata

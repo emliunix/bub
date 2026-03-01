@@ -450,7 +450,7 @@ def peek_column() -> P[int]:
     def parser(tokens: list, index: int) -> Result:
         if index >= len(tokens):
             return Result.success(index, 0)
-        return Result.success(index, tokens[index].column)
+        return Result.success(index, tokens[index].location.column)
 
     return parser
 

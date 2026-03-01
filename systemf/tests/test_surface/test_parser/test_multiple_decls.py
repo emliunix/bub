@@ -122,7 +122,7 @@ class TestMultipleDeclarationsParsing:
         result = parse_program(complete_prelude_subset)
 
         assert result is not None
-        assert len(result) == 8
+        assert len(result) == 9
 
         # Check all declarations are present
         names = [d.name for d in result]

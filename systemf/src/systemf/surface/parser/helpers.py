@@ -51,7 +51,7 @@ def column() -> P[int]:
             return Result.failure(index, "expected token")
         token = tokens[index]
         # Return column without consuming token (peek)
-        return Result.success(index, token.column)
+        return Result.success(index, token.location.column)
 
     return parser
 
@@ -130,7 +130,7 @@ def get_indent_info(token: TokenBase) -> int:
         >>> get_indent_info(ident_token)
         4
     """
-    return token.column
+    return token.location.column
 
 
 # =============================================================================
@@ -191,7 +191,7 @@ def block(item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
             return Result.success(index, [])
 
         # Get column of first token
-        start_col = tokens[index].column
+        start_col = tokens[index].location.column
 
         # Use block_entries with AtPos constraint
         entries_result = block_entries(AtPos(start_col), item)(tokens, index)
@@ -281,7 +281,7 @@ def block_entry(
             return Result.failure(index, "expected block entry")
 
         token = tokens[index]
-        col = token.column
+        col = token.location.column
 
         # Check if column satisfies constraint
         if not check_valid(constraint, col):
@@ -366,7 +366,7 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
             return Result.success(index, EndOfBlock())
 
         # Check column position
-        col = token.column
+        col = token.location.column
 
         # Layout mode column handling (matching Idris2 behavior):
         # AtPos(c): col == c -> continue with AtPos(c) (new item at same column)

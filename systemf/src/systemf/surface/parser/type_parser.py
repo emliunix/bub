@@ -288,8 +288,8 @@ def type_forall_parser() -> P[SurfaceType]:
     # Match dot
     yield match_symbol(".")
 
-    # Parse body type
-    body = yield type_arrow_parser
+    # Parse body type (use _type_parser to allow nested foralls)
+    body = yield _type_parser
 
     # Build nested foralls from right to left
     result = body
