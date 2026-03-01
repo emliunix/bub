@@ -22,6 +22,7 @@ from .types import (
     AfterPos,
     EndOfBlock,
     DelimiterToken,
+    OperatorToken,
 )
 
 # Type variable for parsed items
@@ -49,6 +50,7 @@ def column() -> P[int]:
         if index >= len(tokens):
             return Result.failure(index, "expected token")
         token = tokens[index]
+        # Return column without consuming token (peek)
         return Result.success(index, token.column)
 
     return parser
@@ -161,7 +163,46 @@ def block(item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
         >>> block(branch_parser).parse("A -> 1\nB -> 2")  # At same column
         [Branch(...), Branch(...)]
     """
-    raise NotImplementedError("block() not yet implemented")
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        # Check for explicit braces first
+        if index < len(tokens):
+            tok = tokens[index]
+            if isinstance(tok, DelimiterToken) and tok.delimiter == "{":
+                # Brace mode: use AnyIndent
+                # Skip the opening brace
+                entries_result = block_entries(AnyIndent(), item)(tokens, index + 1)
+                if not entries_result.status:
+                    return entries_result
+
+                # Check for closing brace (but don't require it - just consume if present)
+                next_idx = entries_result.index
+                if next_idx < len(tokens):
+                    close_tok = tokens[next_idx]
+                    if isinstance(close_tok, DelimiterToken) and close_tok.delimiter == "}":
+                        next_idx += 1
+
+                return Result.success(next_idx, entries_result.value)
+
+        # Layout mode: capture current column
+        if index >= len(tokens):
+            # Empty stream, return empty list
+            return Result.success(index, [])
+
+        # Get column of first token
+        start_col = tokens[index].column
+
+        # Use block_entries with AtPos constraint
+        entries_result = block_entries(AtPos(start_col), item)(tokens, index)
+
+        if entries_result.status:
+            return entries_result
+        else:
+            # If entries failed to parse, return empty list
+            return Result.success(index, [])
+
+    return parser
 
 
 def block_after(min_col: int, item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
@@ -203,7 +244,35 @@ def block_entries(constraint: ValidIndent, item: Callable[[ValidIndent], P[T]]) 
         >>> block_entries(AtPos(4), binding_parser).parse("x = 1\ny = 2")
         [Binding(...), Binding(...)]  # Both at column 4
     """
-    raise NotImplementedError("block_entries() not yet implemented")
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        results: List[T] = []
+        current_index = index
+        current_constraint = constraint
+
+        while current_index < len(tokens):
+            # Check if constraint is EndOfBlock - stop parsing
+            match current_constraint:
+                case EndOfBlock():
+                    break
+
+            # Try to parse one entry
+            entry_result = block_entry(current_constraint, item)(tokens, current_index)
+
+            if not entry_result.status:
+                # Entry failed to parse - stop here
+                break
+
+            # Entry parsed successfully
+            parsed_value, updated_constraint = entry_result.value
+            results.append(parsed_value)
+            current_index = entry_result.index
+            current_constraint = updated_constraint
+
+        return Result.success(current_index, results)
+
+    return parser
 
 
 def block_entry(
@@ -225,7 +294,39 @@ def block_entry(
         >>> block_entry(AtPos(4), ident_parser).parse("x")
         (Ident('x'), AtPos(4))
     """
-    raise NotImplementedError("block_entry() not yet implemented")
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        if index >= len(tokens):
+            return Result.failure(index, "expected block entry")
+
+        token = tokens[index]
+        col = token.column
+
+        # Check if column satisfies constraint
+        if not check_valid(constraint, col):
+            return Result.failure(index, f"invalid indentation at column {col}")
+
+        # Parse the item using the provided parser
+        item_result = item(constraint)(tokens, index)
+
+        if not item_result.status:
+            return item_result
+
+        # Get the next index after parsing the item
+        next_index = item_result.index
+
+        # Call terminator to get updated constraint
+        term_result = terminator(constraint, col)(tokens, next_index)
+
+        if not term_result.status:
+            return term_result
+
+        updated_constraint = term_result.value
+
+        return Result.success(term_result.index, (item_result.value, updated_constraint))
+
+    return parser
 
 
 # =============================================================================
@@ -258,7 +359,43 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
         >>> terminator(AtPos(4), 4).parse("end")  # At column 0
         EndOfBlock()
     """
-    raise NotImplementedError("terminator() not yet implemented")
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        # At EOF, block ends - consume nothing (at end)
+        if index >= len(tokens):
+            return Result.success(index, EndOfBlock())
+
+        token = tokens[index]
+
+        # Check for semicolon - consume it and continue with AfterPos
+        if isinstance(token, OperatorToken) and token.operator == ";":
+            match constraint:
+                case AnyIndent():
+                    return Result.success(index + 1, AnyIndent())
+                case AtPos(c):
+                    return Result.success(index + 1, AfterPos(c))
+                case AfterPos(c):
+                    return Result.success(index + 1, AfterPos(c))
+                case EndOfBlock():
+                    return Result.success(index + 1, EndOfBlock())
+
+        # Check for close brace - don't consume, just return EndOfBlock
+        # (the caller will consume the brace if needed)
+        if isinstance(token, DelimiterToken) and token.delimiter == "}":
+            return Result.success(index, EndOfBlock())
+
+        # Check column position
+        col = token.column
+
+        # If column <= start_col, block ends
+        if col <= start_col:
+            return Result.success(index, EndOfBlock())
+
+        # Otherwise, continue with same constraint
+        return Result.success(index, constraint)
+
+    return parser
 
 
 def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> P[None]:
@@ -278,7 +415,21 @@ def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> P[
         >>> must_continue(AtPos(4), "binding").parse("x")
         None  # Success, we're still in block
     """
-    raise NotImplementedError("must_continue() not yet implemented")
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        match constraint:
+            case EndOfBlock():
+                if expected:
+                    msg = f"Unexpected end of expression (expected '{expected}')"
+                else:
+                    msg = "Unexpected end of expression"
+                return Result.failure(index, msg)
+            case _:
+                # AtPos, AfterPos, AnyIndent all succeed
+                return Result.success(index, None)
+
+    return parser
 
 
 # =============================================================================
