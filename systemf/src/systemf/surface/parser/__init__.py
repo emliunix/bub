@@ -180,8 +180,11 @@ def parse_program(source: str, filename: str = "<stdin>") -> list:
         ParseError: If parsing fails
     """
     tokens = list(lex(source, filename))
-    parser = Parser(tokens)
-    return parser.parse()
+    try:
+        result = top_decl_parser().parse(tokens)
+        return result if isinstance(result, list) else [result]
+    except Exception as e:
+        raise _extract_parse_error(e, tokens)
 
 
 class ParseError(Exception):
@@ -193,6 +196,19 @@ class ParseError(Exception):
         loc_str = f"{location}" if location else "unknown location"
         super().__init__(f"{loc_str}: {message}")
         self.location = location
+
+
+def _extract_parse_error(e: Exception, tokens: list) -> ParseError:
+    """Extract location from exception and create ParseError.
+
+    Properly bounds checks before accessing token list.
+    """
+    loc = None
+    # Safely get index from exception
+    idx = getattr(e, "index", None)
+    if idx is not None and isinstance(idx, int) and 0 <= idx < len(tokens):
+        loc = getattr(tokens[idx], "location", None)
+    return ParseError(str(e), loc)
 
 
 class Parser:
@@ -222,20 +238,11 @@ class Parser:
         Raises:
             ParseError: If parsing fails
         """
-        from systemf.surface.types import SurfaceDeclaration
-
         try:
             result = top_decl_parser().parse(self.tokens)
-            # Ensure we return a list
-            if isinstance(result, list):
-                return result
-            return [result]
+            return result if isinstance(result, list) else [result]
         except Exception as e:
-            # Extract location from error if possible
-            loc = None
-            if hasattr(e, "index") and e.index < len(self.tokens):
-                loc = getattr(self.tokens[e.index], "location", None)
-            raise ParseError(str(e), loc)
+            raise _extract_parse_error(e, self.tokens)
 
     def parse_term(self):
         """Parse a single term.
@@ -249,10 +256,7 @@ class Parser:
         try:
             return (expr_parser(AnyIndent()) << eof).parse(self.tokens)
         except Exception as e:
-            loc = None
-            if hasattr(e, "index") and e.index < len(self.tokens):
-                loc = getattr(self.tokens[e.index], "location", None)
-            raise ParseError(str(e), loc)
+            raise _extract_parse_error(e, self.tokens)
 
     def parse_type(self):
         """Parse a single type.
@@ -266,34 +270,7 @@ class Parser:
         try:
             return (type_parser() << eof).parse(self.tokens)
         except Exception as e:
-            loc = None
-            if hasattr(e, "index") and e.index < len(self.tokens):
-                loc = getattr(self.tokens[e.index], "location", None)
-            raise ParseError(str(e), loc)
-
-    def parse_program(self):
-        """Parse multiple declarations from the token stream.
-
-        Returns:
-            List of parsed surface declarations
-
-        Raises:
-            ParseError: If parsing fails
-        """
-        from systemf.surface.types import SurfaceDeclaration
-
-        try:
-            result = top_decl_parser().parse(self.tokens)
-            # Ensure we return a list
-            if isinstance(result, list):
-                return result
-            return [result]
-        except Exception as e:
-            # Extract location from error if possible
-            loc = None
-            if hasattr(e, "index") and e.index < len(self.tokens):
-                loc = getattr(self.tokens[e.index], "location", None)
-            raise ParseError(str(e), loc)
+            raise _extract_parse_error(e, self.tokens)
 
 
 __all__ = [

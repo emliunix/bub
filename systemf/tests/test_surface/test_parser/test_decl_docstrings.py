@@ -216,7 +216,7 @@ two : Int = 2"""
         from systemf.surface.parser import Parser
 
         parser = Parser(tokens)
-        decls = parser.parse_program()
+        decls = parser.parse()
 
         assert len(decls) == 2
         assert decls[0].docstring == "First declaration"
