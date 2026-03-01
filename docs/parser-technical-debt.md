@@ -11,34 +11,31 @@
 ### Recently Fixed
 - ✅ **Removed dead pragma token patterns** - `PRAGMA_START`, `PRAGMA_END`, `PRAGMA_CONTENT` removed from `parser.py` (lines 147-151)
 - ✅ **Refactored docstring processing** - `process_comments()` now uses nested while loop with Idris2-style whitespace stripping
+- ✅ **Pragma parsing** - `top_decl_parser()` now properly accumulates pragmas before declarations
+- ✅ **Multiple declarations** - Parser now handles multiple declarations in one file correctly
+- ✅ **Constructor termination** - Fixed data parser to stop at `|` separator and `ident :` patterns
 
-### Still Broken / Needs Work
-- 🔴 **Pragma parsing in declaration parser** - `top_decl_parser()` doesn't properly handle `PragmaToken` at declaration start (21 tests failing)
-- 🔴 **Multiple declarations** - Parser can't handle multiple declarations in one file (stops after first)
-- 🔴 **Complex term bodies** - Parser fails on case expressions in term declarations
+### Still Broken / Needs Work (Feature Goals, Not Bugs)
+- 🔵 **Type abstraction syntax** - `Λa. expr` not yet supported (feature goal)
+- 🔵 **Multi-argument forall** - `forall a b.` space-separated syntax (feature goal)
 
 ### Remaining Technical Debt (Priority Order)
 
-#### Critical (Blocking)
-1. **Pragma accumulation in declaration parser** - Need to update `top_decl_parser()` to accumulate pragmas like docstrings
-2. **Term parser EOF handling** - Case expressions not fully consumed, causes parse errors
-
 #### High Priority
-3. **Remove dead token patterns from lexer** - `PRAGMA_START`/`PRAGMA_END` regex still defined but never matched (line 52-53)
-4. **Document manual token inspection** - `top_decl_parser()` uses manual scanning instead of parsy combinators
-5. **Fix constructor termination heuristic** - Data parser uses fragile `ident :` pattern to detect end
+1. **Remove dead token patterns from lexer** - `PRAGMA_START`/`PRAGMA_END` regex still defined but never matched (line 52-53)
+2. **Document manual token inspection** - `top_decl_parser()` uses manual scanning instead of parsy combinators
 
 #### Medium Priority
-6. **Create token type constants** - Still using string literals (`"DOCSTRING_PRECEDING"`)
-7. **Extract mapping dictionaries** - `op_map`/`delim_map` recreated fresh every call
-8. **Simplify Parser class** - "Old API" compatibility wrapper in `__init__.py`
-9. **Add bounds checking** - Relies on `hasattr(e, "index")` parsy internals
+3. **Create token type constants** - Still using string literals (`"DOCSTRING_PRECEDING"`)
+4. **Extract mapping dictionaries** - `op_map`/`delim_map` recreated fresh every call
+5. **Simplify Parser class** - "Old API" compatibility wrapper in `__init__.py`
+6. **Add bounds checking** - Relies on `hasattr(e, "index")` parsy internals
 
 #### Low Priority
-10. **Unify parsing strategies** - Consider using parsy combinators in `top_decl_parser()`
-11. **Refactor _raw() pattern** - Decide if EOF handling variants are needed
-12. **Unicode in regex** - Replace `\uXXXX` escapes with literal characters
-13. **Functional state** - Mutable closure state in parser
+7. **Unify parsing strategies** - Consider using parsy combinators in `top_decl_parser()`
+8. **Refactor _raw() pattern** - Decide if EOF handling variants are needed
+9. **Unicode in regex** - Replace `\uXXXX` escapes with literal characters
+10. **Functional state** - Mutable closure state in parser
 
 ---
 
