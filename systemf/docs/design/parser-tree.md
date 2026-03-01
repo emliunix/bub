@@ -12,8 +12,13 @@ Program (Top Level)
 │
 ├── Declarations
 │   ├── data_decl: data X = A | B
+│   │   └── NOT layout-sensitive (| can be at any column)
+│   │
 │   ├── let_decl: let ... in ...
+│   │   └── block(let_binding)  ← layout here
+│   │
 │   └── top_decl: general top-level
+│       └── Used in: block(top_decl) for where clauses
 │
 └── Expressions (expr_parser)
     ├── Atoms (no layout)
@@ -132,6 +137,7 @@ must_continue(constraint, expected?) → Parser[None]
 
 ## Parser Dependencies
 
+### Expression Dependencies
 ```
 expr_parser(constraint)
   ├─ Uses: atom, app, op_expr
@@ -149,6 +155,49 @@ let_expr(constraint)
   ├─ Uses: must_continue(constraint, "in")
   └─ Uses: expr_parser(constraint) for body
 ```
+
+### Declaration Dependencies
+```
+program_parser
+  └─ Uses: block(top_decl) for top-level sequence
+
+top_decl(constraint)
+  ├─ Uses: data_decl()  ← no constraint needed
+  ├─ Uses: let_decl(constraint)  ← needs constraint for body
+  └─ Can appear in: block(top_decl) for where clauses
+
+let_decl(constraint)
+  ├─ Uses: block(let_binding)  ← layout for bindings
+  └─ Uses: expr_parser(constraint) for body
+
+# Note: let_decl is BOTH a declaration AND can appear in expressions!
+```
+
+### The block(topDecl) Pattern
+
+**Idris2 reference** (`Parser.idr` line ~150):
+```idris
+whereBlock : OriginDesc -> Int -> Rule (List PDecl)
+whereBlock fname col
+    = do decoratedKeyword fname "where"
+         ds <- blockAfter col (topDecl fname)
+         pure (collectDefs ds)
+```
+
+**System F equivalent:**
+```python
+def where_block(min_col: int) -> Parser[List[Declaration]]:
+    yield keyword("where")
+    # blockAfter ensures declarations are indented past 'where'
+    decls = yield block_after(min_col, top_decl)
+    return decls
+```
+
+**Key insight**: `block(top_decl)` parses a sequence where:
+1. First declaration sets the reference column
+2. Subsequent declarations must match that column
+3. Block ends on dedent or EOF
+4. Each declaration is parsed with the layout constraint
 
 ## Key Design Decisions
 
@@ -174,6 +223,37 @@ bindings = yield block_entries(AtPos(col), binding_parser)
 def block(item):
     return (brace_block(item) | layout_block(item))
 ```
+
+### 5. Block with Declarations Pattern (Idris2 Style)
+
+From Idris2's `whereBlock`:
+```idris
+whereBlock : OriginDesc -> Int -> Rule (List PDecl)
+whereBlock fname col
+    = do decoratedKeyword fname "where"
+         ds <- blockAfter col (topDecl fname)
+         pure (collectDefs ds)
+```
+
+**Key insight**: `block(topDecl(...))` is the pattern for parsing a sequence of declarations:
+- `block()` captures the column of the first declaration
+- Each `topDecl` is parsed with the constraint
+- Terminator checks for layout end between declarations
+
+**In System F:**
+```python
+def where_block(constraint: ValidIndent) -> Parser[List[Decl]]:
+    # "where" keyword already parsed
+    col = yield column()  # column of first declaration
+    # Use AfterPos constraint since declarations can be at or after 'where' col
+    decls = yield block_entries(AfterPos(col), top_decl)
+    return decls
+```
+
+This pattern appears in:
+- `where` clauses: `f x = ... where { declarations }`
+- Top-level modules: sequence of declarations
+- Local definitions in let/where
 
 ## Testing Strategy
 
