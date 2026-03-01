@@ -23,14 +23,10 @@
 
 ### Remaining Technical Debt (Priority Order)
 
-#### High Priority
-1. **Document manual token inspection** - `top_decl_parser()` uses manual scanning instead of parsy combinators. Explain why: backtracking complexity, lookahead ambiguity, metadata attachment requires stateful accumulation that doesn't fit parsy's pure functional model
-
 #### Medium Priority
-2. **Create token type constants** - Still using string literals (`"DOCSTRING_PRECEDING"`)
-3. **Extract mapping dictionaries** - `op_map`/`delim_map` recreated fresh every call
-4. **Simplify Parser class** - "Old API" compatibility wrapper in `__init__.py`
-5. **Add bounds checking** - Relies on `hasattr(e, "index")` parsy internals
+1. **Extract mapping dictionaries** - `op_map`/`delim_map` recreated fresh every call to `_create_token()` in lexer.py
+2. **Simplify Parser class** - "Old API" compatibility wrapper in `__init__.py` needs review
+3. **Add bounds checking** - Relies on `hasattr(e, "index")` parsy internals for error location extraction
 
 #### Low Priority
 7. **Unify parsing strategies** - Consider using parsy combinators in `top_decl_parser()`
@@ -145,8 +141,8 @@ r"-\u003e|\u2192"  # \u2192 is →
 
 **Risk:** Patterns hard to read, maintain
 
-#### 5. String Literal Token Types
-**Location:** `lexer.py` lines 358, 361, 366, 369-444
+#### 5. String Literal Token Types ✅ FIXED
+**Location:** `lexer.py`, `declarations.py`, `expressions.py`
 
 **Problem:** Token types compared as string literals:
 ```python
@@ -154,7 +150,19 @@ if token_type == "DOCSTRING_PRECEDING":
 elif token_type == "DOCSTRING_INLINE":
 ```
 
-**Risk:** Typos won't be caught until runtime
+**Fix:** Added `DocstringType` and `TokenType` constant classes in `types.py`:
+```python
+class DocstringType:
+    PRECEDING = "DOCSTRING_PRECEDING"
+    INLINE = "DOCSTRING_INLINE"
+
+class TokenType:
+    PRAGMA = "PRAGMA"
+    LAMBDA = "LAMBDA"
+    TYPELAMBDA = "TYPELAMBDA"
+```
+
+**Status:** All string literals replaced with constants. Type safety improved, IDE autocompletion works.
 
 #### 6. Recreated Mapping Dictionaries
 **Location:** `lexer.py` lines 409-432, 435-443
@@ -184,18 +192,48 @@ string_value = value[1:-1]  # Remove quotes
 #### 1. Manual Token Inspection
 **Location:** `declarations.py` lines 560-588
 
-**Problem:** Bypasses parsy's `alt()` combinator:
+**Problem:** `top_decl_parser()` bypasses parsy's `alt()` combinator and uses manual token scanning:
 ```python
-if isinstance(token, KeywordToken):
-    if token.keyword == "data": ...
-    elif token.keyword == "prim_type": ...
-elif isinstance(token, IdentifierToken):
-    # try term parser
+while i < len(tokens):
+    token = tokens[i]
+
+    # Accumulate docstrings BEFORE knowing declaration type
+    if isinstance(token, DocstringToken):
+        current_docstrings.append(token.content)
+        i += 1
+        continue
+
+    # Accumulate pragmas BEFORE knowing declaration type
+    if isinstance(token, PragmaToken):
+        current_pragmas[token.key] = token.value
+        i += 1
+        continue
+
+    # Try to parse declaration based on token type
+    if isinstance(token, KeywordToken):
+        if token.keyword == "data": ...
+        elif token.keyword == "prim_type": ...
+    elif isinstance(token, IdentifierToken):
+        result = term_parser()(tokens, i)
 ```
 
-**Why:** Metadata must be accumulated BEFORE knowing declaration type
+**Why this can't use parsy combinators:**
 
-**Risk:** Less declarative, harder to extend
+1. **Stateful accumulation across declarations**: Docstrings and pragmas appear BEFORE declarations but must be attached TO them. This requires maintaining state (`current_docstrings`, `current_pragmas`) across multiple parsy parser invocations, which doesn't fit parsy's pure functional model.
+
+2. **Backtracking complexity**: If we used parsy's `optional()` or `many()` to parse leading docstrings, we'd need to backtrack on failure. But docstring accumulation is destructive - we've already consumed the tokens.
+
+3. **Lookahead ambiguity**: We need to peek ahead to see if there's a docstring before parsing a declaration, but parsy's lookahead doesn't handle "zero or more" metadata tokens well when combined with the actual declaration parsing.
+
+4. **Multiple declaration types with shared metadata**: We have 4 declaration parsers (data, term, prim_type, prim_op) that all need the same accumulated metadata. Using parsy combinators would require threading this state through each parser variant.
+
+**Why the manual approach is actually better here:**
+- Clear state machine logic that's easy to follow
+- Explicit control over when metadata is reset
+- Easier to debug (can add print statements in the loop)
+- No hidden parsy magic with backtracking
+
+**Trade-off:** Less declarative syntax, but more control and easier to understand for this specific use case.
 
 #### 2. Parser Triplication Pattern
 **Location:** `declarations.py` throughout
