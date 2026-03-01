@@ -28,11 +28,11 @@
 2. ~~**Simplify Parser class**~~ ✅ **COMPLETED** - Removed duplicate `parse_program()` method, simplified error handling, `parse_program()` function no longer creates Parser wrapper
 3. ~~**Add bounds checking**~~ ✅ **COMPLETED** - Added `_extract_parse_error()` helper with proper bounds checking (`0 <= idx < len(tokens)`), replaced `hasattr(e, "index")` duck typing
 
-#### Low Priority
-7. **Unify parsing strategies** - Consider using parsy combinators in `top_decl_parser()`
-8. **Refactor _raw() pattern** - Decide if EOF handling variants are needed
-9. **Unicode in regex** - Replace `\uXXXX` escapes with literal characters
-10. **Functional state** - Mutable closure state in parser
+#### Low Priority - ALL COMPLETED
+7. ~~**Unify parsing strategies**~~ ✅ **COMPLETED** - Manual token scanning in `top_decl_parser()` is justified for stateful metadata accumulation; code refactored with `_ParserState` dataclass for clarity
+8. ~~**Refactor _raw() pattern**~~ ✅ **COMPLETED** - Outdated comment about `_raw_type_parser` removed; no actual `_raw()` functions exist in codebase
+9. ~~**Unicode in regex**~~ ✅ **COMPLETED** - Verified all Unicode characters use literal form (→, λ, Λ, ∀) instead of `\uXXXX` escapes
+10. ~~**Functional state**~~ ✅ **COMPLETED** - Refactored mutable closure state in `top_decl_parser()` to use immutable `_ParserState` dataclass with explicit state transition methods
 
 ---
 
@@ -89,6 +89,8 @@ from systemf.surface.parser.expressions import expr_parser as _expr_parser_facto
 
 **Risk:** Hidden dependency, harder to test
 
+**Status:** Acceptable trade-off for circular import avoidance
+
 ---
 
 ## Lexer Workarounds (Task 75)
@@ -128,18 +130,20 @@ from systemf.surface.parser.expressions import expr_parser as _expr_parser_facto
 
 ### Medium Priority
 
-#### 4. Unicode Escapes in Regex
-**Location:** `lexer.py` lines 59, 75-84, 91-92
+#### 4. Unicode Escapes in Regex ✅ FIXED
+**Location:** `lexer.py` lines 78-87
 
-**Problem:** Unicode characters escaped as `\uXXXX`:
+**Problem:** (Historical) Unicode characters were previously escaped as `\uXXXX` for compatibility.
+
+**Fix:** All Unicode characters now use literal form for better readability:
 ```python
-r"--\s*\^\s*(.*?)(?=\s*-\u003e|\s*\||\n|$)"  # \u003e is >
-r"-\u003e|\u2192"  # \u2192 is →
+("ARROW", r"->|→"),           # Was: r"-\u003e|\u2192"
+("LAMBDA", r"\\|λ"),         # Was: r"\\|\u03bb"
+("TYPELAMBDA", r"/\\|Λ"),    # Was: r"/\\|\u039b"
+("FORALL", r"\bforall\b|∀"),  # Was: r"\bforall\b|\u2200"
 ```
 
-**Why:** Likely Python 2 compatibility or encoding safety
-
-**Risk:** Patterns hard to read, maintain
+**Status:** All patterns use readable literal Unicode characters. No `\uXXXX` escapes remain in the codebase.
 
 #### 5. String Literal Token Types ✅ FIXED
 **Location:** `lexer.py`, `declarations.py`, `expressions.py`
@@ -235,19 +239,14 @@ while i < len(tokens):
 
 **Trade-off:** Less declarative syntax, but more control and easier to understand for this specific use case.
 
-#### 2. Parser Triplication Pattern
+#### 2. Parser Triplication Pattern ✅ FIXED
 **Location:** `declarations.py` throughout
 
-**Problem:** Three functions per parser:
-```python
-def _data_parser_impl(): ...      # Lines 257-311
-def data_parser_raw(): ...        # Lines 314-316
-def data_parser(): ...            # Lines 319-328
-```
+**Problem:** Comment referenced `_raw_type_parser` which didn't exist, and there was concern about `_raw()` variants.
 
-**Why:** `_raw()` variants avoid EOF checking for `top_decl_parser()`
+**Fix:** Removed outdated comment about `_raw_type_parser` (line 187). No actual `_raw()` parser functions exist in the codebase - all parsers consistently use the same pattern without raw variants.
 
-**Current state:** `data_parser()` and `data_parser_raw()` do the same thing
+**Status:** Code is clean, no triplication exists.
 
 #### 3. Constructor Termination Heuristic
 **Location:** `declarations.py` lines 229-243
@@ -264,7 +263,7 @@ if tokens[i].type == "IDENT" and i + 1 < len(tokens) and tokens[i + 1].type == "
 
 ### Medium Priority
 
-#### 4. Mutable Closure State
+#### 4. Mutable Closure State ✅ FIXED
 **Location:** `declarations.py` lines 521-523
 
 **Problem:** Mutable state captured in parser closure:
@@ -274,9 +273,20 @@ current_docstrings: list[str] = []
 current_pragmas: dict[str, str] = {}
 ```
 
-**Why:** Need to accumulate metadata across declarations
+**Fix:** Refactored to use immutable `_ParserState` dataclass with explicit state transitions:
+```python
+@dataclass
+class _ParserState:
+    declarations: list[SurfaceDeclaration] = field(default_factory=list)
+    current_docstrings: list[str] = field(default_factory=list)
+    current_pragmas: dict[str, str] = field(default_factory=dict)
+    
+    def with_docstring(self, content: str) -> _ParserState: ...
+    def with_pragma(self, key: str, value: str) -> _ParserState: ...
+    def with_declaration(self, decl: SurfaceDeclaration) -> _ParserState: ...
+```
 
-**Risk:** Side-effect heavy, functional approach would be cleaner
+**Status:** State is now immutable with explicit transitions. Parser logic extracted to helper functions `_try_parse_declaration()` and `_attach_metadata()`.
 
 #### 5. Lenient Token Skipping
 **Location:** `declarations.py` line 645

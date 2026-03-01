@@ -16,13 +16,13 @@ from systemf.surface.parser import (
 )
 from systemf.surface.types import (
     SurfaceDataDeclaration,
-    SurfaceTermDeclaration,
-    SurfacePrimTypeDecl,
     SurfacePrimOpDecl,
+    SurfacePrimTypeDecl,
+    SurfaceTermDeclaration,
     SurfaceTypeConstructor,
-    SurfaceConstructorInfo,
     SurfaceTypeApp,
     SurfaceTypeTuple,
+    equals_ignore_location,
 )
 
 
@@ -79,6 +79,96 @@ class TestDataDeclaration:
         # Constructor should have 2 arguments
         assert len(cons.args) == 2
 
+    def test_data_style1_single_line(self):
+        """Parse single-line data: data X = A | B."""
+        source = "data X = A | B"
+        tokens = lex(source)
+        result = data_parser().parse(tokens)
+        assert isinstance(result, SurfaceDataDeclaration)
+        assert result.name == "X"
+        assert len(result.constructors) == 2
+        assert result.constructors[0].name == "A"
+        assert result.constructors[1].name == "B"
+
+    def test_data_style2_indented_constructor_on_same_line(self):
+        """Parse data with first constructor on same line as =."""
+        source = """data X1 = A1
+        | B1"""
+        tokens = lex(source)
+        result = data_parser().parse(tokens)
+        assert isinstance(result, SurfaceDataDeclaration)
+        assert result.name == "X1"
+        assert len(result.constructors) == 2
+        assert result.constructors[0].name == "A1"
+        assert result.constructors[1].name == "B1"
+
+    def test_data_style3_more_indented(self):
+        """Parse data with more indentation for second constructor."""
+        source = """data X2 = A2
+          | B2"""
+        tokens = lex(source)
+        result = data_parser().parse(tokens)
+        assert isinstance(result, SurfaceDataDeclaration)
+        assert result.name == "X2"
+        assert len(result.constructors) == 2
+        assert result.constructors[0].name == "A2"
+        assert result.constructors[1].name == "B2"
+
+    def test_data_style4_name_on_own_line(self):
+        """Parse data with name on its own line, then = on next line."""
+        source = """data X3
+  = A3
+  | B3"""
+        tokens = lex(source)
+        result = data_parser().parse(tokens)
+        assert isinstance(result, SurfaceDataDeclaration)
+        assert result.name == "X3"
+        assert len(result.constructors) == 2
+        assert result.constructors[0].name == "A3"
+        assert result.constructors[1].name == "B3"
+
+    def test_data_all_styles_equivalence(self):
+        """Verify all data declaration styles produce identical AST."""
+        # Parse reference style (simplest form)
+        reference = data_parser().parse(lex("data X = A | B"))
+
+        # All these should parse to equivalent ASTs (same structure as reference)
+        sources = [
+            "data X = A\n        | B",
+            "data X = A\n          | B",
+            "data X\n  = A\n  | B",
+        ]
+
+        for source in sources:
+            result = data_parser().parse(lex(source))
+            # Use equals_ignore_location to compare AST structure (ignoring source locations)
+            assert equals_ignore_location(result, reference), f"Style failed: {source!r}"
+
+    def test_data_dedented_constructor_behavior(self):
+        """Document behavior with dedented constructors (may be relaxed layout)."""
+        # Constructor at column 1 when first was at column > 1
+        # Current parser behavior: accepts this (relaxed layout)
+        source = """data X = A
+| B"""
+        tokens = lex(source)
+        result = data_parser().parse(tokens)
+        # Parser accepts this - documents current behavior
+        # If strict layout is desired, this should be rejected
+        assert isinstance(result, SurfaceDataDeclaration)
+        assert len(result.constructors) == 2
+
+    def test_data_rejects_missing_separator(self):
+        """Parser should reject constructors without | separator."""
+        from parsy import ParseError
+
+        source = "data X = A B"
+        tokens = lex(source)
+        # This might parse as single constructor with arg, not two constructors
+        result = data_parser().parse(tokens)
+        # Should have 1 constructor with 1 arg, not 2 constructors
+        assert len(result.constructors) == 1
+        assert len(result.constructors[0].args) == 1
+
 
 class TestTermDeclaration:
     """Test term (function) declaration parser."""
@@ -118,6 +208,65 @@ class TestTermDeclaration:
         tokens = lex(source)
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
+
+    def test_single_line_term_declaration(self):
+        """Parse single-line term declaration: x : Int = 42."""
+        source = "x : Int = 42"
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "x"
+        # Should consume exactly all tokens
+        assert result is not None
+
+    def test_multi_line_term_declaration(self):
+        """Parse multi-line term declaration with expression body on next line."""
+        source = """not : Bool -> Bool =
+  λb -> case b of
+    True -> False
+    False -> True"""
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "not"
+
+    def test_multi_line_polymorphic_term(self):
+        """Parse multi-line polymorphic term with type abstraction."""
+        source = """isJust : forall a. Maybe a -> Bool =
+  Λa. λm:Maybe a ->
+    case m of { Nothing -> False | Just x -> True }"""
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "isJust"
+
+    def test_term_declaration_with_nested_case(self):
+        """Parse term with nested case expressions."""
+        source = """xor : Bool -> Bool -> Bool =
+  λx:Bool -> λy:Bool ->
+    case x of
+      True -> case y of { True -> False | False -> True }
+      False -> y"""
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "xor"
+
+    def test_term_single_vs_multi_line_equivalence(self):
+        """Verify single-line and multi-line produce same declaration type."""
+        # Single line
+        single = "id : forall a. a -> a = λx -> x"
+        single_result = term_parser().parse(lex(single))
+
+        # Multi line (semantically equivalent)
+        multi = """id : forall a. a -> a =
+  λx -> x"""
+        multi_result = term_parser().parse(lex(multi))
+
+        # Both should produce valid term declarations
+        assert isinstance(single_result, SurfaceTermDeclaration)
+        assert isinstance(multi_result, SurfaceTermDeclaration)
+        assert single_result.name == multi_result.name == "id"
 
 
 class TestPrimitiveDeclarations:

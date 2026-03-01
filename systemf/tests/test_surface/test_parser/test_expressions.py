@@ -216,6 +216,60 @@ class TestCaseParser:
         assert isinstance(result.branches[0].pattern, SurfacePatternTuple)
         assert len(result.branches[0].pattern.elements) == 3
 
+    def test_case_with_braces(self):
+        """Parse case with explicit braces: case x of { True → 1 | False → 0 }."""
+        source = "case x of { True → 1 | False → 0 }"
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert len(result.branches) == 2
+        assert result.branches[0].pattern.constructor == "True"
+        assert result.branches[1].pattern.constructor == "False"
+
+    def test_case_with_braces_multiple_patterns(self):
+        """Parse case with braces and multiple patterns."""
+        source = "case mx of { Nothing → 0 | Just x → x }"
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert len(result.branches) == 2
+
+    def test_nested_case_with_braces(self):
+        """Parse nested case with outer layout and inner braces."""
+        source = """case x of
+  True → case y of { Just z → z | Nothing → 0 }
+  False → 1"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert len(result.branches) == 2
+
+    def test_case_braces_vs_layout_equivalence(self):
+        """Verify case produces same structure with braces or layout."""
+        # Layout version
+        layout_source = """case x of
+  True → 1
+  False → 0"""
+        layout_tokens = lex(layout_source)
+        layout_result = expr_parser(AnyIndent()).parse(layout_tokens)
+
+        # Braces version
+        braces_source = "case x of { True → 1 | False → 0 }"
+        braces_tokens = lex(braces_source)
+        braces_result = expr_parser(AnyIndent()).parse(braces_tokens)
+
+        # Both should produce 2 branches
+        assert len(layout_result.branches) == len(braces_result.branches) == 2
+        # Branch patterns should be equivalent (check constructor name)
+        assert (
+            layout_result.branches[0].pattern.constructor
+            == braces_result.branches[0].pattern.constructor
+        )
+        assert (
+            layout_result.branches[1].pattern.constructor
+            == braces_result.branches[1].pattern.constructor
+        )
+
 
 class TestLetParser:
     """Test let expression parser."""

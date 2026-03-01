@@ -17,12 +17,13 @@ from typing import Optional, TypeVar
 import parsy
 from parsy import Parser as P, Result, generate, alt, fail, seq
 
-from systemf.surface.parser.type_parser import type_atom_parser, type_parser
+from systemf.surface.parser.type_parser import type_app_parser, type_atom_parser, type_parser
 from systemf.surface.parser.helpers import (
     AfterPos,
     AnyIndent,
     AtPos,
     ValidIndent,
+    block,
     block_entries,
     check_valid,
     column,
@@ -697,8 +698,8 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
         for var_token in var_tokens:
             var_name = var_token.value
             # Optional type annotation for this parameter
-            # Use type_atom_parser to avoid consuming '->' as part of a type arrow
-            var_type = yield (match_symbol(":") >> type_atom_parser()).optional()
+            # Use type_app_parser to handle type applications like "Maybe a"
+            var_type = yield (match_symbol(":") >> type_app_parser).optional()
             annotated_params.append((var_name, var_type))
 
         # Optional parameter docstring (-- ^ style) - applies to last param
@@ -925,9 +926,8 @@ def case_parser(constraint: ValidIndent) -> P[SurfaceCase]:
         scrutinee = yield expr_parser(constraint)
         yield match_keyword("of")
 
-        # Enter layout mode: capture column of first branch token
-        col = yield column()
-        branches = yield block_entries(AtPos(col), case_alt)
+        # Parse branches (supports both explicit braces { ... } and layout indentation)
+        branches = yield block(case_alt)
 
         return SurfaceCase(scrutinee, branches, loc)
 

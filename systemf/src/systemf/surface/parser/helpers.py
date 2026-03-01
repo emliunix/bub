@@ -360,6 +360,19 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
                 case EndOfBlock():
                     return Result.success(index + 1, EndOfBlock())
 
+        # Check for bar (|) - case branch separator in braces mode
+        if token.type == "BAR":
+            # Consume the bar and continue with same constraint
+            match constraint:
+                case AnyIndent():
+                    return Result.success(index + 1, AnyIndent())
+                case AtPos(c):
+                    return Result.success(index + 1, AtPos(c))
+                case AfterPos(c):
+                    return Result.success(index + 1, AfterPos(c))
+                case EndOfBlock():
+                    return Result.success(index + 1, EndOfBlock())
+
         # Check for close brace - don't consume, just return EndOfBlock
         # (the caller will consume the brace if needed)
         if isinstance(token, DelimiterToken) and token.delimiter == "}":

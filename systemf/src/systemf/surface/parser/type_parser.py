@@ -24,6 +24,7 @@ from systemf.surface.parser.types import (
     DelimiterToken,
     IdentifierToken,
     ConstructorToken,
+    ForallToken,
 )
 from systemf.surface.types import (
     SurfaceType,
@@ -38,7 +39,7 @@ T = TypeVar("T")
 
 
 def match_token(token_type: str) -> P[TokenBase]:
-    """Match a token of the given type.
+    """Match a token of the given type by string (deprecated, use typed version).
 
     Args:
         token_type: The token type to match (e.g., "IDENT", "NUMBER")
@@ -55,6 +56,44 @@ def match_token(token_type: str) -> P[TokenBase]:
         if token.type == token_type:
             return Result.success(index + 1, token)
         return Result.failure(index, f"expected {token_type}, got {token.type}")
+
+    return parser
+
+
+def match_arrow() -> P[OperatorToken]:
+    """Match an arrow token (-> or →).
+
+    Returns:
+        Parser that returns the matched arrow operator token
+    """
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        if index >= len(tokens):
+            return Result.failure(index, "expected arrow")
+        token = tokens[index]
+        if isinstance(token, OperatorToken) and token.op_type == "ARROW":
+            return Result.success(index + 1, token)
+        return Result.failure(index, f"expected arrow, got {token.type}")
+
+    return parser
+
+
+def match_forall() -> P[ForallToken]:
+    """Match a forall token (forall keyword or ∀).
+
+    Returns:
+        Parser that returns the matched forall token
+    """
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        if index >= len(tokens):
+            return Result.failure(index, "expected forall")
+        token = tokens[index]
+        if isinstance(token, ForallToken):
+            return Result.success(index + 1, token)
+        return Result.failure(index, f"expected forall, got {token.type}")
 
     return parser
 
@@ -256,8 +295,8 @@ def type_arrow_parser() -> P[SurfaceType]:
     left = yield type_app_parser
     loc = left.location
 
-    # Check for arrow
-    arrow = yield match_symbol("->").optional()
+    # Check for arrow (accepts both ASCII -> and Unicode →)
+    arrow = yield match_arrow().optional()
     if arrow is None:
         return left
 
@@ -278,8 +317,8 @@ def type_forall_parser() -> P[SurfaceType]:
     """
     from systemf.surface.types import SurfaceTypeForall
 
-    # Match "forall" keyword
-    forall_token = yield match_keyword("forall")
+    # Match forall keyword (forall or ∀)
+    forall_token = yield match_forall()
     loc = forall_token.location
 
     # Parse one or more type variable names

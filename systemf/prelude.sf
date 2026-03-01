@@ -50,7 +50,9 @@ or : Bool → Bool → Bool = λx:Bool → λy:Bool →
 
 xor : Bool → Bool → Bool = λx:Bool → λy:Bool →
   case x of
-    True → case y of { True → False | False → True }
+    True → case y of
+      True → False
+      False → True
     False → y
 
 -- ============================================================================

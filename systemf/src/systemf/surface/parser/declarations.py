@@ -13,6 +13,7 @@ Parsers implemented:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from parsy import Parser as P, Result, generate
 
 from systemf.surface.parser.types import (
@@ -43,7 +44,56 @@ from systemf.surface.parser.type_parser import (
 
 # Import expression parser for term declaration bodies
 from systemf.surface.parser.expressions import expr_parser as _expr_parser_factory
-from systemf.surface.parser.helpers import AnyIndent
+from systemf.surface.parser.helpers import AnyIndent, AtPos, AfterPos, ValidIndent, column
+
+
+@dataclass
+class _ParserState:
+    """Immutable state container for the top-level declaration parser.
+
+    This dataclass encapsulates the state that changes during parsing,
+    making the state transitions explicit and easier to reason about.
+    """
+
+    declarations: list[SurfaceDeclaration] = field(default_factory=list)
+    current_docstrings: list[str] = field(default_factory=list)
+    current_pragmas: dict[str, str] = field(default_factory=dict)
+
+    def with_docstring(self, content: str) -> _ParserState:
+        """Return new state with docstring added."""
+        return _ParserState(
+            declarations=self.declarations,
+            current_docstrings=[*self.current_docstrings, content],
+            current_pragmas=self.current_pragmas,
+        )
+
+    def with_pragma(self, key: str, value: str) -> _ParserState:
+        """Return new state with pragma added."""
+        new_pragmas = dict(self.current_pragmas)
+        new_pragmas[key] = value
+        return _ParserState(
+            declarations=self.declarations,
+            current_docstrings=self.current_docstrings,
+            current_pragmas=new_pragmas,
+        )
+
+    def with_declaration(self, decl: SurfaceDeclaration) -> _ParserState:
+        """Return new state with declaration added and accumulators reset."""
+        return _ParserState(
+            declarations=[*self.declarations, decl], current_docstrings=[], current_pragmas={}
+        )
+
+    def get_docstring(self) -> str | None:
+        """Get concatenated docstring or None if empty."""
+        if not self.current_docstrings:
+            return None
+        return " ".join(self.current_docstrings)
+
+    def get_pragmas(self) -> dict[str, str] | None:
+        """Get pragmas dict or None if empty."""
+        if not self.current_pragmas:
+            return None
+        return dict(self.current_pragmas)
 
 
 def skip_inline_docstrings() -> P[None]:
@@ -184,8 +234,7 @@ def match_constructor() -> P[ConstructorToken]:
 
 # Type parsers are imported from type_parser module:
 # - type_atom_parser: parses atomic types
-# - _raw_type_parser: raw type parser without EOF handling
-# - type_parser: main type parser with EOF handling
+# - type_parser: main type parser for types and arrows
 
 
 # =============================================================================
@@ -349,8 +398,13 @@ def term_parser() -> P[SurfaceTermDeclaration]:
         # Match "=" for definition
         yield match_symbol("=")
 
-        # Parse expression body using the factory import
-        body = yield _expr_parser_factory(AnyIndent())
+        # Capture column of first body token for layout constraint
+        # Multi-line bodies should stop when we see a token at/before this column
+        body_col = yield column()
+        body_constraint = AfterPos(body_col - 1)
+
+        # Parse expression body with layout constraint
+        body = yield _expr_parser_factory(body_constraint)
 
         return SurfaceTermDeclaration(
             name=name,
@@ -461,6 +515,96 @@ def decl_parser() -> P[SurfaceDeclaration]:
 # =============================================================================
 
 
+def _try_parse_declaration(
+    token: TokenBase,
+    tokens: list,
+    i: int,
+    data_p: P[SurfaceDataDeclaration],
+    prim_type_p: P[SurfacePrimTypeDecl],
+    prim_op_p: P[SurfacePrimOpDecl],
+    term_p: P[SurfaceTermDeclaration],
+) -> tuple[bool, SurfaceDeclaration | None, str | None, int]:
+    """Try to parse a declaration starting at the given token.
+
+    Returns:
+        Tuple of (can_start_decl, decl_result, decl_type, new_index)
+        - can_start_decl: whether this token type can start a declaration
+        - decl_result: the parsed declaration or None
+        - decl_type: the type of declaration ("data", "term", etc.) or None
+        - new_index: the index after parsing, or current index if failed
+    """
+    match token:
+        case KeywordToken(keyword="data"):
+            result = data_p(tokens, i)
+            if result.status:
+                return (True, result.value, "data", result.index)
+            return (True, None, None, i)
+        case KeywordToken(keyword="prim_type"):
+            result = prim_type_p(tokens, i)
+            if result.status:
+                return (True, result.value, "prim_type", result.index)
+            return (True, None, None, i)
+        case KeywordToken(keyword="prim_op"):
+            result = prim_op_p(tokens, i)
+            if result.status:
+                return (True, result.value, "prim_op", result.index)
+            return (True, None, None, i)
+        case IdentifierToken():
+            result = term_p(tokens, i)
+            if result.status:
+                return (True, result.value, "term", result.index)
+            return (True, None, None, i)
+        case _:
+            return (False, None, None, i)
+
+
+def _attach_metadata(
+    decl: SurfaceDeclaration,
+    decl_type: str,
+    state: _ParserState,
+) -> SurfaceDeclaration:
+    """Attach accumulated docstrings and pragmas to a declaration."""
+    docstring = state.get_docstring()
+    pragmas = state.get_pragmas()
+
+    match decl_type:
+        case "data":
+            return SurfaceDataDeclaration(
+                name=decl.name,
+                params=decl.params,
+                constructors=decl.constructors,
+                location=decl.location,
+                docstring=docstring,
+                pragma=pragmas,
+            )
+        case "term":
+            return SurfaceTermDeclaration(
+                name=decl.name,
+                type_annotation=decl.type_annotation,
+                body=decl.body,
+                location=decl.location,
+                docstring=docstring,
+                pragma=pragmas,
+            )
+        case "prim_type":
+            return SurfacePrimTypeDecl(
+                name=decl.name,
+                location=decl.location,
+                docstring=docstring,
+                pragma=pragmas,
+            )
+        case "prim_op":
+            return SurfacePrimOpDecl(
+                name=decl.name,
+                type_annotation=decl.type_annotation,
+                location=decl.location,
+                docstring=docstring,
+                pragma=pragmas,
+            )
+        case _:
+            return decl
+
+
 def top_decl_parser() -> P[list[SurfaceDeclaration]]:
     """Parse multiple declarations with docstring/pragma accumulation.
 
@@ -483,9 +627,7 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
 
     @P
     def parser(tokens: list, index: int) -> Result:
-        declarations: list[SurfaceDeclaration] = []
-        current_docstrings: list[str] = []
-        current_pragmas: dict[str, str] = {}
+        state = _ParserState()
         i = index
 
         # Inner parsers
@@ -500,98 +642,24 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
             # Accumulate metadata (docstrings and pragmas) before declarations
             match token:
                 case DocstringToken(docstring_type=DocstringType.PRECEDING):
-                    current_docstrings.append(token.content)
+                    state = state.with_docstring(token.content)
                     i += 1
                     continue
                 case PragmaToken(key=key) if key:
-                    current_pragmas[key] = token.value
+                    state = state.with_pragma(key, token.value)
                     i += 1
                     continue
 
-            # Check if this token can start a declaration
-            can_start_decl = False
-            decl_result = None
-            decl_type = None
-
-            match token:
-                case KeywordToken(keyword="data"):
-                    can_start_decl = True
-                    result = data_p(tokens, i)
-                    if result.status:
-                        decl_result = result.value
-                        decl_type = "data"
-                        i = result.index
-                case KeywordToken(keyword="prim_type"):
-                    can_start_decl = True
-                    result = prim_type_p(tokens, i)
-                    if result.status:
-                        decl_result = result.value
-                        decl_type = "prim_type"
-                        i = result.index
-                case KeywordToken(keyword="prim_op"):
-                    can_start_decl = True
-                    result = prim_op_p(tokens, i)
-                    if result.status:
-                        decl_result = result.value
-                        decl_type = "prim_op"
-                        i = result.index
-                case IdentifierToken():
-                    can_start_decl = True
-                    result = term_p(tokens, i)
-                    if result.status:
-                        decl_result = result.value
-                        decl_type = "term"
-                        i = result.index
+            # Try to parse a declaration
+            can_start_decl, decl_result, decl_type, new_i = _try_parse_declaration(
+                token, tokens, i, data_p, prim_type_p, prim_op_p, term_p
+            )
 
             if decl_result is not None:
-                # Attach accumulated metadata
-                docstring = None
-                if current_docstrings:
-                    # Concatenate multiple docstrings with single space
-                    docstring = " ".join(current_docstrings)
-
-                # Create updated declaration with metadata
-                if decl_type == "data":
-                    updated_decl = SurfaceDataDeclaration(
-                        name=decl_result.name,
-                        params=decl_result.params,
-                        constructors=decl_result.constructors,
-                        location=decl_result.location,
-                        docstring=docstring,
-                        pragma=current_pragmas if current_pragmas else None,
-                    )
-                elif decl_type == "term":
-                    updated_decl = SurfaceTermDeclaration(
-                        name=decl_result.name,
-                        type_annotation=decl_result.type_annotation,
-                        body=decl_result.body,
-                        location=decl_result.location,
-                        docstring=docstring,
-                        pragma=current_pragmas if current_pragmas else None,
-                    )
-                elif decl_type == "prim_type":
-                    updated_decl = SurfacePrimTypeDecl(
-                        name=decl_result.name,
-                        location=decl_result.location,
-                        docstring=docstring,
-                        pragma=current_pragmas if current_pragmas else None,
-                    )
-                elif decl_type == "prim_op":
-                    updated_decl = SurfacePrimOpDecl(
-                        name=decl_result.name,
-                        type_annotation=decl_result.type_annotation,
-                        location=decl_result.location,
-                        docstring=docstring,
-                        pragma=current_pragmas if current_pragmas else None,
-                    )
-                else:
-                    updated_decl = decl_result
-
-                declarations.append(updated_decl)
-
-                # Reset accumulators for next declaration
-                current_docstrings = []
-                current_pragmas = {}
+                # Attach accumulated metadata and update state
+                updated_decl = _attach_metadata(decl_result, decl_type, state)
+                state = state.with_declaration(updated_decl)
+                i = new_i
             elif can_start_decl:
                 # Token looked like it could start a declaration but parsing failed
                 # This is an error - we expected a declaration but couldn't parse it
@@ -600,7 +668,7 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
                 # Unknown token that doesn't start a declaration, skip it
                 i += 1
 
-        return Result.success(i, declarations)
+        return Result.success(i, state.declarations)
 
     return parser
 

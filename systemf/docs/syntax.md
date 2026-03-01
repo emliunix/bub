@@ -135,6 +135,19 @@ atom_type   ::= "(" type ")"
 tuple_type  ::= "(" type ("," type)+ ")"
 ```
 
+**Type Applications:**
+
+Type applications are parsed as left-associative nested `SurfaceTypeApp` nodes:
+
+```systemf
+List Int          -- SurfaceTypeApp(SurfaceTypeConstructor("List"), SurfaceTypeVar("Int"))
+List Int Bool     -- SurfaceTypeApp(SurfaceTypeApp(SurfaceTypeConstructor("List"), 
+                  --                   SurfaceTypeVar("Int")), 
+                  --                   SurfaceTypeVar("Bool"))
+```
+
+The parser builds a left-associative chain: `((List Int) Bool)`.
+
 ### 2.2 Rank-2 Types
 
 Parentheses required for `forall` on the right of arrow:
@@ -343,18 +356,77 @@ case mp of
 
 ### 3.5 Lambda (2 Layout Styles)
 
+**Syntax:**
+```
+lambda_expr ::= "λ" ident+ [":" type] "→" expr
+             |  "\\" ident+ [":" type] "→" expr
+```
+
+**Multi-parameter Lambda:**
+
+The parser handles multi-parameter lambdas directly, producing nested `SurfaceAbs` nodes:
+
+```systemf
+λx y z → body      -- Sugar for: λx → λy → λz → body
+```
+
+This is handled in the parser (not desugaring), producing nested AST nodes:
+```
+SurfaceAbs("x", None,
+  SurfaceAbs("y", None,
+    SurfaceAbs("z", None, body, loc), loc), loc)
+```
+
 **Style 1: Inline**
 ```systemf
 λx → x + 1
+λx y → x + y           -- Multi-parameter
+λx:Int → x + 1         -- With type annotation
 ```
 
 **Style 2: Indented**
 ```systemf
 λx →
   x + 1
+
+λx y →                 -- Multi-parameter with indentation
+  x + y
+
+### 3.6 Type Abstraction (Λ)
+
+**Syntax:**
+```
+type_abs_expr ::= "Λ" ident+ "." expr
+               |  "/\\" ident+ "." expr
 ```
 
-### 3.6 Let-In (3 Layout Styles)
+**Multi-variable Type Abstraction:**
+
+The parser handles multiple type variables directly, producing nested `SurfaceTypeAbs` nodes:
+
+```systemf
+Λa b. expr         -- Sugar for: Λa. Λb. expr
+```
+
+This is handled in the parser (not desugaring), producing nested AST nodes:
+```
+SurfaceTypeAbs("a",
+  SurfaceTypeAbs("b", expr, loc), loc)
+```
+
+**Examples:**
+```systemf
+Λa. λx:a → x               -- Type abstraction with value abstraction
+Λa b. λx:a → λy:b → x      -- Multi-variable type abstraction
+/\a. id @a                 -- ASCII syntax
+```
+
+**Note:** The type application operator `@` binds tighter than value application:
+```systemf
+f @Int x y     -- parses as: (((f @Int) x) y)
+```
+
+### 3.7 Let-In (3 Layout Styles)
 
 Let supports multiple bindings followed by `in`:
 
@@ -494,20 +566,41 @@ prim_op_decl   ::= "prim_op" ident ":" type
 
 ### 7.2 Data Declaration Layout
 
-**Style 1: Inline**
+All these styles are equivalent and parse to the same AST:
+
+**Style 1: Single line**
 ```systemf
 data Bool = True | False
 data Maybe a = Nothing | Just a
 ```
 
-**Style 2: Indented**
+**Style 2: First constructor on same line**
+```systemf
+data X1 = A1
+        | B1
+```
+
+**Style 3: More indentation allowed**
+```systemf
+data X2 = A2
+          | B2
+```
+
+**Style 4: Type name on its own line**
+```systemf
+data X3
+  = A3
+  | B3
+```
+
+**Style 5: Full multi-line with parameters**
 ```systemf
 data List a =
   Nil
   | Cons a (List a)
 ```
 
-**Note:** Data declarations ALWAYS use `|` as the constructor separator (following Haskell). This is different from case expressions which use `;` in explicit brace mode.
+**Note:** Data declarations ALWAYS use `|` as the constructor separator (following Haskell). This is different from case expressions which use `;` in explicit brace mode. The layout is **relaxed** for data declarations - constructors don't need to be at the exact same column, they just need to follow `=` or `|`.
 
 ## 8. Layout and Parser Combinators
 
@@ -660,19 +753,22 @@ case c of
   False → f
 ```
 
-### 9.2 Multi-Argument Lambda
+### 9.2 Multi-Argument Lambda (Parser-Handled)
+
+**Note:** Multi-parameter lambdas and type abstractions are handled directly by the parser, not by a separate desugaring pass. The parser produces nested `SurfaceAbs` and `SurfaceTypeAbs` nodes.
+
 **Value abstraction:**
 ```systemf
 λx y → z
--- desugars to -->
-λx → λy → z
+-- parser produces -->
+SurfaceAbs("x", None, SurfaceAbs("y", None, z, loc), loc)
 ```
 
 **Type abstraction:**
 ```systemf
 Λa b. body
--- desugars to -->
-Λa. Λb. body
+-- parser produces -->
+SurfaceTypeAbs("a", SurfaceTypeAbs("b", body, loc), loc)
 ```
 
 ### 9.3 Operators
