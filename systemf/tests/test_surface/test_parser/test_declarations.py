@@ -251,10 +251,11 @@ class TestTypeParser:
         assert result is not None
 
     def test_unit_type(self):
-        """Parse unit type ()."""
-        tokens = lex("()")
+        """Parse Unit type constructor (defined in prelude)."""
+        tokens = lex("Unit")
         result = type_parser().parse(tokens)
-        assert result is not None
+        assert isinstance(result, SurfaceTypeConstructor)
+        assert result.name == "Unit"
 
     def test_tuple_type(self):
         """Parse (Int, Bool) tuple."""
