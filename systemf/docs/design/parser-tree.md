@@ -14,10 +14,14 @@ Program (Top Level)
 │   ├── data_decl: data X = A | B
 │   │   └── NOT layout-sensitive (| can be at any column)
 │   │
-│   ├── let_decl: let ... in ...
-│   │   └── block(let_binding)  ← layout here
+│   ├── type_decl: name : type
+│   │   └── Type signatures
+│   │
+│   ├── fn_decl: pattern = expr
+│   │   └── Function definition (equation)
 │   │
 │   └── top_decl: general top-level
+│       └── Combines: data_decl | type_decl | fn_decl
 │       └── Used in: block(top_decl) for where clauses
 │
 └── Expressions (expr_parser)
@@ -39,8 +43,11 @@ Program (Top Level)
         ├── case_expr: case e of branches
         │   └── block(case_alt)  ← layout here
         │
-        └── let_expr: let bindings in e
-            └── block(let_binding)  ← layout here
+        ├── let_expr: let bindings in e
+        │   └── block(let_binding)  ← layout here
+        │
+        └── where_expr: expr where { decls }
+            └── block(top_decl)  ← layout here
 
 Types (type_parser)
 ├── forall_type: ∀a. t
@@ -140,37 +147,40 @@ must_continue(constraint, expected?) → Parser[None]
 ### Expression Dependencies
 ```
 expr_parser(constraint)
-  ├─ Uses: atom, app, op_expr
-  ├─ Uses: case_expr(constraint)  ← needs constraint
-  └─ Uses: let_expr(constraint)   ← needs constraint
+  ├─ Uses: atom, app, op_expr (no layout, ignore constraint)
+  ├─ Uses: case_expr(constraint)  ← constraint flows through
+  ├─ Uses: let_expr(constraint)   ← constraint flows through
+  └─ Uses: where_expr(constraint) ← constraint flows through
 
 case_expr(constraint)
   ├─ Uses: expr_parser(constraint) for scrutinee
-  ├─ Uses: column() to capture branch column
-  └─ Uses: block(case_alt) with new constraint
+  ├─ After "of", capture column with column()
+  └─ Uses: block_entries(AtPos(col), case_alt)  ← NEW constraint
 
 let_expr(constraint)
-  ├─ Uses: column() to capture binding column
-  ├─ Uses: block(let_binding) with new constraint
-  ├─ Uses: must_continue(constraint, "in")
-  └─ Uses: expr_parser(constraint) for body
+  ├─ After "let", capture column with column()
+  ├─ Uses: block_entries(AtPos(col), let_binding)  ← NEW constraint
+  ├─ Uses: must_continue(constraint, "in")  ← check parent constraint
+  └─ Uses: expr_parser(constraint) for body  ← parent constraint continues
+
+where_expr(constraint)
+  ├─ Parses expression
+  ├─ After "where", uses: block_entries(AfterPos(col), top_decl)
+  └─ Uses: expr_parser(constraint) for main expression
 ```
 
 ### Declaration Dependencies
 ```
 program_parser
-  └─ Uses: block(top_decl) for top-level sequence
+  └─ Uses: many(top_decl) for top-level sequence (NOT layout-sensitive at top level)
 
-top_decl(constraint)
-  ├─ Uses: data_decl()  ← no constraint needed
-  ├─ Uses: let_decl(constraint)  ← needs constraint for body
-  └─ Can appear in: block(top_decl) for where clauses
+top_decl()
+  ├─ Uses: data_decl()      ← no constraint
+  ├─ Uses: type_decl()      ← no constraint  
+  └─ Uses: fn_decl()        ← no constraint (expr inside doesn't need outer constraint)
 
-let_decl(constraint)
-  ├─ Uses: block(let_binding)  ← layout for bindings
-  └─ Uses: expr_parser(constraint) for body
-
-# Note: let_decl is BOTH a declaration AND can appear in expressions!
+# Note: top-level declarations are NOT layout-sensitive
+# Layout only matters inside: let, case, where
 ```
 
 ### The block(topDecl) Pattern
@@ -281,8 +291,8 @@ src/systemf/surface/parser/
 ├── types.py             # Token types, ValidIndent
 ├── lexer.py             # Tokenizer
 ├── helpers.py           # Core combinators (DONE)
-├── declarations.py      # data_decl, let_decl, top_decl
-└── expressions.py       # expr_parser, case_expr, etc.
+├── declarations.py      # data_decl, type_decl, fn_decl, top_decl
+└── expressions.py       # expr_parser, case_expr, let_expr, etc.
 
 tests/test_surface/test_parser/
 ├── test_helpers.py      # Unit tests (DONE)
