@@ -28,6 +28,8 @@ from systemf.surface.parser.types import (
 )
 from systemf.surface.types import (
     SurfaceType,
+    SurfaceTypeConstructor,
+    SurfaceTypeVar,
 )
 
 # Type variable for generic parsers
@@ -238,7 +240,7 @@ def type_app_parser() -> P[SurfaceType]:
     Returns:
         SurfaceType - the parsed type application or atomic type
     """
-    from systemf.surface.types import SurfaceTypeApp
+    from systemf.surface.types import SurfaceTypeConstructor
 
     # Try tuple first (it starts with '('), then regular atom
     tuple_result = yield type_tuple_parser.optional()
@@ -268,15 +270,27 @@ def type_app_parser() -> P[SurfaceType]:
             break
         args.append(arg)
 
-    # Build left-associative application chain
+    # Build type constructor with arguments
     if not args:
         return first
 
-    result = first
-    for arg in args:
-        result = SurfaceTypeApp(result, arg, loc)
-
-    return result
+    # The first element must be a type constructor name
+    # We use SurfaceTypeConstructor to represent applied types like "List Int"
+    match first:
+        case SurfaceTypeConstructor(name, [], _):
+            return SurfaceTypeConstructor(name, args, loc)
+        case SurfaceTypeVar(name, _):
+            # For type variables (like in higher-kinded contexts),
+            # we still use constructor representation
+            return SurfaceTypeConstructor(name, args, loc)
+        case _:
+            # Fallback: if first is already a constructor with args, append to it
+            match first:
+                case SurfaceTypeConstructor(name, existing_args, _):
+                    return SurfaceTypeConstructor(name, existing_args + args, loc)
+                case _:
+                    # For other cases, try to extract name
+                    return SurfaceTypeConstructor(str(first), args, loc)
 
 
 @generate

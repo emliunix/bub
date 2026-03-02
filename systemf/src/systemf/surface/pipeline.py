@@ -130,7 +130,9 @@ class ElaborationPipeline:
         """
         try:
             # Phase 1 & 2: Scope check and type elaborate
-            core_decls, ctx, global_types = self._elaborate_declarations(declarations, constructors)
+            core_decls, ctx, global_types, new_constructors = self._elaborate_declarations(
+                declarations, constructors
+            )
 
             # Phase 3: Process LLM pragmas
             final_decls, llm_functions = self._process_llm_pragmas(
@@ -140,11 +142,14 @@ class ElaborationPipeline:
             # Collect docstrings
             docstrings = self._collect_docstrings(declarations)
 
+            # Merge constructor types: input + newly defined
+            all_constructors = (constructors or {}) | new_constructors
+
             # Create the module
             module = Module(
                 name=self.module_name,
                 declarations=final_decls,
-                constructor_types=constructors or {},
+                constructor_types=all_constructors,
                 global_types=global_types,
                 primitive_types={},
                 docstrings=docstrings,
@@ -211,7 +216,7 @@ class ElaborationPipeline:
         self,
         declarations: list[SurfaceDeclaration],
         constructors: Optional[dict[str, Type]],
-    ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type]]:
+    ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type], dict[str, Type]]:
         """Run Phase 1 (scope checking) and Phase 2 (type elaboration).
 
         Uses TypeElaborator.elaborate_declarations() which internally
@@ -222,7 +227,7 @@ class ElaborationPipeline:
             constructors: Optional constructor types
 
         Returns:
-            Tuple of (core declarations, type context, global types)
+            Tuple of (core declarations, type context, global types, constructor types)
         """
         try:
             return self.type_elaborator.elaborate_declarations(declarations, constructors)
@@ -235,7 +240,7 @@ class ElaborationPipeline:
                 )
             )
             # Return empty results
-            return [], TypeContext(), {}
+            return [], TypeContext(), {}, {}
 
     def _process_llm_pragmas(
         self,

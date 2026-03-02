@@ -393,13 +393,12 @@ class TestTypeParser:
         """Parse List Int."""
         tokens = lex("List Int")
         result = type_parser().parse(tokens)
-        # Parser produces SurfaceTypeApp directly (normalization to SurfaceTypeConstructor
-        # with args happens during elaboration/desugaring)
-        assert isinstance(result, SurfaceTypeApp)
-        assert isinstance(result.func, SurfaceTypeConstructor)
-        assert result.func.name == "List"
-        assert isinstance(result.type_arg, SurfaceTypeConstructor)
-        assert result.type_arg.name == "Int"
+        # Parser now produces SurfaceTypeConstructor with args directly
+        assert isinstance(result, SurfaceTypeConstructor)
+        assert result.name == "List"
+        assert len(result.args) == 1
+        assert isinstance(result.args[0], SurfaceTypeConstructor)
+        assert result.args[0].name == "Int"
 
     def test_nested_forall(self):
         """Parse forall a b c. a -> b -> c -> a."""

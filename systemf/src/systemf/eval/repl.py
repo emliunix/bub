@@ -167,6 +167,10 @@ class REPL:
             for name, ty in module.global_types.items():
                 self.global_types[name] = ty
 
+            # Update constructor types from data declarations
+            for name, ty in module.constructor_types.items():
+                self.constructor_types[name] = ty
+
             # Accumulate declarations for future elaborations
             self.accumulated_decls.extend(surface_decls)
 

@@ -915,7 +915,7 @@ class TypeElaborator:
         self,
         decls: list[SurfaceDeclaration],
         constructors: dict[str, Type] | None = None,
-    ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type]]:
+    ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type], dict[str, Type]]:
         """Elaborate multiple declarations with mutual recursion support.
 
         This method implements the three-phase elaboration pipeline required for
@@ -991,14 +991,30 @@ class TypeElaborator:
             for name, ty in constructors.items():
                 global_types[name] = ty
 
-        # Phase 2: Build context with all globals
+        # Phase 2: Elaborate data declarations FIRST to get constructor types
+        # This must happen before term declarations so constructors are available
+        # Create initial context with just globals (no constructors yet)
         ctx = TypeContext(globals=global_types)
+
+        core_decls: list[core.Declaration] = []
+        all_constructor_types: dict[str, Type] = {}
+
+        for _, decl in other_decls:
+            core_decl, con_types = self._elaborate_other_declaration(decl, ctx)
+            core_decls.append(core_decl)
+            # Collect constructor types from data declarations
+            all_constructor_types.update(con_types)
+            # Add constructors to global_types and context
+            for name, ty in con_types.items():
+                global_types[name] = ty
+                ctx = ctx.add_constructor(name, ty)
+
+        # Phase 3: Add input constructors to context as well
         if constructors:
             for name, ty in constructors.items():
                 ctx = ctx.add_constructor(name, ty)
 
-        # Phase 3: Elaborate each term declaration body with full context
-        core_decls: list[core.Declaration] = []
+        # Phase 4: Elaborate each term declaration body with full context
         elaborated_terms: dict[str, core.TermDeclaration] = {}
 
         # Initialize ScopeChecker for converting Surface AST to Scoped AST
@@ -1040,18 +1056,13 @@ class TypeElaborator:
             elaborated_terms[decl.name] = core_decl
             core_decls.append(core_decl)
 
-        # Handle other declarations (data, primitive types, etc.)
-        for _, decl in other_decls:
-            core_decl = self._elaborate_other_declaration(decl, ctx)
-            core_decls.append(core_decl)
-
-        return (core_decls, ctx, global_types)
+        return (core_decls, ctx, global_types, all_constructor_types)
 
     def _elaborate_other_declaration(
         self,
         decl: SurfaceDeclaration,
         ctx: TypeContext,
-    ) -> core.Declaration:
+    ) -> tuple[core.Declaration, dict[str, Type]]:
         """Elaborate non-term declarations.
 
         Args:
@@ -1059,7 +1070,7 @@ class TypeElaborator:
             ctx: Current type context
 
         Returns:
-            Core declaration
+            Tuple of (Core declaration, constructor types dict)
         """
         from systemf.surface.types import (
             SurfaceDataDeclaration,
@@ -1071,39 +1082,61 @@ class TypeElaborator:
             case SurfaceDataDeclaration():
                 return self._elaborate_data_decl(decl)
             case SurfacePrimOpDecl():
-                return self._elaborate_prim_op_decl(
+                core_decl = self._elaborate_prim_op_decl(
                     decl.name, decl.type_annotation, decl.location, decl.pragma
                 )
+                return (core_decl, {})
             case SurfacePrimTypeDecl():
-                return self._elaborate_prim_type_decl(decl.name, decl.location)
+                core_decl = self._elaborate_prim_type_decl(decl.name, decl.location)
+                return (core_decl, {})
             case _:
                 raise TypeError(f"Unknown declaration type: {type(decl)}")
 
     def _elaborate_data_decl(
         self,
         decl,
-    ) -> core.DataDeclaration:
+    ) -> tuple[core.DataDeclaration, dict[str, Type]]:
         """Elaborate a data type declaration.
 
         Args:
             decl: Surface data declaration
 
         Returns:
-            Core DataDeclaration
+            Tuple of (Core DataDeclaration, constructor types dict)
         """
         from systemf.surface.types import SurfaceDataDeclaration
+        from systemf.core.types import TypeForall, TypeArrow, TypeVar, TypeConstructor
 
-        # Convert constructors
+        # Build the result type constructor
+        # For "data Maybe a = ...", this is "Maybe a"
+        result_type = TypeConstructor(decl.name, [TypeVar(p) for p in decl.params])
+
+        # Convert constructors and build their types
         core_constructors: list[tuple[str, list[Type]]] = []
+        constructor_types: dict[str, Type] = {}
+
         for con_info in decl.constructors:
             core_args = [self._surface_to_core_type(arg, TypeContext()) for arg in con_info.args]
             core_constructors.append((con_info.name, core_args))
 
-        return core.DataDeclaration(
+            # Build constructor type: args -> result
+            con_type: Type = result_type
+            for arg in reversed(core_args):
+                con_type = TypeArrow(arg, con_type)
+
+            # Add forall for each type parameter
+            for param in reversed(decl.params):
+                con_type = TypeForall(param, con_type)
+
+            constructor_types[con_info.name] = con_type
+
+        data_decl = core.DataDeclaration(
             name=decl.name,
             params=decl.params,
             constructors=core_constructors,
         )
+
+        return (data_decl, constructor_types)
 
     def _elaborate_prim_op_decl(
         self,
