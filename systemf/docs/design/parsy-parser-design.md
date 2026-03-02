@@ -37,7 +37,7 @@ src/systemf/surface/
 
 | Component | Naming Pattern | Example |
 |-----------|---------------|---------|
-| Parser functions | `parse_<rule>` | `parse_term`, `parse_type` |
+| Parser functions | `parse_<rule>` | `parse_expression`, `parse_type` |
 | @generate parsers | `<rule>_parser` | `lambda_parser`, `app_parser` |
 | Token matchers | `match_<token>` | `match_ident`, `match_arrow` |
 | Helpers | `_<name>` | `_make_app`, `_left_fold` |
@@ -524,7 +524,7 @@ class ParsyParser:
         return self.tokens[idx].location
 
 # Convenience functions (same API as old parser)
-def parse_term(source: str, filename: str = "<stdin>") -> SurfaceTerm:
+def parse_expression(source: str, filename: str = "<stdin>") -> SurfaceTerm:
     tokens = Lexer(source, filename).tokenize()
     parser = ParsyParser(tokens)
     decls = parser.parse()
@@ -582,7 +582,7 @@ def parse_program(source: str, filename: str = "<stdin>") -> list[SurfaceDeclara
 ### Phase 5: Integration
 - [ ] Create `ParsyParser` class
 - [ ] Implement error handling
-- [ ] Add convenience functions (`parse_term`, `parse_program`)
+- [ ] Add convenience functions (`parse_expression`, `parse_program`)
 - [ ] Port existing tests
 - [ ] Run full test suite
 

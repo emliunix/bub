@@ -28,7 +28,7 @@ from systemf.surface.elaborator import (
     elaborate,
     elaborate_term,
 )
-from systemf.surface.parser import parse_term
+from systemf.surface.parser import parse_expression
 from systemf.utils.location import Location
 
 
@@ -292,7 +292,7 @@ class TestElaborateIntLit:
 
     def test_elab_int_from_parse(self):
         """Elaborate integer literal from parsed source."""
-        surface = parse_term("42")
+        surface = parse_expression("42")
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.IntLit)
@@ -300,7 +300,7 @@ class TestElaborateIntLit:
 
     def test_elab_int_in_let(self):
         """Elaborate integer in let binding."""
-        surface = parse_term("let x = 42 in x")
+        surface = parse_expression("let x = 42 in x")
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.Let)
@@ -311,7 +311,7 @@ class TestElaborateIntLit:
         """Elaborate integer as function argument."""
         elab = Elaborator()
         elab._add_global_term("f")
-        surface = parse_term("f 42")
+        surface = parse_expression("f 42")
         core_term = elab.elaborate_term(surface)
 
         assert isinstance(core_term, core.App)
@@ -413,7 +413,7 @@ class TestConvenienceFunctions:
 
     def test_elab_term_function(self):
         """Test elaborate_term convenience function."""
-        surface = parse_term(r"\x -> x")
+        surface = parse_expression(r"\x -> x")
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.Abs)
@@ -421,7 +421,7 @@ class TestConvenienceFunctions:
 
     def test_elab_with_context(self):
         """Test elaborate_term_with_context."""
-        surface = parse_term("x")
+        surface = parse_expression("x")
         core_term = elaborate_term(surface, context=["y", "x"])
 
         assert isinstance(core_term, core.Var)
@@ -438,7 +438,7 @@ class TestIntegration:
 
     def test_id_function(self):
         """Parse and elaborate identity function."""
-        surface = parse_term(r"/\a. \x:a -> x")
+        surface = parse_expression(r"/\a. \x:a -> x")
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.TAbs)
@@ -448,7 +448,7 @@ class TestIntegration:
 
     def test_application_chain(self):
         """Parse and elaborate application chain."""
-        surface = parse_term("f x y")
+        surface = parse_expression("f x y")
         elab = Elaborator()
         elab._add_term_binding("y")
         elab._add_term_binding("x")
@@ -462,7 +462,7 @@ class TestIntegration:
 
     def test_complex_nested(self):
         """Parse and elaborate complex nested term."""
-        surface = parse_term("let f = \\x -> x in f @Int 1")
+        surface = parse_expression("let f = \\x -> x in f @Int 1")
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.Let)

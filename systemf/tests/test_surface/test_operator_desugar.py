@@ -13,7 +13,7 @@ from systemf.surface.types import (
     SurfaceVar,
 )
 from systemf.surface.desugar import desugar, OPERATOR_TO_PRIM
-from systemf.surface.parser import parse_term
+from systemf.surface.parser import parse_expression
 
 
 class TestOperatorToPrimitiveMapping:
@@ -61,7 +61,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_addition(self):
         """Desugar + to $prim.int_plus application."""
-        term = parse_term("1 + 2")
+        term = parse_expression("1 + 2")
         desugared = desugar(term)
 
         # Should be: (($prim.int_plus 1) 2)
@@ -76,7 +76,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_subtraction(self):
         """Desugar - to $prim.int_minus application."""
-        term = parse_term("5 - 3")
+        term = parse_expression("5 - 3")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -85,7 +85,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_multiplication(self):
         """Desugar * to $prim.int_multiply application."""
-        term = parse_term("4 * 5")
+        term = parse_expression("4 * 5")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -94,7 +94,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_division(self):
         """Desugar / to $prim.int_divide application."""
-        term = parse_term("10 / 2")
+        term = parse_expression("10 / 2")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -103,7 +103,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_equality(self):
         """Desugar == to $prim.int_eq application."""
-        term = parse_term("x == y")
+        term = parse_expression("x == y")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -112,7 +112,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_less_than(self):
         """Desugar < to $prim.int_lt application."""
-        term = parse_term("x < y")
+        term = parse_expression("x < y")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -120,7 +120,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_greater_than(self):
         """Desugar > to $prim.int_gt application."""
-        term = parse_term("x > y")
+        term = parse_expression("x > y")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -128,7 +128,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_less_than_equal(self):
         """Desugar <= to $prim.int_le application."""
-        term = parse_term("x <= y")
+        term = parse_expression("x <= y")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -136,7 +136,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_greater_than_equal(self):
         """Desugar >= to $prim.int_ge application."""
-        term = parse_term("x >= y")
+        term = parse_expression("x >= y")
         desugared = desugar(term)
 
         assert isinstance(desugared, SurfaceApp)
@@ -145,7 +145,7 @@ class TestOperatorDesugaring:
     def test_desugar_preserves_precedence(self):
         """Desugaring preserves operator precedence."""
         # 1 + 2 * 3 should desugar with proper nesting
-        term = parse_term("1 + 2 * 3")
+        term = parse_expression("1 + 2 * 3")
         desugared = desugar(term)
 
         # Should be: (($prim.int_plus 1) (($prim.int_multiply 2) 3))
@@ -160,7 +160,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_complex_expression(self):
         """Desugar complex expression with multiple operators."""
-        term = parse_term("1 + 2 + 3")
+        term = parse_expression("1 + 2 + 3")
         desugared = desugar(term)
 
         # Should be: (($prim.int_plus (($prim.int_plus 1) 2)) 3)
@@ -169,7 +169,7 @@ class TestOperatorDesugaring:
 
     def test_desugar_preserves_location(self):
         """Desugaring preserves source location information."""
-        term = parse_term("1 + 2")
+        term = parse_expression("1 + 2")
         desugared = desugar(term)
 
         # Check that the location is preserved in the application
@@ -203,7 +203,7 @@ class TestDesugarInContext:
 
     def test_operator_in_lambda(self):
         """Operators in lambda bodies are desugared."""
-        term = parse_term(r"\x -> x + 1")
+        term = parse_expression(r"\x -> x + 1")
         desugared = desugar(term)
 
         # Lambda body should be desugared to prim application
@@ -218,7 +218,7 @@ class TestDesugarInContext:
         source = """case x of
   True -> 1
   False -> 2"""
-        term = parse_term(source)
+        term = parse_expression(source)
         assert isinstance(term, SurfaceCase)
         assert len(term.branches) == 2
 
@@ -230,7 +230,7 @@ class TestDesugarInContext:
 
     def test_nested_operators(self):
         """Nested operator expressions are fully desugared."""
-        term = parse_term("(1 + 2) * (3 + 4)")
+        term = parse_expression("(1 + 2) * (3 + 4)")
         desugared = desugar(term)
 
         # Should be fully desugared to prim applications

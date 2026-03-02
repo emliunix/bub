@@ -594,8 +594,8 @@ def elaborate_term(term: SurfaceTerm, context: Optional[list[str]] = None) -> co
         Core term
 
     Example:
-        >>> from systemf.surface.parser import parse_term
-        >>> term = parse_term("\\x -> x")
+        >>> from systemf.surface.parser import parse_expression
+        >>> term = parse_expression("\\x -> x")
         >>> core_term = elaborate_term(term)
         >>> print(core_term)
         λ(_:_).x0

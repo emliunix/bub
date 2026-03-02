@@ -42,7 +42,7 @@ from systemf.surface.parser import Lexer, lex, Token
 #     ParseError,
 #     Parser,
 #     parse_program,
-#     parse_term,
+#     parse_expression,
 # )
 
 __all__ = [
@@ -75,7 +75,7 @@ __all__ = [
     # Parser (will be added when parser is fully implemented)
     # "Parser",
     # "ParseError",
-    # "parse_term",
+    # "parse_expression",
     # "parse_program",
     # Elaborator
     "Elaborator",

@@ -24,7 +24,7 @@ from systemf.surface.types import (
 )
 from systemf.surface.elaborator import elaborate_term
 from systemf.surface.parser import Lexer
-from systemf.surface.parser import parse_term
+from systemf.surface.parser import parse_expression
 
 
 class TestToolCallParsing:
@@ -32,14 +32,14 @@ class TestToolCallParsing:
 
     def test_parse_simple_tool_call(self):
         """Parse simple tool call without arguments."""
-        term = parse_term("@identity")
+        term = parse_expression("@identity")
         assert isinstance(term, SurfaceToolCall)
         assert term.tool_name == "identity"
         assert term.args == []
 
     def test_parse_tool_call_with_single_arg(self):
         """Parse tool call with single argument."""
-        term = parse_term("@identity 42")
+        term = parse_expression("@identity 42")
         assert isinstance(term, SurfaceToolCall)
         assert term.tool_name == "identity"
         assert len(term.args) == 1
@@ -49,14 +49,14 @@ class TestToolCallParsing:
     def test_parse_tool_call_with_multiple_args(self):
         """Parse tool call with multiple arguments."""
         # Use parenthesized arguments to prevent constructor application
-        term = parse_term("@echo (Hello) (World)")
+        term = parse_expression("@echo (Hello) (World)")
         assert isinstance(term, SurfaceToolCall)
         assert term.tool_name == "echo"
         assert len(term.args) == 2
 
     def test_parse_tool_call_in_expression(self):
         """Parse tool call as part of larger expression."""
-        term = parse_term(r"\x -> @identity x")
+        term = parse_expression(r"\x -> @identity x")
         assert isinstance(term, SurfaceAbs)
         assert isinstance(term.body, SurfaceToolCall)
         assert term.body.tool_name == "identity"
@@ -68,7 +68,7 @@ class TestToolCallParsing:
         """Parse tool call in let binding."""
         source = """let result = @identity 42
   result"""
-        term = parse_term(source)
+        term = parse_expression(source)
         assert isinstance(term, SurfaceLet)
         assert isinstance(term.value, SurfaceToolCall)
         assert term.value.tool_name == "identity"
@@ -76,14 +76,14 @@ class TestToolCallParsing:
     def test_parse_tool_call_in_application(self):
         """Parse tool call as function argument."""
         # Wrap tool call in parentheses to avoid type application ambiguity
-        term = parse_term(r"(\f -> f) (@identity)")
+        term = parse_expression(r"(\f -> f) (@identity)")
         assert isinstance(term, SurfaceApp)
         assert isinstance(term.arg, SurfaceToolCall)
         assert term.arg.tool_name == "identity"
 
     def test_parse_nested_tool_calls(self):
         """Parse nested tool calls."""
-        term = parse_term("@identity @echo Hello")
+        term = parse_expression("@identity @echo Hello")
         assert isinstance(term, SurfaceToolCall)
         assert term.tool_name == "identity"
         assert len(term.args) == 1
@@ -96,7 +96,7 @@ class TestToolCallElaboration:
 
     def test_elaborate_simple_tool_call(self):
         """Elaborate simple tool call."""
-        surface_term = parse_term("@identity")
+        surface_term = parse_expression("@identity")
         core_term = elaborate_term(surface_term)
 
         assert isinstance(core_term, CoreToolCall)
@@ -105,7 +105,7 @@ class TestToolCallElaboration:
 
     def test_elaborate_tool_call_with_args(self):
         """Elaborate tool call with arguments."""
-        surface_term = parse_term("@identity 42")
+        surface_term = parse_expression("@identity 42")
         core_term = elaborate_term(surface_term)
 
         assert isinstance(core_term, CoreToolCall)
@@ -116,7 +116,7 @@ class TestToolCallElaboration:
 
     def test_elaborate_tool_call_with_variable(self):
         """Elaborate tool call with variable argument."""
-        surface_term = parse_term(r"@identity x")
+        surface_term = parse_expression(r"@identity x")
         core_term = elaborate_term(surface_term, context=["x"])
 
         assert isinstance(core_term, CoreToolCall)
@@ -302,7 +302,7 @@ class TestToolCallIntegration:
     def test_full_pipeline_simple(self):
         """Full pipeline: parse -> elaborate -> evaluate."""
         # Parse
-        surface_term = parse_term("@identity 42")
+        surface_term = parse_expression("@identity 42")
 
         # Elaborate
         core_term = elaborate_term(surface_term)

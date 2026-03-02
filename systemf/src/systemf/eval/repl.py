@@ -363,7 +363,7 @@ class REPL:
                 # If declaration parsing fails, try as expression
                 # Re-tokenize for expression parsing
                 tokens = Lexer(source).tokenize()
-                surface_term = Parser(tokens).parse_term()
+                surface_term = Parser(tokens).parse_expression()
 
                 # Desugar operators before elaboration
                 surface_term = desugar(surface_term)

@@ -208,12 +208,12 @@ def _extract_parse_error(e: Exception, tokens: list) -> ParseError:
 
 
 class Parser:
-    """Compatibility wrapper for old Parser API.
+    """Parser wrapper for parsing token streams.
 
-    Provides the same interface as the old Parser class:
+    Provides:
     - Parser(tokens) - initialize with token list
     - parse() - parse declarations
-    - parse_term() - parse a single term
+    - parse_expression() - parse a single expression
     - parse_type() - parse a single type
     """
 
@@ -240,11 +240,11 @@ class Parser:
         except Exception as e:
             raise _extract_parse_error(e, self.tokens)
 
-    def parse_term(self):
-        """Parse a single term.
+    def parse_expression(self):
+        """Parse a single expression.
 
         Returns:
-            Parsed surface term
+            Parsed surface expression
 
         Raises:
             ParseError: If parsing fails

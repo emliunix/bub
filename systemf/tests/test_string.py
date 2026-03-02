@@ -13,7 +13,7 @@ from systemf.eval.machine import Evaluator
 from systemf.eval.value import VString, VInt
 from systemf.surface.elaborator import elaborate
 from systemf.surface.parser import lex
-from systemf.surface.parser import Parser, parse_term
+from systemf.surface.parser import Parser, parse_expression
 
 
 class TestStringParsing:
@@ -29,20 +29,20 @@ class TestStringParsing:
         assert "STRING" in token_types
 
         # Parse as term
-        term = parse_term(source)
+        term = parse_expression(source)
         assert isinstance(term.value, str)
         assert term.value == "hello"
 
     def test_string_with_spaces(self):
         """Parse string containing spaces."""
         source = '"hello world"'
-        term = parse_term(source)
+        term = parse_expression(source)
         assert term.value == "hello world"
 
     def test_empty_string(self):
         """Parse empty string."""
         source = '""'
-        term = parse_term(source)
+        term = parse_expression(source)
         assert term.value == ""
 
     def test_string_with_escape_sequences(self):
@@ -360,7 +360,7 @@ class TestStringErrorCases:
 
         with pytest.raises(Exception):
             tokens = lex(source)
-            Parser(tokens).parse_term()
+            Parser(tokens).parse_expression()
 
     def test_string_concat_with_wrong_types(self):
         """String concat should fail with wrong argument types."""

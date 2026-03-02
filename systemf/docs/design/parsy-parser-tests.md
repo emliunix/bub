@@ -78,7 +78,7 @@ def test_sep_by_empty():
 def test_application_left_associative():
     """Verify f a b parses as (f a) b, not f (a b)."""
     source = "f a b"
-    result = parse_term(source)
+    result = parse_expression(source)
     # Should be App(App(f, a), b)
     assert isinstance(result, SurfaceApp)
     assert isinstance(result.func, SurfaceApp)
@@ -101,7 +101,7 @@ def test_type_arrow_right_associative():
 def test_lambda_location():
     """Verify lambda location is from backslash token."""
     source = "\\x -> x"
-    result = parse_term(source)
+    result = parse_expression(source)
     assert result.location.line == 1
     assert result.location.column == 1
 
@@ -109,7 +109,7 @@ def test_parse_error_location():
     """Verify parse errors report correct location."""
     source = "\\x - y"  # Missing > in arrow
     try:
-        parse_term(source)
+        parse_expression(source)
         assert False, "Should have raised ParseError"
     except ParseError as e:
         assert e.location.line == 1
@@ -126,14 +126,14 @@ def test_empty_program():
 def test_nested_parentheses():
     """Parse deeply nested parentheses."""
     source = "(((x)))"
-    result = parse_term(source)
+    result = parse_expression(source)
     assert isinstance(result, SurfaceVar)
     assert result.name == "x"
 
 def test_operator_precedence():
     """Verify type application binds tighter than function application."""
     source = "f @a x"
-    result = parse_term(source)
+    result = parse_expression(source)
     # Should be App(TypeApp(f, a), x)
     assert isinstance(result, SurfaceApp)
     assert isinstance(result.func, SurfaceTypeApp)
@@ -165,7 +165,7 @@ def test_unexpected_end_of_input():
     """Error at EOF should be handled gracefully."""
     source = "\\x -"  # Incomplete arrow
     try:
-        parse_term(source)
+        parse_expression(source)
     except ParseError as e:
         assert "EOF" in str(e) or "end" in str(e).lower()
 ```
@@ -193,10 +193,10 @@ tests/
 import pytest
 
 @pytest.fixture
-def parse_term():
-    """Fixture providing parse_term function."""
-    from systemf.surface.parser import parse_term
-    return parse_term
+def parse_expression():
+    """Fixture providing parse_expression function."""
+    from systemf.surface.parser import parse_expression
+    return parse_expression
 
 @pytest.fixture
 def parse_program():
