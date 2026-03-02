@@ -9,6 +9,11 @@ The workflow system uses a simplified structure with all files in `./tasks/`:
 - **Kanban files**: `N-kanban-slug.md` (e.g., `2-kanban-api-refactor.md`)
 - **Global sequenced numbering**: All files share the same numbering sequence
 
+## How to Run These Scripts
+
+- Preferred: `uv run .agents/skills/workflow/scripts/<script>.py ...`
+- Alternative: run `.agents/skills/workflow/scripts/<script>.py ...` directly if it is executable
+
 ## Scripts
 
 ### 1. create-task.py
@@ -18,7 +23,7 @@ Creates a new task file with a validated YAML header.
 **Usage:**
 ```bash
 # Basic usage (kanban and creator-role are required)
-.agents/skills/workflow/scripts/create-task.py \
+uv run .agents/skills/workflow/scripts/create-task.py \
     --assignee Architect \
     --expertise "System Design,Python" \
     --title "Design API Layer" \
@@ -26,7 +31,7 @@ Creates a new task file with a validated YAML header.
     --creator-role manager
 
 # Full usage with all options
-.agents/skills/workflow/scripts/create-task.py \
+uv run .agents/skills/workflow/scripts/create-task.py \
     --assignee Implementor \
     --expertise "Software Engineering,Type Theory" \
     --skills "python-project,testing" \
@@ -68,7 +73,7 @@ Creates a new kanban file with a validated YAML header. Creates an **empty** kan
 **Usage:**
 ```bash
 # Create kanban (empty, Manager will add tasks)
-.agents/skills/workflow/scripts/create-kanban.py \
+uv run .agents/skills/workflow/scripts/create-kanban.py \
     --title "API Refactor" \
     --request "Refactor the API layer for better performance"
 ```
@@ -98,7 +103,7 @@ Logs work to a task file using a two-phase commit system with subcommands.
 **Phase 1 - Generate temp file:**
 ```bash
 # Generate creates ./tmp-{uuid}-log-content.md in workspace
-TEMP_FILE=$(.agents/skills/workflow/scripts/log-task.py generate ./tasks/0-explore.md "Initial Analysis")
+TEMP_FILE=$(uv run .agents/skills/workflow/scripts/log-task.py generate ./tasks/0-explore.md "Initial Analysis")
 echo "Temp file: $TEMP_FILE"
 # Agent writes work log to $TEMP_FILE...
 ```
@@ -106,13 +111,13 @@ echo "Temp file: $TEMP_FILE"
 **Phase 2 - Commit log:**
 ```bash
 # Commit reads temp, formats, appends to task, deletes temp
-.agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" "$TEMP_FILE" --role Architect --new-state review
+uv run .agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" "$TEMP_FILE" --role Architect --new-state review
 ```
 
 **Quick mode (direct content):**
 ```bash
 # For simple logs, bypass temp file
-.agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Update" "Fixed the bug in auth module" --role Architect --new-state review
+uv run .agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Update" "Fixed the bug in auth module" --role Architect --new-state review
 ```
 
 **Subcommand Details:**
@@ -148,6 +153,8 @@ Generates agent briefing from task file metadata. Relieves Supervisor from manua
 **Usage:**
 ```bash
 # Generate briefing for task agent
+uv run .agents/skills/workflow/scripts/check-task.py --task tasks/0-design-api.md
+# Or, if the script is executable:
 .agents/skills/workflow/scripts/check-task.py --task tasks/0-design-api.md
 ```
 
@@ -214,7 +221,7 @@ Updates kanban YAML frontmatter programmatically to reduce corruption from manua
 
 **Usage:**
 ```bash
-.agents/skills/workflow/scripts/update-kanban.py --kanban tasks/2-kanban-my-feature.md \
+uv run .agents/skills/workflow/scripts/update-kanban.py --kanban tasks/2-kanban-my-feature.md \
     --add-task tasks/3-some-task.md \
     --set-current tasks/3-some-task.md
 ```

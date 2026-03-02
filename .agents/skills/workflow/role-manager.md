@@ -390,7 +390,7 @@ def format_details(details):
 
 def create_exploration_task(kanban_file, blocked_task, blockers):
     """Create exploration task to resolve blockers."""
-    return execute_script("scripts/create-task.py", {
+    return execute_script(f"{skill_path}/scripts/create-task.py", {
         "assignee": "Architect",
         "type": "exploration",
         "kanban": kanban_file,
@@ -400,7 +400,7 @@ def create_exploration_task(kanban_file, blocked_task, blockers):
 
 def create_exploration_for_item(kanban_file, parent_task, work_item):
     """Create exploration task for work item with missing info."""
-    return execute_script("scripts/create-task.py", {
+    return execute_script(f"{skill_path}/scripts/create-task.py", {
         "assignee": "Architect",
         "type": "exploration",
         "kanban": kanban_file,
@@ -410,7 +410,7 @@ def create_exploration_for_item(kanban_file, parent_task, work_item):
 
 def create_redesign_task(kanban_file, escalated_task, issues):
     """Create redesign task for escalated implementation."""
-    return execute_script("scripts/create-task.py", {
+    return execute_script(f"{skill_path}/scripts/create-task.py", {
         "assignee": "Architect",
         "type": "redesign",
         "kanban": kanban_file,
@@ -436,7 +436,7 @@ def create_tasks_from_work_item(item, parent_task):
     
     if needs_design:
         # Create design task first
-        design = execute_script("scripts/create-task.py", {
+        design = execute_script(f"{skill_path}/scripts/create-task.py", {
             "assignee": "Architect",
             "type": "design",
             "dependencies": parent_task
@@ -444,7 +444,7 @@ def create_tasks_from_work_item(item, parent_task):
         tasks.append(design)
         
         # Create implementation task (depends on design)
-        impl = execute_script("scripts/create-task.py", {
+        impl = execute_script(f"{skill_path}/scripts/create-task.py", {
             "assignee": "Implementor",
             "type": "implement",
             "dependencies": design
@@ -452,7 +452,7 @@ def create_tasks_from_work_item(item, parent_task):
         tasks.append(impl)
     else:
         # Direct implementation (still requires review)
-        impl = execute_script("scripts/create-task.py", {
+        impl = execute_script(f"{skill_path}/scripts/create-task.py", {
             "assignee": "Implementor",
             "type": "implement",
             "dependencies": parent_task

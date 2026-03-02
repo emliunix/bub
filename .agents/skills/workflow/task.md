@@ -259,7 +259,7 @@ additional_work_items:
 **Manager MUST use the create-task.py script** to create task files:
 
 ```bash
-.agents/skills/workflow/scripts/create-task.py \
+uv run .agents/skills/workflow/scripts/create-task.py \
     --assignee Architect \
     --expertise "System Design,Python" \
     --skills "code-reading" \
@@ -268,6 +268,9 @@ additional_work_items:
     --priority high \
     --kanban tasks/0-kanban.md \
     --creator-role manager
+
+# Or, if the script is executable:
+.agents/skills/workflow/scripts/create-task.py --assignee Architect --expertise "System Design,Python" --skills "code-reading" --title "Design API Layer" --type design --priority high --kanban tasks/0-kanban.md --creator-role manager
 ```
 
 The script automatically:
@@ -282,14 +285,14 @@ The script automatically:
 
 ```bash
 # Generate temp file for writing
-TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
+TEMP=$(uv run .agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
 
 # Edit temp file, then commit
 # NOTE: The temporary file is merged into the task file and removed on successful commit
-.agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" "$TEMP"
+uv run .agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" "$TEMP"
 
 # Or quick log for simple updates
-.agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Update" "Fixed bug"
+uv run .agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Update" "Fixed bug"
 ```
 
 ## Constraint

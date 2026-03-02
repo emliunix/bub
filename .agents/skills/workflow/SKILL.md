@@ -48,6 +48,8 @@ If you want more control over the kanban structure or need to add detailed conte
 
 ```bash
 # Create the kanban using the script
+uv run .agents/skills/workflow/scripts/create-kanban.py --title "My Feature" --request "Detailed request here"
+# Or, if the script is executable:
 .agents/skills/workflow/scripts/create-kanban.py --title "My Feature" --request "Detailed request here"
 ```
 
@@ -103,6 +105,8 @@ When spawned as a task agent (Architect or Implementor), you **MUST** follow thi
 
 ```bash
 # Step 1: Generate your briefing from task metadata
+uv run .agents/skills/workflow/scripts/check-task.py --task <task_file>
+# Or, if the script is executable:
 .agents/skills/workflow/scripts/check-task.py --task <task_file>
 
 # Step 2: Read your role definition
@@ -184,20 +188,26 @@ This skill includes executable Python scripts in `scripts/` for managing tasks a
 ### create-task.py
 Creates task files with validated YAML headers. Only Manager and users can create tasks.
 ```bash
-.agents/skills/workflow/scripts/create-task.py \
+uv run .agents/skills/workflow/scripts/create-task.py \
     --assignee Architect \
     --expertise "System Design" \
     --kanban tasks/0-kanban.md \
     --creator-role manager \
     --title "Design API"
+
+# Or, if the script is executable:
+.agents/skills/workflow/scripts/create-task.py --assignee Architect --expertise "System Design" --kanban tasks/0-kanban.md --creator-role manager --title "Design API"
 ```
 
 ### create-kanban.py
 Creates kanban files (empty, Manager adds tasks separately):
 ```bash
-.agents/skills/workflow/scripts/create-kanban.py \
+uv run .agents/skills/workflow/scripts/create-kanban.py \
     --title "API Refactor" \
     --request "Refactor the API layer"
+
+# Or, if the script is executable:
+.agents/skills/workflow/scripts/create-kanban.py --title "API Refactor" --request "Refactor the API layer"
 ```
 
 **Note:** Kanban creation is separate from task creation. Manager populates `kanban.tasks`/`kanban.current` per `role-manager.md`.
@@ -206,13 +216,13 @@ Creates kanban files (empty, Manager adds tasks separately):
 Logs work using subcommands (generate/commit/quick):
 ```bash
 # Phase 1: Generate temp file
-TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
+TEMP=$(uv run .agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
 
 # Phase 2: Commit after editing
-.agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" $TEMP --role Architect --new-state review
+uv run .agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" $TEMP --role Architect --new-state review
 
 # Or use quick mode for simple logs
-.agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed bug" --role Architect --new-state review
+uv run .agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed bug" --role Architect --new-state review
 ```
 
 **Work Items are structured:** Tasks contain a bounded Work Items block:
@@ -230,6 +240,8 @@ For `type: design` tasks, `log-task.py` validates this block when transitioning 
 Generates agent briefing from task metadata. **Task agents MUST run this first** to get their role instructions.
 ```bash
 # Task agent onboarding - REQUIRED first step
+uv run .agents/skills/workflow/scripts/check-task.py --task tasks/0-design-api.md
+# Or, if the script is executable:
 .agents/skills/workflow/scripts/check-task.py --task tasks/0-design-api.md
 ```
 
@@ -243,12 +255,18 @@ This script renders a standardized briefing that tells agents:
 Updates kanban YAML frontmatter (tasks list, current pointer, phase) programmatically to reduce corruption from manual edits.
 
 ```bash
-.agents/skills/workflow/scripts/update-kanban.py --kanban tasks/2-kanban-my-feature.md \
+uv run .agents/skills/workflow/scripts/update-kanban.py --kanban tasks/2-kanban-my-feature.md \
     --add-task tasks/3-some-task.md \
     --set-current tasks/3-some-task.md
+
+# Or, if the script is executable:
+.agents/skills/workflow/scripts/update-kanban.py --kanban tasks/2-kanban-my-feature.md --add-task tasks/3-some-task.md --set-current tasks/3-some-task.md
 ```
 
-All scripts use PEP 723 inline dependencies and can be run directly with `./script.py`.
+All scripts use PEP 723 inline dependencies.
+
+- Preferred: `uv run .agents/skills/workflow/scripts/<script>.py ...`
+- Alternative: run the script directly if it is executable.
 See `scripts/README.md` for full documentation.
 
 ## Workflow Patterns
@@ -303,12 +321,12 @@ All agents must write a work log before completing their task. Work logs are the
 
 ```bash
 # Generate temp file for editing
-TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
+TEMP=$(uv run .agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
 # Edit the temp file, then commit
-.agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" "$TEMP"
+uv run .agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" "$TEMP"
 
 # Or for quick logs
-.agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed the bug"
+uv run .agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed the bug"
 ```
 
 ### Work Log Structure (Summary)

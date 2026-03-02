@@ -6,7 +6,9 @@ Before doing any work:
 
 1. **Run check-task.py to get your briefing:**
    ```bash
-   .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
+    uv run .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
+    # Or, if the script is executable:
+    .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
    ```
 
 2. **Read this file completely** (`role-implementor.md`)
@@ -57,13 +59,13 @@ def execute(task_file):
             work_facts.append("Discovered issues for future tasks")
         
         # Log work (CLI - canonical):
-        # .agents/skills/workflow/scripts/log-task.py quick <task_file> \
+        # uv run .agents/skills/workflow/scripts/log-task.py quick <task_file> \
         #   "Implementation Complete" "<facts>" --role Implementor --new-state review
         return "ok"
 
     except Exception as e:
         # Log escalation (CLI - canonical):
-        # .agents/skills/workflow/scripts/log-task.py quick <task_file> \
+        # uv run .agents/skills/workflow/scripts/log-task.py quick <task_file> \
         #   "Blocked" "Implementation blocked: <error>" --role Implementor --new-state escalated
         return "blocked"
 ```

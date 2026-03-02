@@ -6,7 +6,9 @@ Before doing any work:
 
 1. **Run check-task.py to get your briefing:**
    ```bash
-   .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
+    uv run .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
+    # Or, if the script is executable:
+    .agents/skills/workflow/scripts/check-task.py --task <your_task_file>
    ```
 
 2. **Read this file completely** (`role-architect.md`)
@@ -292,9 +294,9 @@ def design_mode(task_file):
         #   <!-- end workitems -->
         #
         # 4. Log work and transition to review (CLI - canonical):
-        #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Architecture Design Complete")
+        #   TEMP=$(uv run .agents/skills/workflow/scripts/log-task.py generate <task_file> "Architecture Design Complete")
         #   # edit $TEMP
-        #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Architecture Design Complete" $TEMP --role Architect --new-state review
+        #   uv run .agents/skills/workflow/scripts/log-task.py commit <task_file> "Architecture Design Complete" $TEMP --role Architect --new-state review
 
         return work_items
         
@@ -330,9 +332,9 @@ def design_mode(task_file):
             facts.append("Discovered issues for future tasks")
         
         # Populate bounded Work Items block, then log + transition to review:
-        #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Design Complete")
+        #   TEMP=$(uv run .agents/skills/workflow/scripts/log-task.py generate <task_file> "Design Complete")
         #   # edit $TEMP
-        #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Design Complete" $TEMP --role Architect --new-state review
+        #   uv run .agents/skills/workflow/scripts/log-task.py commit <task_file> "Design Complete" $TEMP --role Architect --new-state review
         
         return work_items
 ```
@@ -401,9 +403,9 @@ def design_review_mode(task_file):
     new_state = "done" if decision == "approved" else "escalated"
     
     # Log result using log-task.py (CLI - canonical):
-    #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Design Review ...")
+    #   TEMP=$(uv run .agents/skills/workflow/scripts/log-task.py generate <task_file> "Design Review ...")
     #   # edit $TEMP with findings
-    #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Design Review ..." $TEMP --role Architect --new-state <done|escalated>
+    #   uv run .agents/skills/workflow/scripts/log-task.py commit <task_file> "Design Review ..." $TEMP --role Architect --new-state <done|escalated>
     
     return decision
 
@@ -673,9 +675,9 @@ def review_mode(task_file):
     new_state = "done" if decision == "pass" else "escalated"
     
     # Log result using log-task.py (CLI - canonical):
-    #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Review ...")
+    #   TEMP=$(uv run .agents/skills/workflow/scripts/log-task.py generate <task_file> "Review ...")
     #   # edit $TEMP with findings
-    #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Review ..." $TEMP --role Architect --new-state <done|escalated>
+    #   uv run .agents/skills/workflow/scripts/log-task.py commit <task_file> "Review ..." $TEMP --role Architect --new-state <done|escalated>
     
     return decision
 

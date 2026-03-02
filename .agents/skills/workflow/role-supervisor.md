@@ -48,7 +48,7 @@ def supervisor_loop(initial_task: str, kanban_file: str | None = None):
 
 ```python
 def execute_script(script_path: str, args: dict) -> str:
-    """Execute a bash script with arguments.
+    """Execute a workflow helper script with arguments.
     
     Models bash execution by running script with args.
     Returns stdout (usually file path or status).
@@ -59,8 +59,10 @@ def execute_script(script_path: str, args: dict) -> str:
             {"title": "API Refactor", "request": initial_task}
         )
     """
-    # Executes (preferred): uv run script_path --key value --key2 value2
-    # Or execute script_path directly (scripts have a uv shebang)
+    # Executes (preferred): uv run <script_path> --key value --key2 value2
+    # Or execute <script_path> directly (these scripts have a `uv` shebang).
+    # NOTE: Do NOT assume a repo-root `scripts/` folder. Workflow scripts live under:
+    #   {skill_path}/scripts/
     # Returns stdout as string
     pass
 ```
@@ -76,6 +78,12 @@ kanban_file: <path>
 task_file: <path>
 
 Run check-task.py to get your briefing.
+
+From repo root, run either:
+- uv run .agents/skills/workflow/scripts/check-task.py --task <task_file>
+- .agents/skills/workflow/scripts/check-task.py --task <task_file>
+
+(There is no `scripts-check-task.py` file; the script is `scripts/check-task.py` under the workflow skill.)
 ```
 
 The Task Agent then:
@@ -97,7 +105,7 @@ This minimal prompt instructs the Manager to:
 1. Load the `workflow` skill
 2. Read `role-manager.md` for the algorithm
 3. Read `patterns.md` for workflow patterns
-4. Use `scripts/create-task.py` for creating tasks
+4. Use `.agents/skills/workflow/scripts/create-task.py` for creating tasks (run via `uv run` or the script shebang)
 
 **Inputs/Outputs**:
 
