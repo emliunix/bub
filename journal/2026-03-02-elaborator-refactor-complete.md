@@ -177,10 +177,40 @@ All 18 tasks in `tasks/79-kanban-system-f-elaborator-refactor.md` completed:
 - Performance optimization if needed
 - Additional language features
 
+## Validation Against Theory
+
+### Theoretical Foundation Validated
+
+**Algorithm**: Bidirectional type checking for predicative System F
+
+**Key Theoretical Results**:
+- **Wells (1999)**: System F type inference is undecidable
+- **Our approach**: Bidirectional checking breaks decidability barrier
+- **Foundation**: Dunfield & Krishnaswami (2013) "Complete and Easy Bidirectional Typechecking"
+
+**Validation Results**:
+- ✅ **Soundness**: Well-typed programs are accepted
+- ✅ **Decidability**: Always terminates (Robinson unification + eager substitution)
+- ✅ **Completeness (checking)**: Type checking complete with annotations
+- ⚠️ **Completeness (inference)**: Requires annotations for higher-rank types (by design)
+
+**Extensions Validated**:
+1. **Data Constructors**: `_instantiate_free_vars()` - replaces free TypeVars with fresh TMetas (sound)
+2. **Pattern Matching**: Context extension with pattern types (sound)
+3. **Recursive Types**: Nominal approach (simplified, matches Haskell/ML)
+
+**Deviations from Theory** (by design):
+- No let-generalization (like Idris 2)
+- Predicative only (no impredicativity)
+- Rank-1 polymorphism without annotations
+
+**Full validation report**: `systemf/docs/ALGORITHM_VALIDATION.md`
+
 ## References
 
 - Design: `systemf/docs/ELABORATOR_DESIGN.md`
 - Algorithm: `systemf/docs/TYPE_INFERENCE_ALGORITHM.md`
 - Bugs: `systemf/docs/TYPE_INFERENCE_BUGS.md`
 - Forward refs: `systemf/docs/FORWARD_REFERENCES_RESEARCH.md`
+- Validation: `systemf/docs/ALGORITHM_VALIDATION.md`
 - Tasks: `tasks/79-kanban-system-f-elaborator-refactor.md`
