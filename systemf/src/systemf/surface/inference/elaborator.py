@@ -273,6 +273,13 @@ class TypeElaborator:
                 # Function type should be an arrow
                 func_type = self._apply_subst(func_type)
 
+                # Handle implicit instantiation for polymorphic functions
+                # If func has type ∀a. ..., instantiate it with fresh meta-variables
+                match func_type:
+                    case TypeForall(_, _):
+                        func_type = self._instantiate(func_type)
+                        func_type = self._apply_subst(func_type)
+
                 match func_type:
                     case TypeArrow(param_type, ret_type):
                         # Check argument against parameter type
@@ -401,13 +408,14 @@ class TypeElaborator:
                     # This might be a built-in or the constructor wasn't registered
                     con_type = self._fresh_meta(f"con_{name}")
 
-                con_type = self._apply_subst(con_type)
-
-                # Instantiate polymorphic constructor type
+                # Instantiate polymorphic constructor type (handles nested foralls)
                 con_type = self._instantiate(con_type)
 
                 # Instantiate free type variables with fresh meta-variables
                 con_type = self._instantiate_free_vars(con_type)
+
+                # Apply substitution to resolve any meta-variables
+                con_type = self._apply_subst(con_type)
 
                 # Check arguments against constructor parameter types
                 core_args = []
@@ -439,24 +447,31 @@ class TypeElaborator:
                 # Pattern matching: infer scrutinee type, check branches
                 core_scrut, scrut_type = self.infer(scrutinee, ctx)
 
-                # All branches must return the same type
-                result_type: Optional[Type] = None
-                core_branches = []
-
+                # Collect all branch results first
+                branch_results: list[tuple[core.Branch, Type]] = []
                 for branch in branches:
                     core_branch, branch_type = self._check_branch(branch, scrut_type, ctx)
-                    core_branches.append(core_branch)
+                    branch_results.append((core_branch, branch_type))
 
-                    if result_type is None:
-                        result_type = branch_type
-                    else:
-                        # Unify with previous branches
-                        branch_type = self._apply_subst(branch_type)
+                # All branches must return the same type
+                # Apply current substitution to all branch types first
+                for i in range(len(branch_results)):
+                    branch_results[i] = (
+                        branch_results[i][0],
+                        self._apply_subst(branch_results[i][1]),
+                    )
+
+                # Now unify all branches to find common type
+                if len(branch_results) > 0:
+                    result_type = branch_results[0][1]
+                    for i in range(1, len(branch_results)):
+                        self._unify(result_type, branch_results[i][1], location)
                         result_type = self._apply_subst(result_type)
-                        self._unify(result_type, branch_type, location)
+                else:
+                    result_type = self._fresh_meta("result")
 
-                final_result_type = result_type if result_type else self._fresh_meta("result")
-                final_result_type = self._apply_subst(final_result_type)
+                final_result_type = self._apply_subst(result_type)
+                core_branches = [br for br, _ in branch_results]
 
                 core_term = core.Case(location, core_scrut, core_branches)
                 return (core_term, final_result_type)
@@ -748,6 +763,18 @@ class TypeElaborator:
                 # Now check term against the (unified) type
                 return self.check(term_inner, expected, ctx)
 
+            case SurfaceCase(scrutinee, branches, location):
+                # Case expression: infer scrutinee, check branches against expected result
+                core_scrut, scrut_type = self.infer(scrutinee, ctx)
+
+                # Check all branches against the expected result type
+                core_branches = []
+                for branch in branches:
+                    core_branch = self._check_branch_check_mode(branch, scrut_type, expected, ctx)
+                    core_branches.append(core_branch)
+
+                return core.Case(location, core_scrut, core_branches)
+
             case _:
                 # For other cases, infer and unify
                 core_term, inferred_type = self.infer(term, ctx)
@@ -776,6 +803,7 @@ class TypeElaborator:
         branch: SurfaceBranch,
         scrut_type: Type,
         ctx: TypeContext,
+        expected_result: Type | None = None,
     ) -> tuple[core.Branch, Type]:
         """Check a case branch against a scrutinee type.
 
@@ -783,22 +811,50 @@ class TypeElaborator:
             branch: The branch to check
             scrut_type: Type of the scrutinee
             ctx: Current context
+            expected_result: Expected result type for the branch body (bidirectional checking)
 
         Returns:
             Tuple of (core branch, result type)
         """
-        # Extend context with pattern variables
-        # For now, create fresh types for pattern variables
+        # Look up constructor and validate pattern
+        constr_name = branch.pattern.constructor
+        arg_types: list[Type] = []
+
+        if constr_name in ctx.constructors:
+            constr_type = ctx.constructors[constr_name]
+            # Instantiate polymorphic constructor type
+            constr_type = self._instantiate(constr_type)
+            constr_type = self._apply_subst(constr_type)
+
+            # Extract argument types and result type from constructor
+            # Constructor type is: arg1 -> arg2 -> ... -> ResultType
+            current = constr_type
+            while isinstance(current, TypeArrow):
+                arg_types.append(current.arg)
+                current = current.ret
+            result_type = current
+
+            # Unify constructor result with scrutinee type
+            self._unify(result_type, scrut_type, branch.location)
+
+        # Bind pattern variables with correct types
         branch_ctx = ctx
-        pattern_var_types = []
-
-        for var_name in branch.pattern.vars:
-            var_type = self._fresh_meta(var_name)
+        for i, var_name in enumerate(branch.pattern.vars):
+            if i < len(arg_types):
+                var_type = arg_types[i]
+            else:
+                # Unknown constructor or too many pattern variables
+                var_type = self._fresh_meta(var_name)
+            var_type = self._apply_subst(var_type)
             branch_ctx = branch_ctx.extend_term(var_type)
-            pattern_var_types.append(var_type)
 
-        # Infer body type in extended context
-        core_body, body_type = self.infer(branch.body, branch_ctx)
+        # Check or infer body type based on bidirectional typing
+        # According to Pierce & Turner, case branches should CHECK against expected type
+        if expected_result is not None:
+            core_body = self.check(branch.body, expected_result, branch_ctx)
+            body_type = expected_result
+        else:
+            core_body, body_type = self.infer(branch.body, branch_ctx)
 
         core_branch = core.Branch(
             pattern=core.Pattern(branch.pattern.constructor, branch.pattern.vars),
@@ -806,6 +862,67 @@ class TypeElaborator:
         )
 
         return (core_branch, body_type)
+
+    def _check_branch_check_mode(
+        self,
+        branch: SurfaceBranch,
+        scrut_type: Type,
+        expected_result: Type,
+        ctx: TypeContext,
+    ) -> core.Branch:
+        """Check a case branch against scrutinee and expected result types.
+
+        This is used in checking mode (bidirectional type checking) where we
+        know the expected result type and check branches against it.
+
+        Args:
+            branch: The branch to check
+            scrut_type: Type of the scrutinee
+            expected_result: Expected result type for the branch body
+            ctx: Current context
+
+        Returns:
+            The elaborated core branch
+        """
+        # Look up constructor and validate pattern
+        constr_name = branch.pattern.constructor
+        arg_types: list[Type] = []
+
+        if constr_name in ctx.constructors:
+            constr_type = ctx.constructors[constr_name]
+            # Instantiate polymorphic constructor type
+            constr_type = self._instantiate(constr_type)
+            constr_type = self._apply_subst(constr_type)
+
+            # Extract argument types and result type from constructor
+            # Constructor type is: arg1 -> arg2 -> ... -> ResultType
+            current = constr_type
+            while isinstance(current, TypeArrow):
+                arg_types.append(current.arg)
+                current = current.ret
+            result_type = current
+
+            # Unify constructor result with scrutinee type
+            self._unify(result_type, scrut_type, branch.location)
+
+        # Bind pattern variables with correct types
+        branch_ctx = ctx
+        for i, var_name in enumerate(branch.pattern.vars):
+            if i < len(arg_types):
+                var_type = arg_types[i]
+            else:
+                # Unknown constructor or too many pattern variables
+                var_type = self._fresh_meta(var_name)
+            var_type = self._apply_subst(var_type)
+            branch_ctx = branch_ctx.extend_term(var_type)
+
+        # Check body against expected result type (bidirectional checking)
+        core_body = self.check(branch.body, expected_result, branch_ctx)
+
+        return core.Branch(
+            pattern=core.Pattern(branch.pattern.constructor, branch.pattern.vars),
+            body=core_body,
+        )
 
     def _instantiate(self, ty: Type) -> Type:
         """Instantiate a polymorphic type by replacing bound variables with meta vars.
@@ -816,13 +933,14 @@ class TypeElaborator:
         Returns:
             The instantiated type
         """
-        # For now, simple implementation - replace forall with body
-        # A full implementation would handle nested foralls and avoid capture
+        # Handle nested foralls recursively by continuing to instantiate
+        # after substituting the outer forall variable
         match ty:
             case TypeForall(var, body):
                 # Replace var with fresh meta
                 meta = self._fresh_meta(var)
-                return self._subst_type_var(body, var, meta)
+                # Recursively instantiate nested foralls
+                return self._instantiate(self._subst_type_var(body, var, meta))
             case _:
                 return ty
 
@@ -993,8 +1111,8 @@ class TypeElaborator:
 
         # Phase 2: Elaborate data declarations FIRST to get constructor types
         # This must happen before term declarations so constructors are available
-        # Create initial context with just globals (no constructors yet)
-        ctx = TypeContext(globals=global_types)
+        # Create initial context with globals AND input constructors
+        ctx = TypeContext(globals=global_types, constructors=constructors or {})
 
         core_decls: list[core.Declaration] = []
         all_constructor_types: dict[str, Type] = {}
@@ -1029,8 +1147,14 @@ class TypeElaborator:
             scope_ctx = ScopeContext(globals=set(global_types.keys()))
             scoped_body = scope_checker.check_term(decl.body, scope_ctx)
 
-            # Step 2: Elaborate the scoped body with type inference
-            core_body, inferred_type = self.infer(scoped_body, ctx)
+            # Step 2: Elaborate the scoped body
+            # Use bidirectional checking: if we have expected type, check against it
+            # Otherwise infer the type
+            if expected_type is not None:
+                core_body = self.check(scoped_body, expected_type, ctx)
+                inferred_type = expected_type
+            else:
+                core_body, inferred_type = self.infer(scoped_body, ctx)
 
             # Unify expected type with inferred type
             if expected_type is not None:
@@ -1111,12 +1235,18 @@ class TypeElaborator:
         # For "data Maybe a = ...", this is "Maybe a"
         result_type = TypeConstructor(decl.name, [TypeVar(p) for p in decl.params])
 
+        # Create a context with type parameters bound
+        # This ensures type variables in constructor args are properly resolved
+        type_ctx = TypeContext()
+        for param in decl.params:
+            type_ctx = type_ctx.extend_type(param)
+
         # Convert constructors and build their types
         core_constructors: list[tuple[str, list[Type]]] = []
         constructor_types: dict[str, Type] = {}
 
         for con_info in decl.constructors:
-            core_args = [self._surface_to_core_type(arg, TypeContext()) for arg in con_info.args]
+            core_args = [self._surface_to_core_type(arg, type_ctx) for arg in con_info.args]
             core_constructors.append((con_info.name, core_args))
 
             # Build constructor type: args -> result

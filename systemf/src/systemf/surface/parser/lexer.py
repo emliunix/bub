@@ -111,7 +111,7 @@ class Lexer:
         ("NUMBER", r"\d+"),
         # Identifiers and constructors (order matters!)
         ("CONSTRUCTOR", r"[A-Z][a-zA-Z0-9_]*"),
-        ("IDENT", r"[a-z_][a-zA-Z0-9_]*"),
+        ("IDENT", r"[a-z_][a-zA-Z0-9_']*"),
     ]
 
     def __init__(self, source: str, filename: str | None = None) -> None:
