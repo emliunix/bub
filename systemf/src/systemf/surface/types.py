@@ -163,6 +163,52 @@ class SurfaceAbs(SurfaceTerm):
 
 
 @dataclass(frozen=True)
+class ScopedVar(SurfaceTerm):
+    """Variable reference by de Bruijn index (after scope checking).
+
+    Replaces SurfaceVar during scope checking. Index 0 refers to the
+    nearest binder, index 1 to the next outer binder, etc.
+
+    Attributes:
+        index: De Bruijn index (0 = nearest binder)
+        debug_name: Original name for error messages and debugging
+        location: Source location
+    """
+
+    index: int
+    debug_name: str
+    location: Location
+
+    def __str__(self) -> str:
+        return f"#{self.index}({self.debug_name})"
+
+
+@dataclass(frozen=True)
+class ScopedAbs(SurfaceTerm):
+    """Lambda with parameter name preserved (after scope checking).
+
+    Replaces SurfaceAbs during scope checking. The body contains ScopedVar
+    references instead of SurfaceVar.
+
+    Attributes:
+        var_name: Original parameter name (for error messages)
+        var_type: Optional type annotation
+        body: The function body (contains ScopedVar references)
+        location: Source location
+    """
+
+    var_name: str
+    var_type: Optional[SurfaceType]
+    body: SurfaceTerm
+    location: Location
+
+    def __str__(self) -> str:
+        if self.var_type:
+            return f"\\{self.var_name}:{self.var_type} -> {self.body}"
+        return f"\\{self.var_name} -> {self.body}"
+
+
+@dataclass(frozen=True)
 class SurfaceApp(SurfaceTerm):
     """Function application: f arg."""
 

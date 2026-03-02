@@ -1,4 +1,8 @@
-"""Surface language: parser and elaborator for System F."""
+"""Surface language: parser and elaborator for System F.
+
+This module provides the surface language AST, parser, and the new multi-pass
+elaboration pipeline for System F.
+"""
 
 from systemf.surface.types import (
     SurfaceAbs,
@@ -29,21 +33,12 @@ from systemf.surface.desugar import (
     desugar_lets,
 )
 from systemf.core.errors import ElaborationError
-from systemf.surface.elaborator import (
-    Elaborator,
-    UndefinedTypeVariable,
-    UndefinedVariable,
-    elaborate,
-    elaborate_term,
+from systemf.surface.pipeline import (
+    ElaborationPipeline,
+    PipelineResult,
+    elaborate_module,
 )
 from systemf.surface.parser import Lexer, lex, Token
-# Parser imports - will be added when parser is fully implemented
-# from systemf.surface.parser import (
-#     ParseError,
-#     Parser,
-#     parse_program,
-#     parse_expression,
-# )
 
 __all__ = [
     # AST
@@ -72,18 +67,11 @@ __all__ = [
     "Lexer",
     "Token",
     "lex",
-    # Parser (will be added when parser is fully implemented)
-    # "Parser",
-    # "ParseError",
-    # "parse_expression",
-    # "parse_program",
-    # Elaborator
-    "Elaborator",
+    # Pipeline (new multi-pass elaborator)
+    "ElaborationPipeline",
+    "PipelineResult",
+    "elaborate_module",
     "ElaborationError",
-    "UndefinedVariable",
-    "UndefinedTypeVariable",
-    "elaborate",
-    "elaborate_term",
     # Desugarer
     "Desugarer",
     "LetToLambdaDesugarer",

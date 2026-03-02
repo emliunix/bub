@@ -1,4 +1,12 @@
-"""Interactive REPL for System F interpreter."""
+"""Interactive REPL for System F interpreter.
+
+This module provides an interactive Read-Eval-Print Loop for the System F
+language. It uses the new multi-pass elaboration pipeline:
+
+1. Parse source code into Surface AST
+2. Run pipeline: Surface AST → Scoped AST → Core AST
+3. Evaluate Core AST
+"""
 
 import atexit
 import os
@@ -9,13 +17,10 @@ from pathlib import Path
 
 from systemf.surface.parser import Lexer
 from systemf.surface.parser import Parser, ParseError
-from systemf.surface.elaborator import Elaborator
+from systemf.surface.pipeline import ElaborationPipeline, PipelineResult
 from systemf.surface.desugar import desugar
-from systemf.core.checker import TypeChecker
-from systemf.core.context import Context
-from systemf.core.types import Type
 from systemf.core.module import LLMMetadata
-from systemf.llm.extractor import extract_llm_metadata
+from systemf.core.types import Type
 from systemf.eval.machine import Evaluator
 from systemf.eval.value import VClosure, VConstructor, VTypeClosure, Value
 
@@ -30,7 +35,11 @@ class LoadResult:
 
 
 class REPL:
-    """Interactive Read-Eval-Print Loop."""
+    """Interactive Read-Eval-Print Loop.
+
+    Uses the new multi-pass elaboration pipeline for type checking
+    and compilation.
+    """
 
     HISTORY_FILE = Path.home() / ".systemf_history"
     MAX_HISTORY = 1000
@@ -39,23 +48,21 @@ class REPL:
     def __init__(self) -> None:
         # Persistent environments across REPL inputs
         self.global_values: dict[str, Value] = {}
+        self.global_types: dict[str, Type] = {}
         self.constructor_types: dict[str, Type] = {}
         self.global_terms: set[str] = set()
 
         # LLM function metadata storage
         self.llm_functions: dict[str, LLMMetadata] = {}
 
-        # Initialize elaborator first (it creates its own constructor_types, primitive_types, and global_types)
-        self.elaborator = Elaborator()
-        # Share the elaborator's global_types so prim_op declarations are visible to checker
-        self.global_types = self.elaborator.global_types
-        # Share the elaborator's registries with the checker
-        self.checker = TypeChecker(
-            datatype_constructors=self.elaborator.constructor_types,
-            global_types=self.global_types,
-            primitive_types=self.elaborator.primitive_types,  # type: ignore[arg-type]
-        )
+        # Initialize the new multi-pass pipeline
+        self.pipeline = ElaborationPipeline(module_name="repl")
+
+        # Initialize evaluator with global environment
         self.evaluator = Evaluator(global_env=self.global_values)
+
+        # Track accumulated declarations for incremental elaboration
+        self.accumulated_decls: list = []
 
         self.multiline_buffer: list[str] = []
         self.in_multiline = False
@@ -130,31 +137,38 @@ class REPL:
             if not source.strip():
                 return LoadResult(success=True, count=0)
 
-            # Clear local term environment before loading
-            self.elaborator.term_env = {}
-
             tokens = Lexer(source, filename=str(filepath)).tokenize()
             surface_decls = Parser(tokens).parse()
-            module = self.elaborator.elaborate(surface_decls)
-            types = self.checker.check_program(module.declarations)
 
-            # Extract LLM metadata after type checking, BEFORE evaluation
-            llm_functions = extract_llm_metadata(module, types)
+            # Use the new pipeline for elaboration
+            result = self.pipeline.run(surface_decls, constructors=self.constructor_types)
 
-            # Register LLM functions with evaluator BEFORE evaluating program
-            for name, metadata in llm_functions.items():
+            if not result.success:
+                # Handle pipeline errors
+                error_msg = "; ".join(str(e) for e in result.errors)
+                return LoadResult(success=False, count=0, error=error_msg)
+
+            module = result.module
+
+            # Register LLM functions with evaluator
+            for name, metadata in module.llm_functions.items():
                 self.evaluator.register_llm_closure(name, metadata)
                 self.llm_functions[name] = metadata
 
-            # Now evaluate the program (closures are registered)
+            # Evaluate the program
             values = self.evaluator.evaluate_program(module.declarations)
 
             # Update environments with definitions
             for name, value in values.items():
                 self.global_values[name] = value
-                self.global_types[name] = types[name]
                 self.global_terms.add(name)
-                self.elaborator.global_terms.add(name)
+
+            # Update global types from module
+            for name, ty in module.global_types.items():
+                self.global_types[name] = ty
+
+            # Accumulate declarations for future elaborations
+            self.accumulated_decls.extend(surface_decls)
 
             return LoadResult(success=True, count=len(values))
 
@@ -328,36 +342,40 @@ class REPL:
         First tries to parse as declarations, then falls back to expressions.
         """
         try:
-            # Clear local term environment before each input (globals persist via global_terms)
-            self.elaborator.term_env = {}
-
             tokens = Lexer(source).tokenize()
 
             # Try parsing as declarations first
             try:
                 surface_decls = Parser(tokens).parse()
-                module = self.elaborator.elaborate(surface_decls)
-                types = self.checker.check_program(module.declarations)
 
-                # Extract LLM metadata after type checking, BEFORE evaluation
-                llm_functions = extract_llm_metadata(module, types)
+                # Run the pipeline
+                result = self.pipeline.run(surface_decls, constructors=self.constructor_types)
 
-                # Register LLM functions with evaluator BEFORE evaluating program
-                for name, metadata in llm_functions.items():
+                if not result.success:
+                    # Handle errors from pipeline
+                    for error in result.errors:
+                        print(f"Error: {error}")
+                    return
+
+                module = result.module
+
+                # Register LLM functions with evaluator
+                for name, metadata in module.llm_functions.items():
                     self.evaluator.register_llm_closure(name, metadata)
                     self.llm_functions[name] = metadata
 
-                # Now evaluate the program (closures are registered)
+                # Evaluate the program
                 values = self.evaluator.evaluate_program(module.declarations)
 
                 for name, value in values.items():
-                    ty = types[name]
+                    ty = module.global_types[name]
                     print(f"{name} : {ty} = {self._format_value(value)}")
                     # Update persistent environments
                     self.global_values[name] = value
-                    self.global_types[name] = ty
                     self.global_terms.add(name)
-                    self.elaborator.global_terms.add(name)
+
+                # Accumulate declarations
+                self.accumulated_decls.extend(surface_decls)
 
             except ParseError:
                 # If declaration parsing fails, try as expression
@@ -368,23 +386,45 @@ class REPL:
                 # Desugar operators before elaboration
                 surface_term = desugar(surface_term)
 
-                # Elaborate the expression
-                core_term = self.elaborator.elaborate_term(surface_term)
+                # For expressions, we need to create a temporary declaration
+                # and run it through the pipeline
+                from systemf.surface.types import SurfaceTermDeclaration, SurfaceTypeVar
+                from systemf.utils.location import Location
 
-                # Type check the expression
-                ctx = Context.empty()
-                ty = self.checker.infer(ctx, core_term)
+                loc = Location(line=1, column=1, file="repl")
+                temp_decl = SurfaceTermDeclaration(
+                    name="it",
+                    type_annotation=SurfaceTypeVar("_", loc),  # Will be inferred
+                    body=surface_term,
+                    location=loc,
+                )
 
-                # Evaluate the expression
-                value = self.evaluator.evaluate(core_term)
+                # Run through pipeline
+                result = self.pipeline.run([temp_decl], constructors=self.constructor_types)
 
-                # Store as 'it'
-                self.global_values["it"] = value
-                self.global_types["it"] = ty
-                self.global_terms.add("it")
-                self.elaborator.global_terms.add("it")
+                if not result.success:
+                    for error in result.errors:
+                        print(f"Error: {error}")
+                    return
 
-                print(f"it : {ty} = {self._format_value(value)}")
+                module = result.module
+
+                if len(module.declarations) == 0:
+                    print("Error: No declarations produced")
+                    return
+
+                # Get the evaluated result
+                values = self.evaluator.evaluate_program(module.declarations)
+
+                if "it" in values:
+                    value = values["it"]
+                    ty = module.global_types.get("it", "_")
+
+                    # Store as 'it'
+                    self.global_values["it"] = value
+                    self.global_terms.add("it")
+
+                    print(f"it : {ty} = {self._format_value(value)}")
 
         except Exception as e:
             print(f"\nError: {e}")
