@@ -159,10 +159,6 @@ def parse_type(source: str):
     return (type_parser() << eof).parse(tokens)
 
 
-# Legacy API compatibility aliases
-parse_term = parse_expression
-
-
 def parse_program(source: str, filename: str = "<stdin>") -> list:
     """Parse a complete program from source code.
 
@@ -357,8 +353,4 @@ __all__ = [
     "parse_declaration",
     "parse_type",
     "parse_program",
-    # Legacy compatibility
-    "parse_term",
-    "Parser",
-    "ParseError",
 ]
