@@ -56,27 +56,15 @@ def execute(task_file):
         if discovered:
             work_facts.append("Discovered issues for future tasks")
         
-        # Log work using script - MUST set state to 'review' (Implementor cannot set 'done')
-        execute_script(f"{skill_path}/scripts/log-task.py", {
-            "command": "quick",
-            "task": task_file,
-            "title": "Implementation Complete",
-            "content": "; ".join(work_facts),
-            "role": "Implementor",
-            "new_state": "review"
-        })
+        # Log work (CLI - canonical):
+        # .agents/skills/workflow/scripts/log-task.py quick <task_file> \
+        #   "Implementation Complete" "<facts>" --role Implementor --new-state review
         return "ok"
 
     except Exception as e:
-        # Log escalation - MUST set state to 'escalated'
-        execute_script(f"{skill_path}/scripts/log-task.py", {
-            "command": "quick",
-            "task": task_file,
-            "title": "Blocked",
-            "content": "Implementation blocked: " + str(e),
-            "role": "Implementor",
-            "new_state": "escalated"
-        })
+        # Log escalation (CLI - canonical):
+        # .agents/skills/workflow/scripts/log-task.py quick <task_file> \
+        #   "Blocked" "Implementation blocked: <error>" --role Implementor --new-state escalated
         return "blocked"
 ```
 
@@ -104,7 +92,7 @@ Before implementing, analyze the task:
 **1. Divisibility Check**
 - Can this task be split into independent sub-tasks?
 - Are there natural boundaries (different files, different concerns)?
-- If YES: Escalate with suggested work items for subdivision
+- If YES: Escalate and populate the bounded **Work Items** block with the proposed split
 
 **2. Prerequisites Check**
 - Are all dependencies satisfied?
@@ -133,7 +121,9 @@ Before implementing, analyze the task:
 - Requires: Manager to create 3 separate tasks
 - Impact: Better task granularity
 
-## Suggested Work Items
+## Work Items
+
+<!-- start workitems -->
 
 ```yaml
 work_items:
@@ -146,6 +136,8 @@ work_items:
     expertise_required: ["Data Validation"]
     priority: medium
 ```
+
+<!-- end workitems -->
 
 **Example escalation for missing prerequisites:**
 ```markdown

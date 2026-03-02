@@ -5,9 +5,19 @@ This document defines the complete structure and format of task files in the wor
 ## Overview
 
 Task files are the primary unit of work in the workflow system. They contain:
-- **Metadata** (YAML frontmatter): Role, type, priority, state, dependencies
+- **Metadata** (YAML frontmatter): Assignee, type, priority, state, dependencies
 - **Context**: Background information and requirements
 - **Work Log**: Record of work performed with Facts/Analysis/Conclusion structure
+
+## Naming Model (Role vs Assignee vs Creator)
+
+This workflow intentionally separates three concepts:
+
+- **`assignee` (task YAML field)**: who is currently responsible for the task file (typically `Architect` or `Implementor`). This is what you see in the task view.
+- **actor `role` (log-task CLI arg)**: who is writing a work log entry (e.g., `--role Architect`). This answers “who am I right now” when logging.
+- **`creator-role` (create-task CLI arg)**: who is allowed to create tasks (`manager` or `user` only). This is an enforcement mechanism to prevent agents from creating tasks directly.
+
+Do not invent new YAML fields like `role:` in task frontmatter. Use `assignee:` for assignment and use `--role/--actor-role` when logging.
 
 ## File Structure
 
@@ -17,7 +27,7 @@ assignee: Architect                # Current assignee (Architect or Implementor)
 skills: [code-reading]             # Skills to load (auto-loaded by agent tool)
 expertise: ["System Design"]       # Required expertise domains
 dependencies: []                   # Prerequisite task file paths
-refers: []                         # Related task file paths for reference
+refers: ["tasks/0-kanban.md"]       # MUST include the kanban pointer (and may include other related files)
 type: design                       # Task type (see Type field below)
 priority: high                     # critical | high | medium | low
 state: todo                        # todo | review | done | escalated | cancelled
@@ -36,6 +46,14 @@ Background information, requirements, and relevant context for the task.
 
 ## Description
 Detailed description of what needs to be done.
+
+## Work Items
+
+This section is **structured input for Manager**. It is bounded by markers so scripts can validate and extract it.
+
+<!-- start workitems -->
+work_items: []
+<!-- end workitems -->
 
 ## Work Log
 
@@ -83,7 +101,7 @@ Detailed description of what needs to be done.
 
 The `type` field determines task behavior and routing:
 
-| Type | Role | Description |
+| Type | Typical `assignee` | Description |
 |------|------|-------------|
 | `exploration` | Architect | Explore codebase or problem space |
 | `design` | Architect | Design core types and interfaces |
@@ -149,19 +167,18 @@ Every work log entry MUST include three core sections:
 
 Add these when relevant:
 
-#### Suggested Work Items (Architect only)
+#### Work Items (structured; preferred)
 
-```markdown
-## Suggested Work Items
+Work Items should be written into the task’s **bounded Work Items block**:
 
-```yaml
-work_items:
-  - description: What needs to be done
-    files: [src/file.py]
-    expertise_required: ["Skill1"]
-    priority: high
+```md
+## Work Items
+<!-- start workitems -->
+work_items: []
+<!-- end workitems -->
 ```
-```
+
+This block is intended to be extracted by Manager scripts and can be validated by tooling.
 
 #### Blockers (if status = blocked)
 
@@ -195,15 +212,7 @@ work_items:
 
 **C:** Design complete. 2 work items ready for Manager.
 
-## Suggested Work Items
-
-```yaml
-work_items:
-  - description: Implement User model
-    files: [src/models/user.py]
-    expertise_required: ["Python", "SQLAlchemy"]
-    priority: high
-```
+Work items are recorded in the bounded **Work Items** block (not in the Work Log).
 ```
 
 #### Implementor - Implementation Task

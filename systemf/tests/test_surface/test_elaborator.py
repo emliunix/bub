@@ -300,7 +300,7 @@ class TestElaborateIntLit:
 
     def test_elab_int_in_let(self):
         """Elaborate integer in let binding."""
-        surface = parse_term("let x = 42\n  x")
+        surface = parse_term("let x = 42 in x")
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.Let)
@@ -462,7 +462,7 @@ class TestIntegration:
 
     def test_complex_nested(self):
         """Parse and elaborate complex nested term."""
-        surface = parse_term("let f = \\x -> x\n  f @Int 1")
+        surface = parse_term("let f = \\x -> x in f @Int 1")
         core_term = elaborate_term(surface)
 
         assert isinstance(core_term, core.Let)

@@ -7,6 +7,16 @@ description: Multi-agent workflow system for complex software engineering tasks 
 
 This skill defines a hierarchical multi-agent workflow for complex software engineering tasks that require separation of design from implementation.
 
+## Naming Model (Role vs Assignee vs Creator)
+
+This workflow separates three concepts:
+
+- **Task `assignee` (YAML frontmatter):** who is currently assigned to the task file (`Architect` or `Implementor`).
+- **Actor `--role/--actor-role` (log-task.py):** who is writing the work log entry (“who am I right now”).
+- **`--creator-role` (create-task.py):** who is allowed to create tasks (`manager` or `user` only).
+
+Task files should use `assignee:` (not `role:`) in YAML frontmatter.
+
 ## When to Use
 
 Use this workflow when:
@@ -22,9 +32,8 @@ As a project creator, you initiate the workflow by providing the request. There 
 ### Option 1: Pass request as message (Recommended)
 Simply describe your request or provide a design document. The system will:
 1. Create a kanban file with your request preserved as-is
-2. Create initial Architect task to populate work items from the design
-3. Route to Architect for work item population
-4. After design review, create implementation tasks
+2. Spawn Manager to create the initial task(s) and set `kanban.current` (see `role-manager.md`)
+3. Execute tasks sequentially with mandatory review gates (`state: review` → `state: done`)
 
 **Example:**
 ```
@@ -32,14 +41,14 @@ Create a Module dataclass and update the elaborator to return Module instead of 
 This is Phase 1 of refactoring to support LLM integration.
 ```
 
-**Flow:** User Request → Kanban (preserved) → Architect (populate work items) → Design Review → Implementation Tasks
+**Flow:** User Request → Kanban (preserved) → Manager (plans tasks) → Task execution with review gates
 
 ### Option 2: Create kanban manually and pass the file
 If you want more control over the kanban structure or need to add detailed context:
 
 ```bash
 # Create the kanban using the script
-./scripts/create-kanban.py --title "My Feature" --request "Detailed request here"
+.agents/skills/workflow/scripts/create-kanban.py --title "My Feature" --request "Detailed request here"
 ```
 
 Then pass the created kanban file path:
@@ -117,7 +126,7 @@ The briefing provides:
 
 **Key Design Decisions**:
 
-1. **Manager Never Does Real Work**: Manager MUST NOT explore, edit files, execute shell commands, or make design decisions. Manager ONLY creates task files and updates kanban.md.
+1. **Manager Never Does Real Work**: Manager MUST NOT explore, edit source files, or make design decisions. Manager drives execution by creating tasks, updating task/kanban **frontmatter** (phase transitions), and returning the next task list. Manager MUST NOT run arbitrary shell commands (workflow helper scripts are the exception).
 
 2. **One Work Item at a Time**: When replanning, Manager returns only the immediate next work item rather than all future work. This allows the workflow to adapt based on implementation results before committing to downstream tasks.
 
@@ -191,7 +200,7 @@ Creates kanban files (empty, Manager adds tasks separately):
     --request "Refactor the API layer"
 ```
 
-**Note:** Manager always creates an initial Architect task to populate work items from the design document in the kanban. The Architect reads the kanban's request field and creates work items.
+**Note:** Kanban creation is separate from task creation. Manager populates `kanban.tasks`/`kanban.current` per `role-manager.md`.
 
 ### log-task.py
 Logs work using subcommands (generate/commit/quick):
@@ -200,11 +209,22 @@ Logs work using subcommands (generate/commit/quick):
 TEMP=$(.agents/skills/workflow/scripts/log-task.py generate tasks/0-task.md "Analysis")
 
 # Phase 2: Commit after editing
-.agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" $TEMP
+.agents/skills/workflow/scripts/log-task.py commit tasks/0-task.md "Analysis" $TEMP --role Architect --new-state review
 
 # Or use quick mode for simple logs
-.agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed bug"
+.agents/skills/workflow/scripts/log-task.py quick tasks/0-task.md "Fix" "Fixed bug" --role Architect --new-state review
 ```
+
+**Work Items are structured:** Tasks contain a bounded Work Items block:
+
+```md
+## Work Items
+<!-- start workitems -->
+work_items: []
+<!-- end workitems -->
+```
+
+For `type: design` tasks, `log-task.py` validates this block when transitioning to `state: review` or `state: done`.
 
 ### check-task.py
 Generates agent briefing from task metadata. **Task agents MUST run this first** to get their role instructions.
@@ -218,6 +238,15 @@ This script renders a standardized briefing that tells agents:
 - What skills to load
 - Task context (expertise, dependencies, files)
 - MUST/MUST NOT reminders
+
+### update-kanban.py
+Updates kanban YAML frontmatter (tasks list, current pointer, phase) programmatically to reduce corruption from manual edits.
+
+```bash
+.agents/skills/workflow/scripts/update-kanban.py --kanban tasks/2-kanban-my-feature.md \
+    --add-task tasks/3-some-task.md \
+    --set-current tasks/3-some-task.md
+```
 
 All scripts use PEP 723 inline dependencies and can be run directly with `./script.py`.
 See `scripts/README.md` for full documentation.

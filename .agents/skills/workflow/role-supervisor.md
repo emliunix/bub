@@ -59,7 +59,8 @@ def execute_script(script_path: str, args: dict) -> str:
             {"title": "API Refactor", "request": initial_task}
         )
     """
-    # Executes: python script_path --key value --key2 value2
+    # Executes (preferred): uv run script_path --key value --key2 value2
+    # Or execute script_path directly (scripts have a uv shebang)
     # Returns stdout as string
     pass
 ```

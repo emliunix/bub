@@ -2,29 +2,37 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
-from systemf.core.types import Type
+from systemf.core.types import Type, TypeVar
+from systemf.utils.location import Location
 
 
+@dataclass(frozen=True)
 class Term:
-    """Base class for terms."""
+    """Base class for terms with source location information."""
 
-    pass
+    source_loc: Optional[Location] = None
+    """Source location where this term originated. Used for error reporting."""
 
 
 @dataclass(frozen=True)
 class Var(Term):
-    """Variable reference using de Bruijn index.
+    """Variable reference using de Bruijn index with original name for debugging.
 
     Index 0 refers to the nearest binder, 1 to the next, etc.
-    Example: λx.λy.x  =>  Abs(_, Abs(_, Var(1)))
+    The debug_name preserves the original variable name for error messages and display.
+    Example: λx.λy.x  =>  Abs("x", _, Abs("y", _, Var(None, 1, "x"), None), None)
     """
 
-    index: int
+    index: int = 0
+    debug_name: str = ""  # Original name for error reporting and display
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
+        if self.debug_name:
+            return self.debug_name
         return f"x{self.index}"
 
 
@@ -36,7 +44,8 @@ class Global(Term):
     Resolved to actual values by the evaluator.
     """
 
-    name: str
+    name: str = ""
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return f"@{self.name}"
@@ -44,24 +53,29 @@ class Global(Term):
 
 @dataclass(frozen=True)
 class Abs(Term):
-    """Lambda abstraction: λ(x:σ).t
+    """Lambda abstraction: λ(x:σ).t with original parameter name.
 
     var_type is the type annotation for the bound variable.
+    var_name preserves the original parameter name for error reporting.
     """
 
-    var_type: Type
-    body: Term
+    var_name: str = ""  # Original parameter name
+    var_type: Type = field(default_factory=lambda: TypeVar("_"))
+    body: Term = field(default_factory=lambda: Var())
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
-        return f"λ(_:{self.var_type}).{self.body}"
+        name = self.var_name if self.var_name else "_"
+        return f"λ({name}:{self.var_type}).{self.body}"
 
 
 @dataclass(frozen=True)
 class App(Term):
     """Function application: f arg."""
 
-    func: Term
-    arg: Term
+    func: Term = field(default_factory=lambda: Var())
+    arg: Term = field(default_factory=lambda: Var())
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return f"({self.func} {self.arg})"
@@ -71,8 +85,9 @@ class App(Term):
 class TAbs(Term):
     """Type abstraction: Λα.t"""
 
-    var: str
-    body: Term
+    var: str = ""
+    body: Term = field(default_factory=lambda: Var())
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return f"Λ{self.var}.{self.body}"
@@ -82,8 +97,9 @@ class TAbs(Term):
 class TApp(Term):
     """Type application: t[τ]."""
 
-    func: Term
-    type_arg: Type
+    func: Term = field(default_factory=lambda: Var())
+    type_arg: Type = field(default_factory=lambda: TypeVar("_"))
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return f"({self.func}[{self.type_arg}])"
@@ -93,8 +109,8 @@ class TApp(Term):
 class Pattern:
     """Pattern in a case branch: Constructor name + bound variables."""
 
-    constructor: str
-    vars: list[str]  # Variable names for pattern binding
+    constructor: str = ""
+    vars: list[str] = field(default_factory=list)
 
     def __str__(self) -> str:
         if self.vars:
@@ -106,8 +122,8 @@ class Pattern:
 class Branch:
     """Case branch: pattern -> body."""
 
-    pattern: Pattern
-    body: Term
+    pattern: Pattern = field(default_factory=Pattern)
+    body: Term = field(default_factory=lambda: Var())
 
     def __str__(self) -> str:
         return f"{self.pattern} -> {self.body}"
@@ -117,8 +133,9 @@ class Branch:
 class Constructor(Term):
     """Data constructor application: C t₁...tₙ."""
 
-    name: str
-    args: list[Term]
+    name: str = ""
+    args: list[Term] = field(default_factory=list)
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         if not self.args:
@@ -131,8 +148,9 @@ class Constructor(Term):
 class Case(Term):
     """Pattern matching: case scrutinee of branches."""
 
-    scrutinee: Term
-    branches: list[Branch]
+    scrutinee: Term = field(default_factory=lambda: Var())
+    branches: list[Branch] = field(default_factory=list)
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         branches_str = " | ".join(str(branch) for branch in self.branches)
@@ -146,9 +164,10 @@ class Let(Term):
     Note: 'name' is for debugging only (de Bruijn index 0 in body).
     """
 
-    name: str
-    value: Term
-    body: Term
+    name: str = ""
+    value: Term = field(default_factory=lambda: Var())
+    body: Term = field(default_factory=lambda: Var())
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return f"let {self.name} = {self.value} in {self.body}"
@@ -162,7 +181,8 @@ class IntLit(Term):
     Type checker looks up the Int type from prelude-populated registry.
     """
 
-    value: int
+    value: int = 0
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return str(self.value)
@@ -176,7 +196,8 @@ class StringLit(Term):
     Type checker looks up the String type from prelude-populated registry.
     """
 
-    value: str
+    value: str = ""
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return f'"{self.value}"'
@@ -194,7 +215,8 @@ class PrimOp(Term):
     Usage: App(App(PrimOp("int_plus"), IntLit(1)), IntLit(2))
     """
 
-    name: str
+    name: str = ""
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         return f"$prim.{self.name}"
@@ -208,8 +230,9 @@ class ToolCall(Term):
     The tool is resolved by name at runtime from the tool registry.
     """
 
-    tool_name: str
-    args: list[Term]
+    tool_name: str = ""
+    args: list[Term] = field(default_factory=list)
+    # source_loc inherited from Term
 
     def __str__(self) -> str:
         if not self.args:
@@ -222,9 +245,9 @@ class ToolCall(Term):
 class DataDeclaration:
     """data T a = K₁ τ₁ | ... | Kₙ τₙ"""
 
-    name: str  # Type constructor name
-    params: list[str]  # Type parameters
-    constructors: list[tuple[str, list[Type]]]  # (name, arg_types)
+    name: str = ""  # Type constructor name
+    params: list[str] = field(default_factory=list)  # Type parameters
+    constructors: list[tuple[str, list[Type]]] = field(default_factory=list)  # (name, arg_types)
 
 
 @dataclass(frozen=True)
@@ -241,9 +264,9 @@ class TermDeclaration:
     Docstrings and param_docstrings are stored here for LLM metadata extraction.
     """
 
-    name: str
-    type_annotation: Optional[Type]
-    body: Term
+    name: str = ""
+    type_annotation: Optional[Type] = None
+    body: Term = field(default_factory=lambda: Var())
     pragma: Optional[str] = None
     docstring: Optional[str] = None
     param_docstrings: Optional[list[str]] = None

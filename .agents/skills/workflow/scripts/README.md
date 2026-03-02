@@ -84,9 +84,7 @@ Creates a new kanban file with a validated YAML header. Creates an **empty** kan
 **What it does:**
 1. Creates the kanban file with proper ID sequencing
 2. Preserves user's design document in `request` field
-3. Manager creates initial Architect task to populate work items
-
-**Note:** Manager always starts with Architect task to populate work items from the design document. See role-manager.md for details.
+3. Creates an empty kanban; Manager populates tasks separately (see `../role-manager.md`)
 
 ### 3. log-task.py
 
@@ -108,13 +106,13 @@ echo "Temp file: $TEMP_FILE"
 **Phase 2 - Commit log:**
 ```bash
 # Commit reads temp, formats, appends to task, deletes temp
-.agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" "$TEMP_FILE"
+.agents/skills/workflow/scripts/log-task.py commit ./tasks/0-explore.md "Initial Analysis" "$TEMP_FILE" --role Architect --new-state review
 ```
 
 **Quick mode (direct content):**
 ```bash
 # For simple logs, bypass temp file
-.agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Update" "Fixed the bug in auth module"
+.agents/skills/workflow/scripts/log-task.py quick ./tasks/0-explore.md "Quick Update" "Fixed the bug in auth module" --role Architect --new-state review
 ```
 
 **Subcommand Details:**
@@ -159,7 +157,6 @@ Renders a standardized briefing that agents should follow:
 ```markdown
 # Agent Briefing: Architect
 
-**Role:** Architect
 **Task Type:** design
 **Priority:** high
 
@@ -169,22 +166,24 @@ Renders a standardized briefing that agents should follow:
    - You MUST understand your responsibilities
    - You MUST follow the algorithm specified in your role
 
-2. **Load required skills:**
-   - `code-reading` (read SKILL.md)
+2. **Design Mode Instructions:**
+    - Populate the bounded **Work Items** block in the task file (between `<!-- start workitems -->` and `<!-- end workitems -->`)
+    - Log work using log-task.py and transition state to `review`
+
+3. **Load required skills:**
+    - `code-reading` (read SKILL.md)
 
 ## Task Context
 
 **Expertise Required:** System Design, Python
 **Task File:** tasks/0-design-api.md
 
-## Instructions
-
-You are a **Architect** agent.
+## Critical Reminders
 
 **You MUST:**
-- Read `role-architect.md` completely before starting
-- Follow the instructions in your role definition strictly
-- Load and consult all required skills before proceeding
+- Read ALL required documentation before starting
+- Follow your role's algorithm strictly
+- Load and consult all required skills
 - Write a work log using `log-task.py` before completing
 
 **Do NOT:**
@@ -209,6 +208,19 @@ Apply your expertise in these domains:
 - Lists required skills and expertise
 - Reminds agents of work log requirements
 
+### 5. update-kanban.py
+
+Updates kanban YAML frontmatter programmatically to reduce corruption from manual edits.
+
+**Usage:**
+```bash
+.agents/skills/workflow/scripts/update-kanban.py --kanban tasks/2-kanban-my-feature.md \
+    --add-task tasks/3-some-task.md \
+    --set-current tasks/3-some-task.md
+```
+
+This script updates only frontmatter fields like `tasks`, `current`, and `phase` and preserves the kanban body.
+
 ## File Naming Convention
 
 All files in `./tasks/` use global sequenced numbering:
@@ -226,14 +238,14 @@ tasks/
 
 ```yaml
 ---
-role: Architect
+assignee: Architect
 expertise: ['System Design', 'Python']
 skills: ['code-reading']
 type: design
 priority: high
-state: todo  # todo | done | escalated | cancelled
+state: todo  # todo | review | done | escalated | cancelled
 dependencies: []
-refers: []
+refers: ['tasks/0-kanban-project.md']
 kanban: tasks/0-kanban-project.md
 created: 2026-02-25T11:38:30.998352
 ---
@@ -269,20 +281,35 @@ What needs to be done...
 ---
 ```
 
+## Structured Work Items (Bounded Block)
+
+Tasks include a script-validated Work Items section bounded by markers:
+
+```md
+## Work Items
+<!-- start workitems -->
+work_items: []
+<!-- end workitems -->
+```
+
+Design tasks typically populate `work_items` before transitioning to `state: review`.
+
 ## Kanban File Structure
 
 ```yaml
 ---
 type: kanban
 title: API Refactor
-request: Refactor the API layer for better performance
 created: 2026-02-25T11:38:34.470783
 phase: exploration
-current: 1-explore-request.md
-tasks: ['tasks/1-explore-request.md']
+current: null
+tasks: []
 ---
 
-# Kanban: Workflow Tracking
+# Kanban: API Refactor
+
+## Request
+Refactor the API layer for better performance
 
 ## Plan Adjustment Log
 

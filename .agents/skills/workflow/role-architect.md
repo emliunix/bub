@@ -109,7 +109,6 @@ Architect uses the `type` field in task metadata to determine mode:
 | Task Type | Mode | Description |
 |-----------|------|-------------|
 | `type: design` | DESIGN | Create types.py and define test contracts |
-| `type: design-review` | DESIGN REVIEW | Validate design work items against patterns |
 | `type: review` | REVIEW | Validate implementation quality |
 
 **Manager MUST set correct `type` when creating Architect tasks.**
@@ -124,8 +123,6 @@ def determine_mode(task_file):
         if task_meta.get("state") == "review":
             return design_review_mode(task_file)
         return design_mode(task_file)
-    elif task_meta.get("type") == "design-review":
-        return design_review_mode(task_file)
     elif task_meta.get("type") == "review":
         return review_mode(task_file)
     else:
@@ -244,11 +241,15 @@ def design_mode(task_file):
     task = read(task_file)
     load_skills(task.skills)
     
-    # 1a. Load design from kanban if referred
-    if task.get("refers"):
-        kanban = read(task["refers"])
-        design_doc = kanban.get("request", "")  # User's original design document
-        # Use design_doc as requirements for work item population
+    # 1a. Load design from kanban
+    # - Canonical pointer: task frontmatter `kanban: <path>`
+    # - `refers` is a list (and MUST include the kanban pointer), but should not be treated as a single path.
+    kanban_file = task.get("kanban")
+    if kanban_file:
+        kanban_md = read(kanban_file)
+        # The user's original request/design doc lives in the kanban markdown body under `## Request`.
+        design_doc = extract_markdown_section(kanban_md, "Request")
+        # Use design_doc as requirements for work item population.
     
     # 2. Analyze scope
     scope_analysis = analyze_scope(task)
@@ -276,17 +277,24 @@ def design_mode(task_file):
             "Dependencies documented for parallel/sequential execution"
         ]
         
-        # Log work using script - MUST set state to 'review' (ready for design review)
-        execute_script(f"{skill_path}/scripts/log-task.py", {
-            "command": "quick",
-            "task": task_file,
-            "title": "Architecture Design Complete",
-            "facts": facts,
-            "analysis": analysis,
-            "conclusion": "ok",
-            "work_items": work_items,
-            "new_state": "review"
-        })
+        # 3. Populate the bounded Work Items block in the task file:
+        #
+        #   ## Work Items
+        #   <!-- start workitems -->
+        #   work_items:
+        #     - description: ...
+        #       files: [...]
+        #       related_domains: [...]
+        #       expertise_required: [...]
+        #       dependencies: [...]
+        #       priority: high
+        #       estimated_effort: medium
+        #   <!-- end workitems -->
+        #
+        # 4. Log work and transition to review (CLI - canonical):
+        #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Architecture Design Complete")
+        #   # edit $TEMP
+        #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Architecture Design Complete" $TEMP --role Architect --new-state review
 
         return work_items
         
@@ -321,18 +329,10 @@ def design_mode(task_file):
         if discovered:
             facts.append("Discovered issues for future tasks")
         
-        # Log work using script - MUST set state to 'review' (ready for design review)
-        execute_script(f"{skill_path}/scripts/log-task.py", {
-            "command": "quick",
-            "task": task_file,
-            "title": "Design Complete",
-            "facts": facts,
-            "analysis": ["Design decisions documented"],
-            "conclusion": "ok",
-            "work_items": work_items,
-            "discovered_issues": discovered,
-            "new_state": "review"
-        })
+        # Populate bounded Work Items block, then log + transition to review:
+        #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Design Complete")
+        #   # edit $TEMP
+        #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Design Complete" $TEMP --role Architect --new-state review
         
         return work_items
 ```
@@ -400,14 +400,10 @@ def design_review_mode(task_file):
     # escalate -> escalated (needs redesign)
     new_state = "done" if decision == "approved" else "escalated"
     
-    # Log result using log-task.py
-    execute_script(f"{skill_path}/scripts/log-task.py", {
-        "command": "quick",
-        "task": task_file,
-        "title": f"Design Review {'Approved' if decision == 'approved' else 'Escalated'}",
-        "content": format_design_review_content(decision, all_issues, reasoning),
-        "new_state": new_state
-    })
+    # Log result using log-task.py (CLI - canonical):
+    #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Design Review ...")
+    #   # edit $TEMP with findings
+    #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Design Review ..." $TEMP --role Architect --new-state <done|escalated>
     
     return decision
 
@@ -676,15 +672,10 @@ def review_mode(task_file):
     # escalate -> escalated (needs fixes)
     new_state = "done" if decision == "pass" else "escalated"
     
-    # Log result using log-task.py
-    # See review.md for log_review_result() details
-    execute_script(f"{skill_path}/scripts/log-task.py", {
-        "command": "quick",
-        "task": task_file,
-        "title": f"Review {'Passed' if decision == 'pass' else 'Escalated'}",
-        "content": format_review_content(decision, issues, core_mods, compliance, work_items),
-        "new_state": new_state
-    })
+    # Log result using log-task.py (CLI - canonical):
+    #   TEMP=$(.agents/skills/workflow/scripts/log-task.py generate <task_file> "Review ...")
+    #   # edit $TEMP with findings
+    #   .agents/skills/workflow/scripts/log-task.py commit <task_file> "Review ..." $TEMP --role Architect --new-state <done|escalated>
     
     return decision
 
@@ -846,31 +837,16 @@ Apply the **Core-First Dependency Order** principle when setting dependencies:
 
 ## Work Item Logging (CRITICAL)
 
-**Architect NEVER creates task files.** Instead, Architect logs suggested work items in the work log.
+**Architect NEVER creates task files.** Instead, Architect records work items in the task file’s bounded **Work Items** block.
 
-### How to Log Work Items
+### How to Record Work Items
 
-After completing analysis/design, append work items to the task file work log:
+After completing analysis/design, populate the bounded Work Items block in the task file:
 
 ```markdown
-## Work Log
+## Work Items
 
-### [2026-02-25 14:30:00] Design Session
-
-**Facts:**
-- Defined 3 types in types.py: User, Role, Permission
-- Created test contracts in tests/test_auth.py
-
-**Analysis:**
-- Chose RBAC over ABAC for simplicity
-- Identified 2 implementation components
-
-**Conclusion:**
-- Design complete, ready for implementation
-
-## Suggested Work Items (for Manager)
-
-The following work items should be turned into task files by Manager:
+<!-- start workitems -->
 
 ```yaml
 work_items:
@@ -892,6 +868,23 @@ work_items:
     estimated_effort: medium
     notes: Depends on User model completion
 ```
+
+<!-- end workitems -->
+
+## Work Log
+
+### [2026-02-25 14:30:00] Design Session
+
+**Facts:**
+- Defined 3 types in types.py: User, Role, Permission
+- Created test contracts in tests/test_auth.py
+
+**Analysis:**
+- Chose RBAC over ABAC for simplicity
+- Identified 2 implementation components
+
+**Conclusion:**
+- Design complete, ready for design review
 
 ## References
 
@@ -923,14 +916,14 @@ work_items:
 
 ## Constraints
 
-- **NEVER create task files** - Only Manager creates task files. Architect logs WORK ITEMS in the work log.
+- **NEVER create task files** - Only Manager creates task files. Architect records WORK ITEMS in the bounded Work Items block.
 - types.py is the single source of truth
 - Exceptions allowed but MUST be documented with explanation
 - Review must check: workaround, incomplete, major problems, cleanup needed
 - ALWAYS set appropriate expertise based on task complexity
 - **MUST write work log before completing** (see skills.md Work Logging Requirement)
-  - Design mode: Log facts (what was designed), analysis (decisions made), conclusion (readiness), suggested work items
-  - Review mode: Log facts (what was reviewed), analysis (issues found), conclusion (pass/escalate), suggested work items if escalation
+    - Design mode: Populate Work Items block; log facts (what was designed), analysis (decisions made), conclusion (readiness)
+    - Review mode: Log facts (what was reviewed), analysis (issues found), conclusion (pass/escalate), add work items only if escalation
 - **MUST set correct `new_state` when logging** (Architect controls state transitions):
   - **Design mode** (completing design): Set `new_state: "review"` (ready for design review)
   - **Design Review mode** (approving design): Set `new_state: "done"` (approved, ready for implementation)

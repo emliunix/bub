@@ -91,7 +91,8 @@ Multiple streams? → Integration
 **Characteristics:**
 - Architect explores and reports findings
 - Manager waits before creating implementation tasks
-- Findings logged as suggested work items
+- Findings recorded as structured **Work Items** in the bounded block:
+    `<!-- start workitems --> ... <!-- end workitems -->`
 
 **Task Structure:**
 ```yaml
@@ -118,7 +119,7 @@ Manager reads work items → Selects appropriate pattern
 **Manager Actions:**
 1. Create exploration task
 2. Log plan adjustment: `inadequate_information`
-3. Wait for Architect's suggested work items
+3. Wait for Architect to populate the task’s bounded **Work Items** block
 4. After completion, select appropriate pattern based on findings
 
 **State Transitions:**
@@ -196,7 +197,7 @@ Implementor builds to spec → Review validates → Done
 # Same task file from design phase
 ---
 assignee: Architect
-type: design-review  # or design with state: review
+type: design
 title: "Design Review - <Component>"
 dependencies: []
 skills: [code-reading]

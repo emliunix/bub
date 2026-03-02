@@ -1,7 +1,9 @@
 # Role: Manager
 
 ## Purpose
-Orchestrate workflow phases and task sequencing. **Manager is the ONLY role that updates kanban state.** Manager does NOT perform real work (no exploration, no designing, no editing, no shell commands). Manager only creates tasks, manages tasks, and maintains kanban.md.
+Orchestrate workflow phases and task sequencing. **Manager is the ONLY role that updates kanban state.**
+
+Manager does NOT perform real work (no exploration, no designing, no source edits). Manager’s job is to manage task creation, update task/kanban *metadata* (phase transitions), and drive execution by returning the next task list to run.
 
 ## Design Rationale
 
@@ -10,7 +12,7 @@ Orchestrate workflow phases and task sequencing. **Manager is the ONLY role that
 Manager is a pure coordinator. Manager MUST NOT:
 - Explore the codebase (delegate to Architect with exploration task)
 - Edit source files (delegate to Implementor)
-- Execute shell commands (delegate to appropriate agents)
+- Execute arbitrary shell commands (delegate to appropriate agents)
 - Make design decisions (delegate to Architect)
 - Write code or tests (delegate to Implementor)
 
@@ -19,6 +21,10 @@ Manager MUST ONLY:
 - Update kanban.md state
 - Parse work items from completed tasks
 - Delegate exploration when information is inadequate
+
+**Workflow scripts exception:** To do the above, Manager may run only the workflow helper scripts:
+- `.agents/skills/workflow/scripts/create-task.py`
+- `.agents/skills/workflow/scripts/update-kanban.py`
 
 ### One Work Item at a Time
 
@@ -38,16 +44,10 @@ If Manager cannot adequately plan due to missing information:
 ## Inputs
 
 ```python
-# Mode 1: Kanban Creation
-{
-    "instruction": "create kanban for task: <user_request>"
-}
-
-# Mode 2: Task Reconciliation
+# Task reconciliation (initial call uses done_task=None)
 {
     "kanban_file": "./tasks/7-kanban-api-refactor.md",
-    "done_task": "tasks/3-handler-refactor.md",
-    "tasks": ["tasks/3-handler-refactor.md", "tasks/4-test-update.md"]  # Current task list
+    "done_task": None  # or "tasks/3-handler-refactor.md" after a task completes
 }
 ```
 
@@ -55,18 +55,16 @@ If Manager cannot adequately plan due to missing information:
 
 **Important:** Manager updates kanban file and returns current state.
 
-```python
-# Mode 1 Response
-{
-    "kanban_file": "./tasks/7-kanban-api-refactor.md",
-    "next_task": "tasks/0-explore-codebase.md",  # Next task to execute, or null if complete
-    "tasks": ["tasks/0-explore-codebase.md"]  # Current known task list
-}
+The `tasks` array is REQUIRED: Supervisor uses it to update user-facing progress (e.g., todo writer) without having to read task files itself.
 
-# Mode 2 Response
+```python
+# Response
 {
     "next_task": "tasks/4-test-update.md",  # Next task to execute, or null if complete
-    "tasks": ["tasks/4-test-update.md", "tasks/5-docs-update.md"]  # Updated task list
+    "tasks": [
+        {"file": "tasks/4-test-update.md", "state": "todo"},
+        {"file": "tasks/5-docs-update.md", "state": "todo"}
+    ]  # Updated task list
 }
 ```
 
@@ -76,52 +74,42 @@ If Manager cannot adequately plan due to missing information:
 
 ```python
 def execute(input):
-    if input.get("instruction"):
-        return create_kanban(input.instruction)
-    else:
-        return reconcile_tasks(input.kanban_file, input.done_task, input.tasks)
+    return reconcile_tasks(input.kanban_file, input.done_task)
 
-def create_kanban(user_request):
-    """Create kanban with user's design doc and initial Architect task."""
-    # Create kanban file with user's request preserved unchanged
-    kanban_file = execute_script(f"{skill_path}/scripts/create-kanban.py", {
-        "title": "Workflow",
-        "request": user_request
-    })
-    
-    # Always start with Architect to populate work items from design doc
-    initial_task = execute_script(f"{skill_path}/scripts/create-task.py", {
-        "role": "Architect",
-        "type": "design",
-        "kanban": kanban_file,
-        "creator-role": "manager",
-        "title": "Populate Work Items",
-        "description": "Review the design document in kanban and populate work items",
-        "refers": kanban_file
-    })
-    
-    # Update kanban with initial task
-    kanban = read(kanban_file)
-    kanban["tasks"] = [initial_task]
-    kanban["current"] = initial_task
-    write(kanban_file, kanban)
-    
-    # Log plan creation
-    log_plan_adjustment(kanban_file, "kanban_created", {
-        "action": "Created initial task",
-        "task_type": "design",
-        "note": "Architect will populate work items from design doc"
-    })
-    
-    return {
-        "kanban_file": kanban_file,
-        "next_task": initial_task,
-        "tasks": [initial_task]
-    }
-
-def reconcile_tasks(kanban_file, done_task, tasks):
+def reconcile_tasks(kanban_file, done_task):
     """Process completed task and plan next steps."""
     kb = read(kanban_file)
+
+    # Source of truth: current tasks live in kanban frontmatter.
+    tasks = kb.get("tasks", [])
+
+    # Initial call: create the first Architect task to populate Work Items
+    if done_task is None:
+        initial_task = execute_script(f"{skill_path}/scripts/create-task.py", {
+            "assignee": "Architect",
+            "type": "design",
+            "kanban": kanban_file,
+            "creator-role": "manager",
+            "title": "Populate Work Items",
+            "description": "Review the design document in kanban and populate the bounded Work Items block",
+            "refers": kanban_file,
+        })
+
+        kb["tasks"] = [initial_task]
+        kb["current"] = initial_task
+        write(kanban_file, kb)
+
+        log_plan_adjustment(kanban_file, "kanban_initialized", {
+            "action": "Created initial Architect design task",
+            "task_type": "design",
+            "note": "Architect will populate Work Items from the kanban request",
+        })
+
+        return {
+            "next_task": initial_task,
+            "tasks": summarize_tasks([initial_task]),
+        }
+
     done_content = read(done_task)
 
     # 0. Validate work log structure (REQUIRED)
@@ -160,7 +148,7 @@ def reconcile_tasks(kanban_file, done_task, tasks):
             "exploration_task": exploration_task
         })
 
-    elif task_meta.get("type") in ["design", "design-review"] and current_state == "done":
+    elif task_meta.get("type") == "design" and current_state == "done":
         # Design review completed and approved
         # Extract work items and create implementation tasks
         task_meta["state"] = "done"
@@ -333,8 +321,19 @@ def reconcile_tasks(kanban_file, done_task, tasks):
     
     return {
         "next_task": next_task,
-        "tasks": remaining
+        "tasks": summarize_tasks(remaining)
     }
+
+def summarize_tasks(task_paths):
+    """Return supervisor-friendly task summaries.
+
+    Supervisor must not read task files, so Manager returns `{file,state}`.
+    """
+    out = []
+    for p in task_paths:
+        meta = read(p)
+        out.append({"file": p, "state": meta.get("state", "todo")})
+    return out
 
 def select_next_task(tasks):
     """Select highest priority non-blocked task."""
@@ -469,15 +468,22 @@ def create_tasks_from_work_item(item, parent_task):
 def extract_work_items(task_content):
     """Extract work items from task file content."""
     work_items = []
-    
-    # Find Work Items section
-    if "## Work Items" not in task_content:
+
+    # Preferred: bounded Work Items block (avoids corruption)
+    start = "<!-- start workitems -->"
+    end = "<!-- end workitems -->"
+    start_idx = task_content.find(start)
+    if start_idx == -1:
         return work_items
-    
-    # Extract YAML between section header and next H2 or EOF
-    section = extract_yaml_section(task_content, "## Work Items")
-    if section:
-        work_items = yaml.safe_load(section).get("work_items", [])
+    end_idx = task_content.find(end, start_idx + len(start))
+    if end_idx == -1:
+        return work_items
+
+    block = task_content[start_idx + len(start) : end_idx]
+    try:
+        work_items = yaml.safe_load(block).get("work_items", [])
+    except Exception:
+        return []
     
     return work_items
 
@@ -493,7 +499,8 @@ def validate_work_log(task_content):
     - Entry has **C:** (Conclusion) with status: ok/blocked/escalate
     
     For Architect tasks:
-    - If status is 'ok', should have '## Suggested Work Items' section
+        - If status is 'ok' on a `type: design` task transitioning to `state: review`, the task should contain a valid bounded Work Items block:
+            `<!-- start workitems --> ... <!-- end workitems -->`
     
     Returns: (is_valid: bool, errors: list[str])
     """
@@ -509,7 +516,7 @@ def extract_escalations(task_content):
     Escalation triggers (OR conditions):
     - Header ends with '| escalate' or '| blocked'
     - C: section status word is 'escalate' or 'blocked'
-    - Entry has '## Suggested Work Items' with critical priority items
+        - Work Items block contains critical priority items
       AND status indicates escalation
     
     Returns list of escalation dicts with:
@@ -517,7 +524,7 @@ def extract_escalations(task_content):
     - timestamp: from entry header
     - facts: what was attempted (F: section)
     - analysis: root cause analysis (A: section)
-    - required_work: from Suggested Work Items section (if present)
+    - required_work: from Work Items block (if present)
     """
     pass
 
@@ -570,7 +577,7 @@ def should_trigger_escalation_recovery(entry):
     1. Header ends with '| escalate' (explicit status)
     2. Header ends with '| blocked' AND has Blockers section details
     3. C: section first word is 'ESCALATE' or 'BLOCKED' (uppercase emphasis)
-    4. Entry has Suggested Work Items with critical priority
+    4. Work Items block contains critical priority
        AND conclusion indicates architecture/core types issue
     
     Do NOT trigger:
@@ -608,7 +615,7 @@ def extract_blockers(task_content):
 
 ```bash
 execute_script(f"{skill_path}/scripts/create-task.py", {
-    "role": "Architect",
+    "assignee": "Architect",
     "expertise": "System Design,Python",
     "skills": "code-reading",
     "title": "Design API",
@@ -628,14 +635,15 @@ The script automatically:
 **Example Task Structure:**
 ```yaml
 ---
-role: Implementor
+assignee: Implementor
 skills: [python-project]
 expertise: ["Software Engineering", "Type Theory"]
 dependencies: []
-refers: []
+refers: ["tasks/0-kanban-project.md"]
 type: implement     # exploration | design | review | implement | redesign
 priority: high      # critical | high | medium | low
-state: todo         # todo | done | escalated | cancelled
+state: todo         # todo | review | done | escalated | cancelled
+kanban: tasks/0-kanban-project.md
 ---
 
 # Task: Title
@@ -677,7 +685,7 @@ The `state` field tracks task lifecycle:
 - **Delegate exploration** - When information is inadequate, create exploration task for Architect
 - **Return partial task lists** - Tasks list is "known so far", will be adjusted later
 - **Select by priority** - Highest priority non-blocked task becomes next_task
-- **NEVER modify task content** - Only update meta.dependencies
+- **Only edit YAML frontmatter** - Manager may update frontmatter fields for coordination (e.g., `assignee`, `type`, `state`, `dependencies`, `refers`). Do NOT edit task body or work logs.
 - **NEVER spawn subagents** - Only create task files
 - **ALWAYS write kanban updates before returning**
 - **If no ready tasks exist** - Check for circular dependencies, escalate to supervisor if found
@@ -715,7 +723,7 @@ Every significant decision is logged:
 |-----------|----------------|
 | `exploration` | `code-reading` |
 | `design` | `code-reading`, domain-specific |
-| `design-review` | `code-reading`, workflow |
+| `design` (when `state: review`) | `code-reading`, workflow |
 | `review` | `code-reading` |
 | `implement` | Skills from work item + `testing` if tests needed |
 | `redesign` | `code-reading`, domain-specific |
@@ -745,8 +753,8 @@ Every significant decision is logged:
 **Manager always starts with Architect to populate work items:**
 
 Regardless of request clarity, Manager:
-1. Creates kanban with user's design doc preserved in `request` field
-2. Creates initial `design` task for Architect with `refers: kanban_file`
+1. Uses the kanban created by Supervisor (user request preserved in `## Request`)
+2. Creates initial `design` task for Architect (task frontmatter includes `kanban: <kanban_file>` and `refers` includes the kanban pointer)
 3. Architect reads design from kanban and populates work items
 4. Design review validates work items
 5. Manager creates implementation tasks from approved work items

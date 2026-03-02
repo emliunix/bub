@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# dependencies = []
+# dependencies = ["pyyaml"]
 # requires-python = ">=3.12"
 # ///
 """Log work to a task file using two-phase commit.
@@ -41,6 +41,12 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    print("Error: PyYAML required. Install with: pip install pyyaml", file=sys.stderr)
+    sys.exit(1)
 
 
 def slugify(text: str) -> str:
@@ -96,6 +102,60 @@ def get_assignee(task_content: str) -> str | None:
     frontmatter = task_content[:frontmatter_end]
     match = re.search(r"^assignee:\s*(\w+)", frontmatter, re.MULTILINE)
     return match.group(1) if match else None
+
+
+def get_task_type(task_content: str) -> str | None:
+    """Extract the task type from YAML frontmatter."""
+    if not task_content.startswith("---"):
+        return None
+
+    frontmatter_end = task_content.find("\n---", 3)
+    if frontmatter_end == -1:
+        return None
+
+    frontmatter = task_content[:frontmatter_end]
+    match = re.search(r"^type:\s*(\w+)", frontmatter, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def extract_bounded_block(task_content: str, start_marker: str, end_marker: str) -> str | None:
+    """Extract content between two marker lines (exclusive)."""
+    start_idx = task_content.find(start_marker)
+    if start_idx == -1:
+        return None
+    end_idx = task_content.find(end_marker, start_idx + len(start_marker))
+    if end_idx == -1:
+        return None
+    return task_content[start_idx + len(start_marker) : end_idx].strip()
+
+
+def validate_work_items_block(task_content: str) -> tuple[bool, str]:
+    """Validate the structured Work Items block.
+
+    The canonical block is bounded by:
+      <!-- start workitems -->
+      ...YAML...
+      <!-- end workitems -->
+
+    The YAML must parse into a mapping with key `work_items` whose value is a list.
+    """
+    block = extract_bounded_block(task_content, "<!-- start workitems -->", "<!-- end workitems -->")
+    if block is None:
+        return False, "Missing Work Items block markers (<!-- start workitems --> ... <!-- end workitems -->)."
+
+    try:
+        data = yaml.safe_load(block)
+    except Exception as e:
+        return False, f"Invalid YAML in Work Items block: {e}"
+
+    if not isinstance(data, dict):
+        return False, "Work Items block YAML must be a mapping (e.g., work_items: [])."
+    if "work_items" not in data:
+        return False, "Work Items block YAML must contain `work_items`."
+    if not isinstance(data["work_items"], list):
+        return False, "`work_items` must be a list."
+
+    return True, ""
 
 
 def validate_state_transition(current_state: str | None, new_state: str, role: str) -> tuple[bool, str]:
@@ -234,6 +294,14 @@ def cmd_commit(task_file: Path, title: str, temp_file: Path, role: str, new_stat
     # Read task file
     task_content = task_file.read_text(encoding="utf-8")
 
+    # Validate work items block for design tasks when publishing for review/done
+    task_type = get_task_type(task_content)
+    if task_type == "design" and new_state in {"review", "done"}:
+        ok, msg = validate_work_items_block(task_content)
+        if not ok:
+            print(f"Error: {msg}", file=sys.stderr)
+            sys.exit(1)
+
     # Validate and update state (required)
     current_state = get_current_state(task_content)
     is_valid, error_msg = validate_state_transition(current_state, new_state, role)
@@ -271,6 +339,14 @@ def cmd_quick(task_file: Path, title: str, content: str, role: str, new_state: s
     log_entry = format_work_log(title, temp_content)
 
     task_content = task_file.read_text(encoding="utf-8")
+
+    # Validate work items block for design tasks when publishing for review/done
+    task_type = get_task_type(task_content)
+    if task_type == "design" and new_state in {"review", "done"}:
+        ok, msg = validate_work_items_block(task_content)
+        if not ok:
+            print(f"Error: {msg}", file=sys.stderr)
+            sys.exit(1)
 
     # Validate and update state (required)
     current_state = get_current_state(task_content)
@@ -358,9 +434,15 @@ WORK LOG FORMAT:
     commit_parser.add_argument(
         "--role",
         "-r",
-        required=True,
+        required=False,
         choices=["Architect", "Implementor", "Manager", "Supervisor", "user"],
-        help="Role of the agent logging work. Used for permission checks.",
+        help="Role of the agent logging work (actor role). Used for permission checks.",
+    )
+    commit_parser.add_argument(
+        "--actor-role",
+        required=False,
+        choices=["Architect", "Implementor", "Manager", "Supervisor", "user"],
+        help="Alias for --role (who is logging).",
     )
     commit_parser.add_argument(
         "--new-state",
@@ -381,9 +463,15 @@ WORK LOG FORMAT:
     quick_parser.add_argument(
         "--role",
         "-r",
-        required=True,
+        required=False,
         choices=["Architect", "Implementor", "Manager", "Supervisor", "user"],
-        help="Role of the agent logging work. Used for permission checks.",
+        help="Role of the agent logging work (actor role). Used for permission checks.",
+    )
+    quick_parser.add_argument(
+        "--actor-role",
+        required=False,
+        choices=["Architect", "Implementor", "Manager", "Supervisor", "user"],
+        help="Alias for --role (who is logging).",
     )
     quick_parser.add_argument(
         "--new-state",
@@ -397,9 +485,17 @@ WORK LOG FORMAT:
     if args.command == "generate":
         cmd_generate(Path(args.task), args.title)
     elif args.command == "commit":
-        cmd_commit(Path(args.task), args.title, Path(args.temp_file), args.role, args.new_state)
+        actor_role = args.role or args.actor_role
+        if not actor_role:
+            print("Error: missing required argument: --role/--actor-role", file=sys.stderr)
+            sys.exit(1)
+        cmd_commit(Path(args.task), args.title, Path(args.temp_file), actor_role, args.new_state)
     elif args.command == "quick":
-        cmd_quick(Path(args.task), args.title, args.content, args.role, args.new_state)
+        actor_role = args.role or args.actor_role
+        if not actor_role:
+            print("Error: missing required argument: --role/--actor-role", file=sys.stderr)
+            sys.exit(1)
+        cmd_quick(Path(args.task), args.title, args.content, actor_role, args.new_state)
     else:
         parser.print_help()
         sys.exit(1)

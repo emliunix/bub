@@ -71,7 +71,8 @@ def get_instructions(role: str, task_type: str) -> list:
             instructions.append("   - Create or update types.py with type definitions")
             instructions.append("   - Define test contracts")
             instructions.append("   - Break large scope into components with dependencies")
-            instructions.append("   - Log work using log-task.py with work items for Manager")
+            instructions.append("   - Populate the bounded **Work Items** block in the task file (between `<!-- start workitems -->` and `<!-- end workitems -->`)")
+            instructions.append("   - Log work using log-task.py and transition state to `review`")
         elif task_type == "review":
             instructions.append("")
             instructions.append("2. **Review Mode Instructions:**")
@@ -85,7 +86,8 @@ def get_instructions(role: str, task_type: str) -> list:
             instructions.append("2. **Exploration Mode Instructions:**")
             instructions.append("   - Explore codebase to understand structure")
             instructions.append("   - Gather information for planning")
-            instructions.append("   - Document findings and create work items")
+            instructions.append("   - Record findings as structured Work Items in the bounded Work Items block")
+            instructions.append("   - Log work using log-task.py and transition state to `review`")
         elif task_type == "redesign":
             instructions.append("")
             instructions.append("2. **Redesign Mode Instructions:**")
@@ -119,7 +121,7 @@ def get_instructions(role: str, task_type: str) -> list:
 
 def render_briefing(metadata: dict, task_path: str) -> str:
     """Render agent briefing from task metadata."""
-    role = metadata.get("assignee", "Unknown")
+    assignee = metadata.get("assignee", "Unknown")
     expertise = metadata.get("expertise", [])
     skills = metadata.get("skills", [])
     task_type = metadata.get("type", "unknown")
@@ -128,7 +130,7 @@ def render_briefing(metadata: dict, task_path: str) -> str:
     refers = metadata.get("refers", [])
 
     lines = [
-        f"# Agent Briefing: {role}",
+        f"# Agent Briefing: {assignee}",
         "",
         f"**Task Type:** {task_type}",
         f"**Priority:** {priority}",
@@ -138,7 +140,7 @@ def render_briefing(metadata: dict, task_path: str) -> str:
     ]
 
     # Add conditional instructions based on role and type
-    lines.extend(get_instructions(role, task_type))
+    lines.extend(get_instructions(assignee, task_type))
 
     # Add skills section
     lines.append("")
@@ -190,9 +192,9 @@ def render_briefing(metadata: dict, task_path: str) -> str:
         lines.append("No specific expertise domains specified.")
 
     # Determine what to read first
-    first_doc = f"role-{role.lower()}.md"
-    if role == "Architect" and task_type == "review":
-        first_doc = f"role-{role.lower()}.md` AND `review.md"
+    first_doc = f"role-{assignee.lower()}.md"
+    if assignee == "Architect" and task_type == "review":
+        first_doc = "role-architect.md AND review.md"
 
     lines.extend([
         "",

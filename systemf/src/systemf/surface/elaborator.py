@@ -126,12 +126,13 @@ class Elaborator:
         or PrimOp for $prim.xxx names.
         """
         if name in self.term_env:
-            return core.Var(self.term_env[name])
+            index = self.term_env[name]
+            return core.Var(location, index, name)
         if name in self.global_terms:
-            return core.Global(name)
+            return core.Global(location, name)
         if name.startswith("$prim."):
             op_name = name[6:]  # Strip "$prim."
-            return core.PrimOp(op_name)
+            return core.PrimOp(location, op_name)
         raise UndefinedVariable(name, location)
 
     def _add_type_binding(self, name: str) -> None:
@@ -317,7 +318,7 @@ class Elaborator:
         return core.TermDeclaration(
             name=decl.name,
             type_annotation=core_type,
-            body=core.PrimOp(f"llm.{decl.name}"),
+            body=core.PrimOp(decl.location, f"llm.{decl.name}"),
             pragma=pragma_params,
             docstring=func_docstring,
             param_docstrings=param_docstrings if param_docstrings else None,
@@ -371,7 +372,7 @@ class Elaborator:
         return core.TermDeclaration(
             name=name,
             type_annotation=core_type,
-            body=core.PrimOp(full_name),
+            body=core.PrimOp(location, full_name),
             pragma=pragma_str,
         )
 
@@ -406,15 +407,15 @@ class Elaborator:
                 core_body = self.elaborate_term(body)
                 self._remove_term_binding(var)
 
-                return core.Abs(core_var_type, core_body)
+                return core.Abs(location, var, core_var_type, core_body)
 
             case SurfaceApp(func, arg, location):
                 core_func = self.elaborate_term(func)
                 core_arg = self.elaborate_term(arg)
                 # If func is a constructor, convert App to Constructor with args
                 if isinstance(core_func, core.Constructor):
-                    return core.Constructor(core_func.name, core_func.args + [core_arg])
-                return core.App(core_func, core_arg)
+                    return core.Constructor(location, core_func.name, core_func.args + [core_arg])
+                return core.App(location, core_func, core_arg)
 
             case SurfaceTypeAbs(var, body, location):
                 # Extend type environment and elaborate body
@@ -422,7 +423,7 @@ class Elaborator:
                 core_body = self.elaborate_term(body)
                 self._remove_type_binding(var)
 
-                return core.TAbs(var, core_body)
+                return core.TAbs(location, var, core_body)
 
             case SurfaceTypeApp(func, type_arg, location):
                 core_func = self.elaborate_term(func)
@@ -431,7 +432,7 @@ class Elaborator:
                 # type applications at runtime. The type checker will handle the type.
                 if isinstance(core_func, core.Constructor):
                     return core_func
-                return core.TApp(core_func, core_type_arg)
+                return core.TApp(location, core_func, core_type_arg)
 
             case SurfaceLet(bindings=bindings, body=body, location=location):
                 # Handle multiple let bindings by nesting them
@@ -451,7 +452,7 @@ class Elaborator:
                 # Build nested lets from the inside out
                 result = core_body
                 for name, core_value in reversed(core_values):
-                    result = core.Let(name, core_value, result)
+                    result = core.Let(location, name, core_value, result)
 
                 return result
 
@@ -461,7 +462,7 @@ class Elaborator:
 
             case SurfaceConstructor(name, args, location):
                 core_args = [self.elaborate_term(arg) for arg in args]
-                return core.Constructor(name, core_args)
+                return core.Constructor(location, name, core_args)
 
             case SurfaceCase(scrutinee, branches, location):
                 core_scrut = self.elaborate_term(scrutinee)
@@ -488,20 +489,20 @@ class Elaborator:
                         )
                     )
 
-                return core.Case(core_scrut, core_branches)
+                return core.Case(location, core_scrut, core_branches)
 
             case SurfaceToolCall(tool_name, args, location):
                 # Elaborate tool call arguments
                 core_args = [self.elaborate_term(arg) for arg in args]
-                return core.ToolCall(tool_name, core_args)
+                return core.ToolCall(location, tool_name, core_args)
 
             case SurfaceIntLit(value, location):
                 # Convert integer literal to core IntLit
-                return core.IntLit(value)
+                return core.IntLit(location, value)
 
             case SurfaceStringLit(value, location):
                 # Convert string literal to core StringLit
-                return core.StringLit(value)
+                return core.StringLit(location, value)
 
             case SurfaceOp(left, op, right, location):
                 # Desugar operator to primitive application

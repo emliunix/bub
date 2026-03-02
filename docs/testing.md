@@ -82,6 +82,18 @@ python scripts/test_e2e_automated.py
 
 ### Operational / Validation Helpers
 
+#### test_workflow_helper_scripts.py
+**Purpose**: Smoke-test the workflow skill helper scripts end-to-end in a temporary workspace (no pytest).
+
+**Last Modified**: 2026-03-02
+
+**Usage**:
+```bash
+uv run python scripts/test_workflow_helper_scripts.py
+```
+
+**What it tests**: create-kanban/create-task/update-kanban/check-task/log-task validation behavior
+
 #### validate_system.py
 **Purpose**: Validates the system-level wiring.
 

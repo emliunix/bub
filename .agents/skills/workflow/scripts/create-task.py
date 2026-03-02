@@ -6,10 +6,10 @@
 """Create a new task file with validated YAML header.
 
 Usage:
-    .agents/skills/workflow/scripts/create-task.py --role Architect --expertise "System Design,Python" --kanban tasks/0-kanban.md --creator-role manager --title "Design API"
+    .agents/skills/workflow/scripts/create-task.py --assignee Architect --expertise "System Design,Python" --kanban tasks/0-kanban.md --creator-role manager --title "Design API"
 
 The script will:
-1. Validate required fields (role, expertise, kanban, creator-role)
+1. Validate required fields (assignee, expertise, kanban, creator-role)
 2. Check creator-role is allowed (manager or user only)
 3. Generate the next sequential ID
 4. Create the task file with proper YAML header
@@ -148,6 +148,12 @@ def generate_task_content(title: str, context: str = "", files: str = "", descri
         content += "## Description\n"
         content += "<!-- What needs to be done -->\n\n"
 
+    content += "## Work Items\n"
+    content += "<!-- Structured, script-validated work items for Manager -->\n"
+    content += "<!-- start workitems -->\n"
+    content += "work_items: []\n"
+    content += "<!-- end workitems -->\n\n"
+
     content += "## Work Log\n"
     content += "<!-- Work logs will be appended here -->\n"
 
@@ -211,6 +217,11 @@ Examples:
     dependencies = parse_list(args.dependencies)
     refers = parse_list(args.refers)
     task_type = args.type or infer_task_type(assignee, args.title)
+
+    # Invariant: every task must carry a pointer back to its kanban via `refers`.
+    # (The canonical pointer is also stored in the `kanban:` field.)
+    if args.kanban and args.kanban not in refers:
+        refers.append(args.kanban)
 
     # Ensure tasks directory exists
     tasks_dir = Path(args.tasks_dir)
