@@ -12,7 +12,6 @@ from systemf.surface.parser import (
     TokenBase,
     IdentifierToken,
     KeywordToken,
-    ConstructorToken,
     OperatorToken,
     DelimiterToken,
     ValidIndent,
@@ -73,13 +72,13 @@ class DummyKeyword(TokenBase):
 
 @dataclass(frozen=True)
 class DummyConstr(TokenBase):
-    """Dummy constructor token for tests."""
+    """Dummy constructor token for tests (now uses IDENT type)."""
 
     name: str
 
     @property
     def type(self) -> str:
-        return "CONSTR"
+        return "IDENT"
 
     @property
     def value(self) -> str:
@@ -465,7 +464,7 @@ class TestWithRealLexer:
         case_tok = next(t for t in tokens if t.type == "CASE")
         assert case_tok.column == 1
 
-        a_tok = next(t for t in tokens if t.type == "CONSTRUCTOR" and t.value == "A")
+        a_tok = next(t for t in tokens if t.type == "IDENT" and t.value == "A")
         assert a_tok.column == 3  # Indented
 
     def test_no_virtual_tokens(self):

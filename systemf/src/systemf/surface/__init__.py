@@ -28,9 +28,7 @@ from systemf.surface.types import (
 )
 from systemf.surface.desugar import (
     Desugarer,
-    LetToLambdaDesugarer,
     desugar,
-    desugar_lets,
 )
 from systemf.core.errors import ElaborationError
 from systemf.surface.pipeline import (

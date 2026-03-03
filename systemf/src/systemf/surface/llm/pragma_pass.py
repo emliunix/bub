@@ -144,18 +144,13 @@ class LLMPragmaPass:
         # This is an LLM function - extract metadata and transform
         self._processed_count += 1
 
-        # Extract parameter docstrings from lambda if present
-        param_docstrings: list[str] = []
-        if isinstance(decl.body, SurfaceAbs) and decl.body.param_docstrings:
-            param_docstrings = [str(ds) if ds else "" for ds in decl.body.param_docstrings]
-
-        # Build LLM metadata
+        # Build LLM metadata (parameter docstrings not supported on lambdas)
         metadata = self._build_llm_metadata(
             name=decl.name,
             docstring=decl.docstring,
             pragma_config=pragma_config,
             core_type=core_type,
-            param_docstrings=param_docstrings if param_docstrings else None,
+            param_docstrings=None,
         )
 
         # Create Core declaration with PrimOp body
@@ -165,7 +160,7 @@ class LLMPragmaPass:
             body=core.PrimOp(decl.location, f"llm.{decl.name}"),
             pragma=pragma_config,
             docstring=decl.docstring,
-            param_docstrings=param_docstrings if param_docstrings else None,
+            param_docstrings=None,
         )
 
         return LLMPragmaResult(

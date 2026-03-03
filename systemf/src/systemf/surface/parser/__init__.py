@@ -26,7 +26,6 @@ from systemf.surface.parser.types import (
     Location,
     Token,
     IdentifierToken,
-    ConstructorToken,
     NumberToken,
     StringToken,
     KeywordToken,
@@ -87,7 +86,6 @@ from systemf.surface.parser.expressions import (
     match_keyword,
     match_symbol,
     variable_parser,
-    constructor_parser,
     literal_parser,
     paren_parser,
     atom_base_parser,
@@ -103,7 +101,6 @@ from systemf.surface.parser.declarations import (
     prim_op_parser,
     constr_parser,
     match_ident,
-    match_constructor,
 )
 
 # Re-export type parser
@@ -281,7 +278,6 @@ __all__ = [
     "Token",
     "TokenBase",
     "IdentifierToken",
-    "ConstructorToken",
     "NumberToken",
     "StringToken",
     "KeywordToken",
@@ -333,7 +329,6 @@ __all__ = [
     "match_keyword",
     "match_symbol",
     "variable_parser",
-    "constructor_parser",
     "literal_parser",
     "paren_parser",
     "atom_base_parser",
@@ -347,7 +342,6 @@ __all__ = [
     "type_parser",
     "constr_parser",
     "match_ident",
-    "match_constructor",
     # Convenience functions
     "parse_expression",
     "parse_declaration",

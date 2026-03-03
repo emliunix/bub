@@ -102,8 +102,8 @@ class TestTokenLocations:
         case_tok = next(t for t in tokens if t.type == "CASE")
         assert case_tok.column == 1
 
-        # Find A constructor at col 3 (indented)
-        a_tok = next(t for t in tokens if t.type == "CONSTRUCTOR" and t.value == "A")
+        # Find A identifier at col 3 (indented)
+        a_tok = next(t for t in tokens if t.type == "IDENT" and t.value == "A")
         assert a_tok.column == 3
 
 
@@ -128,10 +128,10 @@ class TestComplexExamples:
             "CASE",
             "IDENT",
             "OF",
-            "CONSTRUCTOR",
+            "IDENT",
             "ARROW",
             "NUMBER",
-            "CONSTRUCTOR",
+            "IDENT",
             "ARROW",
             "NUMBER",
         ]
@@ -159,7 +159,7 @@ in x + y"""
         tokens = lex(source)
         types = [t.type for t in tokens]
 
-        expected = ["DATA", "CONSTRUCTOR", "EQUALS", "CONSTRUCTOR", "BAR", "CONSTRUCTOR"]
+        expected = ["DATA", "IDENT", "EQUALS", "IDENT", "BAR", "IDENT"]
         assert types == expected
 
 
@@ -271,7 +271,7 @@ class TestUnicodeTokens:
         """Tokenize lambda with type annotation."""
         tokens = lex("λx:Int -> x")
         types = [t.type for t in tokens]
-        assert types == ["LAMBDA", "IDENT", "COLON", "CONSTRUCTOR", "ARROW", "IDENT"]
+        assert types == ["LAMBDA", "IDENT", "COLON", "IDENT", "ARROW", "IDENT"]
 
     def test_mixed_unicode_ascii(self):
         """Tokenize mix of unicode and ASCII symbols."""

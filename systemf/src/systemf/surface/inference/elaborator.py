@@ -249,7 +249,19 @@ class TypeElaborator:
                     )
 
             case GlobalVar(location=location, name=name):
-                # Global variable: look up by name from context
+                # Try looking up as a data constructor first
+                try:
+                    con_type = ctx.lookup_constructor(name)
+                    # Constructor with no args - return Constructor node with empty args
+                    con_type = self._instantiate(con_type)
+                    con_type = self._instantiate_free_vars(con_type)
+                    con_type = self._apply_subst(con_type)
+                    core_term = core.Constructor(location, name, [])
+                    return (core_term, con_type)
+                except NameError:
+                    pass
+
+                # Not a constructor, try global variable lookup
                 try:
                     var_type = ctx.lookup_global(name)
                     # Apply current substitution
@@ -259,7 +271,7 @@ class TypeElaborator:
                     return (core_term, var_type)
                 except NameError:
                     raise TypeError(
-                        f"Undefined global variable '{name}'",
+                        f"Undefined variable '{name}'",
                         location,
                         term,
                     )
@@ -307,7 +319,17 @@ class TypeElaborator:
                         core_arg = self.check(arg, param_type, ctx)
                         # Apply substitution to resolve any meta-variables in return type
                         ret_type = self._apply_subst(ret_type)
-                        return (core.App(location, core_func, core_arg), ret_type)
+
+                        # If the function is a data constructor, accumulate the argument
+                        # instead of creating a separate App node
+                        match core_func:
+                            case core.Constructor(name=name, args=args):
+                                return (
+                                    core.Constructor(location, name, args + [core_arg]),
+                                    ret_type,
+                                )
+                            case _:
+                                return (core.App(location, core_func, core_arg), ret_type)
 
                     case TMeta() as meta:
                         # Unknown function type - create fresh types for param/ret
@@ -661,7 +683,7 @@ class TypeElaborator:
 
         match term:
             case ScopedAbs(location=location, var_name=var_name, var_type=var_type, body=body):
-                # Lambda: expected should be an arrow type
+                # Lambda: expected should be an arrow type (or forall that instantiates to arrow)
                 match expected:
                     case TypeArrow(param_type, ret_type):
                         # If there's an annotation, unify with expected
@@ -677,6 +699,17 @@ class TypeElaborator:
 
                         final_param_type = self._apply_subst(param_type)
                         return core.Abs(location, var_name, final_param_type, core_body)
+
+                    case TypeForall(_, _) as forall_type:
+                        # Lambda against forall: instantiate and check
+                        # Example: checking `λx → x` against `∀a. a → a`
+                        # Instantiate to get `a → a` (with fresh meta), then check lambda
+                        instantiated = self._instantiate(forall_type)
+                        instantiated = self._apply_subst(instantiated)
+
+                        # Now check the lambda against the instantiated type
+                        # This will match the TypeArrow case above
+                        return self.check(term, instantiated, ctx)
 
                     case TMeta() as meta:
                         # Unknown expected type - infer lambda type

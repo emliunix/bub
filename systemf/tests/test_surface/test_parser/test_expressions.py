@@ -19,7 +19,6 @@ from systemf.surface.parser import (
 )
 from systemf.surface.types import (
     SurfaceVar,
-    SurfaceConstructor,
     SurfaceLit,
     SurfaceAbs,
     SurfaceTypeAbs,
@@ -40,10 +39,10 @@ class TestAtomParser:
         assert result.name == "x"
 
     def test_constructor(self):
-        """Parse a constructor."""
+        """Parse a constructor (now treated as variable)."""
         tokens = lex("True")
         result = atom_parser().parse(tokens)
-        assert isinstance(result, SurfaceConstructor)
+        assert isinstance(result, SurfaceVar)
         assert result.name == "True"
 
     def test_integer_literal(self):
@@ -419,13 +418,14 @@ class TestTupleParser:
 
     def test_tuple_mixed(self):
         """Parse tuple with mixed elements."""
-        from systemf.surface.types import SurfaceTuple, SurfaceLit, SurfaceConstructor
+        from systemf.surface.types import SurfaceTuple, SurfaceLit
 
         tokens = lex("(1, True)")
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceTuple)
         assert isinstance(result.elements[0], SurfaceLit)
-        assert isinstance(result.elements[1], SurfaceConstructor)
+        assert isinstance(result.elements[1], SurfaceVar)
+        assert result.elements[1].name == "True"
 
     def test_nested_tuple(self):
         """Parse nested tuples."""

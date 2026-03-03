@@ -149,22 +149,57 @@ class SurfaceVar(SurfaceTerm):
 
 @dataclass(frozen=True, kw_only=True)
 class SurfaceAbs(SurfaceTerm):
-    """Lambda abstraction: \\x -> body or \\x:T -> body.
+    r"""Lambda abstraction: \x -> body or \x:T -> body.
 
-    Supports Haddock-style parameter docstrings: \\x -- ^ docstring -> body
+    Supports multiple parameters: \x y z -> body (desugared to nested lambdas)
     """
 
-    var: str = ""
-    var_type: Optional[SurfaceType] = None
+    # Multi-param support: list of (name, type) pairs
+    # For single param, use params=[(name, type)]
+    params: list[tuple[str, Optional[SurfaceType]]] = field(default_factory=list)
     body: Optional[SurfaceTerm] = None
-    param_docstrings: list[str | None] = field(
-        default_factory=list
-    )  # Docstrings for each parameter
+
+    # Backwards compatibility properties
+    @property
+    def var(self) -> str:
+        """First parameter name (backwards compatibility)."""
+        return self.params[0][0] if self.params else ""
+
+    @property
+    def var_type(self) -> Optional[SurfaceType]:
+        """First parameter type (backwards compatibility)."""
+        return self.params[0][1] if self.params else None
+
+    def __init__(
+        self,
+        params: list[tuple[str, Optional[SurfaceType]]] | None = None,
+        body: SurfaceTerm | None = None,
+        location: Location | None = None,
+        # Backwards compatibility kwargs
+        var: str | None = None,
+        var_type: SurfaceType | None = None,
+    ):
+        """Initialize with backwards compatibility for old API.
+
+        Old API: SurfaceAbs(var="x", var_type=Int, body=..., location=...)
+        New API: SurfaceAbs(params=[("x", Int)], body=..., location=...)
+        """
+        # Handle old API: if var is provided, build params from it
+        if var is not None:
+            params = [(var, var_type)]
+        elif params is None:
+            params = []
+
+        # Use object.__setattr__ since dataclass is frozen
+        object.__setattr__(self, "params", params)
+        object.__setattr__(self, "body", body)
+        object.__setattr__(self, "location", location)
 
     def __str__(self) -> str:
-        if self.var_type:
-            return f"\\{self.var}:{self.var_type} -> {self.body}"
-        return f"\\{self.var} -> {self.body}"
+        if not self.params:
+            return f"\\ -> {self.body}"
+        params_str = " ".join(f"{name}:{ty}" if ty else name for name, ty in self.params)
+        return f"\\{params_str} -> {self.body}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -224,13 +259,51 @@ class SurfaceApp(SurfaceTerm):
 
 @dataclass(frozen=True, kw_only=True)
 class SurfaceTypeAbs(SurfaceTerm):
-    """Type abstraction: /\\a. body (written as /\\a. or Λa.)."""
+    """Type abstraction: /\a. body (written as /\a. or Λa.).
 
-    var: str = ""
+    Supports multiple type variables: /\a b c. body (desugared to nested type abstractions)
+    """
+
+    # Multi-var support: list of type variable names
+    # For single var, use vars=["a"]
+    vars: list[str] = field(default_factory=list)
     body: Optional[SurfaceTerm] = None
 
+    # Backwards compatibility property
+    @property
+    def var(self) -> str:
+        """First type variable name (backwards compatibility)."""
+        return self.vars[0] if self.vars else ""
+
+    def __init__(
+        self,
+        vars: list[str] | None = None,
+        body: SurfaceTerm | None = None,
+        location: Location | None = None,
+        # Backwards compatibility kwargs
+        var: str | None = None,
+    ):
+        """Initialize with backwards compatibility for old API.
+
+        Old API: SurfaceTypeAbs(var="a", body=..., location=...)
+        New API: SurfaceTypeAbs(vars=["a"], body=..., location=...)
+        """
+        # Handle old API: if var is provided, build vars from it
+        if var is not None:
+            vars = [var]
+        elif vars is None:
+            vars = []
+
+        # Use object.__setattr__ since dataclass is frozen
+        object.__setattr__(self, "vars", vars)
+        object.__setattr__(self, "body", body)
+        object.__setattr__(self, "location", location)
+
     def __str__(self) -> str:
-        return f"/\\{self.var}. {self.body}"
+        if not self.vars:
+            return f"/\\. {self.body}"
+        vars_str = " ".join(self.vars)
+        return f"/\\{vars_str}. {self.body}"
 
 
 @dataclass(frozen=True, kw_only=True)

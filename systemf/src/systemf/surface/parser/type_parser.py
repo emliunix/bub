@@ -23,8 +23,9 @@ from systemf.surface.parser.types import (
     OperatorToken,
     DelimiterToken,
     IdentifierToken,
-    ConstructorToken,
     ForallToken,
+    DocstringToken,
+    DocstringType,
 )
 from systemf.surface.types import (
     SurfaceType,
@@ -96,6 +97,25 @@ def match_forall() -> P[ForallToken]:
         if isinstance(token, ForallToken):
             return Result.success(index + 1, token)
         return Result.failure(index, f"expected forall, got {token.type}")
+
+    return parser
+
+
+def match_inline_docstring() -> P[str | None]:
+    """Match an inline docstring token (-- ^ doc).
+
+    Returns:
+        Parser that returns the docstring content or None
+    """
+
+    @P
+    def parser(tokens: list, index: int) -> Result:
+        if index >= len(tokens):
+            return Result.success(index, None)
+        token = tokens[index]
+        if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.INLINE:
+            return Result.success(index + 1, token.content)
+        return Result.success(index, None)
 
     return parser
 
@@ -211,21 +231,18 @@ def type_atom_parser() -> P[SurfaceType]:
             yield match_symbol(")")
             return inner
 
-        # Try type constructor
-        con_token = yield match_token("CONSTRUCTOR").optional()
-        if con_token is not None:
-            from systemf.surface.types import SurfaceTypeConstructor
+        # Try identifier (type constructor or type variable based on naming convention)
+        ident_token = yield match_token("IDENT").optional()
+        if ident_token is not None:
+            from systemf.surface.types import SurfaceTypeConstructor, SurfaceTypeVar
 
-            return SurfaceTypeConstructor(
-                name=con_token.value, args=[], location=con_token.location
-            )
-
-        # Try type variable
-        var_token = yield match_token("IDENT").optional()
-        if var_token is not None:
-            from systemf.surface.types import SurfaceTypeVar
-
-            return SurfaceTypeVar(name=var_token.value, location=var_token.location)
+            name = ident_token.value
+            loc = ident_token.location
+            # Uppercase names are type constructors, lowercase are type variables
+            if name[0].isupper():
+                return SurfaceTypeConstructor(name=name, args=[], location=loc)
+            else:
+                return SurfaceTypeVar(name=name, location=loc)
 
         # No match - return None (will be handled by optional)
         return None
@@ -301,8 +318,10 @@ def type_app_parser() -> P[SurfaceType]:
 def type_arrow_parser() -> P[SurfaceType]:
     """Parse a function type (with arrows).
 
-    Grammar: type_app ("->" type_arrow)?
+    Grammar: type_app ("-- ^ doc" "->" type_arrow)?
     Right-associative: A -> B -> C = A -> (B -> C)
+
+    Supports inline docstrings: String -- ^ Input text -> String
 
     Returns:
         SurfaceType - the parsed function type
@@ -313,6 +332,9 @@ def type_arrow_parser() -> P[SurfaceType]:
     left = yield type_app_parser
     loc = left.location
 
+    # Check for inline docstring before arrow
+    param_doc = yield match_inline_docstring().optional()
+
     # Check for arrow (accepts both ASCII -> and Unicode →)
     arrow = yield match_arrow().optional()
     if arrow is None:
@@ -320,7 +342,7 @@ def type_arrow_parser() -> P[SurfaceType]:
 
     # Parse right side (recursively for right-associativity)
     right = yield type_arrow_parser
-    return SurfaceTypeArrow(arg=left, ret=right, location=loc)
+    return SurfaceTypeArrow(arg=left, ret=right, param_doc=param_doc, location=loc)
 
 
 @generate

@@ -48,7 +48,10 @@ from systemf.surface.inference.errors import (
 )
 from systemf.surface.llm.pragma_pass import LLMPragmaPass, LLMPragmaResult
 from systemf.surface.types import SurfaceDeclaration, SurfaceTermDeclaration
-from systemf.surface.desugar import desugar
+from systemf.surface.desugar import (
+    desugar_term,
+    insert_implicit_type_abstractions,
+)
 
 
 @dataclass
@@ -278,16 +281,25 @@ class ElaborationPipeline:
         desugared = []
         for decl in declarations:
             if isinstance(decl, SurfaceTermDeclaration):
-                # Desugar the body term
-                desugared_body = desugar(decl.body)
+                # Phase 0a: Insert implicit type abstractions
+                # (e.g., `id : ∀a. a → a = λx → x` becomes `id : ∀a. a → a = Λa. λx → x`)
+                decl_with_type_abs = insert_implicit_type_abstractions(decl)
+
+                # Phase 0b: Desugar the body term
+                # Includes: multi-var type abs, multi-arg lambdas, if-then-else, operators
+                if decl_with_type_abs.body is not None:
+                    desugared_body = desugar_term(decl_with_type_abs.body)
+                else:
+                    desugared_body = decl_with_type_abs.body
+
                 desugared.append(
                     SurfaceTermDeclaration(
-                        name=decl.name,
-                        type_annotation=decl.type_annotation,
+                        name=decl_with_type_abs.name,
+                        type_annotation=decl_with_type_abs.type_annotation,
                         body=desugared_body,
-                        location=decl.location,
-                        docstring=decl.docstring,
-                        pragma=decl.pragma,
+                        location=decl_with_type_abs.location,
+                        docstring=decl_with_type_abs.docstring,
+                        pragma=decl_with_type_abs.pragma,
                     )
                 )
             else:

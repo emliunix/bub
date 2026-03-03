@@ -22,7 +22,6 @@ from systemf.surface.parser.types import (
     OperatorToken,
     DelimiterToken,
     IdentifierToken,
-    ConstructorToken,
     DocstringToken,
     PragmaToken,
     DocstringType,
@@ -209,25 +208,6 @@ def match_ident() -> P[IdentifierToken]:
     return parser
 
 
-def match_constructor() -> P[ConstructorToken]:
-    """Match a constructor token.
-
-    Returns:
-        Parser that returns the matched constructor token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, "expected constructor")
-        token = tokens[index]
-        if isinstance(token, ConstructorToken):
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected constructor, got {token.type}")
-
-    return parser
-
-
 # =============================================================================
 # Type Parser (imported from type_parser module)
 # =============================================================================
@@ -258,8 +238,8 @@ def constr_parser() -> P[SurfaceConstructorInfo]:
         if skip_result.status:
             i = skip_result.index
 
-        # Match constructor name
-        con_result = match_constructor()(tokens, i)
+        # Match constructor name (now uses IDENT token)
+        con_result = match_ident()(tokens, i)
         if not con_result.status:
             return con_result
         con_token = con_result.value
@@ -325,7 +305,7 @@ def data_parser() -> P[SurfaceDataDeclaration]:
         loc = data_token.location
 
         # Parse type constructor name
-        name_token = yield match_constructor()
+        name_token = yield match_ident()
         name = name_token.value
 
         # Parse optional type parameters (identifiers)
@@ -432,7 +412,7 @@ def prim_type_parser() -> P[SurfacePrimTypeDecl]:
         loc = prim_token.location
 
         # Parse constructor name
-        name_token = yield match_constructor()
+        name_token = yield match_ident()
         name = name_token.value
 
         return SurfacePrimTypeDecl(name=name, location=loc, docstring=None)
@@ -684,7 +664,6 @@ __all__ = [
     "match_keyword",
     "match_symbol",
     "match_ident",
-    "match_constructor",
     # Constructor parser
     "constr_parser",
     # Declaration parsers

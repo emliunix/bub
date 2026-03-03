@@ -12,7 +12,6 @@ from systemf.surface.parser import (
     TokenBase,
     IdentifierToken,
     KeywordToken,
-    ConstructorToken,
     OperatorToken,
     DelimiterToken,
     AnyIndent,

@@ -43,7 +43,6 @@ from systemf.surface.types import (
     SurfaceApp,
     SurfaceTypeAbs,
     SurfaceTypeApp,
-    SurfaceConstructor,
     SurfaceLit,
     SurfaceAnn,
     SurfaceType,
@@ -180,53 +179,6 @@ def variable_parser() -> P[SurfaceVar]:
     return parser
 
 
-def constructor_parser(
-    constraint: ValidIndent | None = None, greedy: bool = True
-) -> P[SurfaceConstructor]:
-    """Parse a constructor application or nullary constructor.
-
-    Tries to parse arguments greedily until no more atoms can be parsed.
-
-    Args:
-        constraint: Optional layout constraint for checking argument columns
-        greedy: If True, parse arguments greedily (for patterns).
-                If False, only parse constructor name (for expressions).
-
-    Returns:
-        SurfaceConstructor with the constructor name and arguments
-    """
-
-    @generate
-    def parser():
-        token = yield match_token("CONSTRUCTOR")
-        name = token.value
-        loc = token.location
-
-        if not greedy:
-            # For expressions: only parse constructor name
-            # Application is handled by app_parser
-            return SurfaceConstructor(name=name, args=[], location=loc)
-
-        # Parse arguments greedily (constructor application)
-        args: list[SurfaceTerm] = []
-        while True:
-            # Check constraint before parsing next argument
-            if constraint is not None and not isinstance(constraint, AnyIndent):
-                next_col = yield peek_column()
-                if next_col > 0 and not check_valid(constraint, next_col):
-                    break
-
-            # Try to parse an atom argument
-            arg_result = yield atom_parser().optional()
-            if arg_result is None:
-                break
-            args.append(arg_result)
-
-        return SurfaceConstructor(name=name, args=args, location=loc)
-
-    return parser
-
-
 def literal_parser() -> P[SurfaceLit]:
     """Parse an integer or string literal.
 
@@ -337,19 +289,12 @@ def atom_base_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
         if paren is not None:
             return paren
 
-        # Try constructor (non-greedy for expressions)
-        # In expressions, constructor application has same precedence as function app
-        # So "Nil xs" parses as two atoms, not constructor with argument
-        con = yield constructor_parser(constraint, greedy=False).optional()
-        if con is not None:
-            return con
-
         # Try literal
         lit = yield literal_parser().optional()
         if lit is not None:
             return lit
 
-        # Try variable
+        # Try variable (includes all names, constructors resolved in elaborator)
         var = yield variable_parser().optional()
         if var is not None:
             return var
@@ -710,36 +655,19 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
             var_type = yield (match_symbol(":") >> type_app_parser).optional()
             annotated_params.append((var_name, var_type))
 
-        # Optional parameter docstring (-- ^ style) - applies to last param
-        param_doc_token = yield match_token(DocstringType.INLINE).optional()
-        param_docstrings: list[str | None] = []
-        if param_doc_token is not None:
-            content = param_doc_token.value
-            if "^" in content:
-                param_docstrings.append(content.split("^", 1)[1].strip())
-            else:
-                param_docstrings.append("")
-
         # Parse arrow
         yield match_token("ARROW")
 
         # Parse body (respecting layout constraint)
         body = yield expr_parser(constraint)
 
-        # Nest lambdas from right to left
-        # λx y z → body  =>  λx → (λy → (λz → body))
-        result = body
-        # Reverse iterate to build nested structure
-        for var_name, var_type in reversed(annotated_params):
-            result = SurfaceAbs(
-                var=var_name,
-                var_type=var_type,
-                body=result,
-                location=loc,
-                param_docstrings=param_docstrings if result is body else [],
-            )
-
-        return result
+        # Return a single SurfaceAbs with all parameters
+        # Desugaring pass will convert to nested lambdas
+        return SurfaceAbs(
+            params=annotated_params,
+            body=body,
+            location=loc,
+        )
 
     return parser
 
@@ -756,12 +684,13 @@ def type_abs_parser(constraint: ValidIndent) -> P[SurfaceTypeAbs]:
 
     @generate
     def parser():
-        # Match type lambda symbol (TYPELAMBDA token represents Λ or /\\)
+        # Match type lambda symbol (TYPELAMBDA token represents Λ or /\)
         lam_token = yield match_token("TYPELAMBDA")
         loc = lam_token.location
 
         # Parse type variable name(s)
         var_tokens = yield match_token("IDENT").at_least(1)
+        type_vars = [t.value for t in var_tokens]
 
         # Parse dot
         yield match_token("DOT")
@@ -769,12 +698,8 @@ def type_abs_parser(constraint: ValidIndent) -> P[SurfaceTypeAbs]:
         # Parse body (respecting layout constraint)
         body = yield expr_parser(constraint)
 
-        # Build nested type abstractions from right to left
-        result = body
-        for var_token in reversed(var_tokens):
-            result = SurfaceTypeAbs(var=var_token.value, body=result, location=loc)
-
-        return result
+        # Return multi-var type abstraction (desugar pass will handle nesting)
+        return SurfaceTypeAbs(vars=type_vars, body=body, location=loc)
 
     return parser
 
@@ -797,31 +722,24 @@ def pattern_base_parser() -> P[SurfacePattern]:
 
     @generate
     def parser():
-        # Try constructor pattern first (CONSTRUCTOR followed by optional vars)
-        con_token = yield match_token("CONSTRUCTOR").optional()
-        if con_token is not None:
-            constructor = con_token.value
-            loc = con_token.location
+        # Parse pattern name (constructor or variable)
+        # All names use IDENT token - elaborator determines if it's a constructor
+        name_token = yield match_token("IDENT").optional()
+        if name_token is None:
+            yield fail("expected pattern")
 
-            # Parse variable bindings (identifiers)
-            vars = []
-            while True:
-                var_result = yield match_token("IDENT").optional()
-                if var_result is None:
-                    break
-                vars.append(var_result.value)
+        name = name_token.value
+        loc = name_token.location
 
-            return SurfacePattern(constructor=constructor, vars=vars, location=loc)
+        # Parse variable bindings (identifiers)
+        vars = []
+        while True:
+            var_result = yield match_token("IDENT").optional()
+            if var_result is None:
+                break
+            vars.append(var_result.value)
 
-        # Try variable pattern (just an identifier)
-        var_token = yield match_token("IDENT").optional()
-        if var_token is not None:
-            # Variable pattern is just a constructor with no args
-            # (treated as a catch-all variable)
-            return SurfacePattern(constructor=var_token.value, vars=[], location=var_token.location)
-
-        # No match
-        yield fail("expected pattern")
+        return SurfacePattern(constructor=name, vars=vars, location=loc)
 
     return parser
 
@@ -1114,7 +1032,6 @@ __all__ = [
     "match_symbol",
     # Atom parsers
     "variable_parser",
-    "constructor_parser",
     "literal_parser",
     "paren_parser",
     "atom_base_parser",

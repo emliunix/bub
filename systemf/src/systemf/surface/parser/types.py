@@ -141,27 +141,6 @@ class IdentifierToken(TokenBase):
 
 
 @dataclass(frozen=True, kw_only=True)
-class ConstructorToken(TokenBase):
-    """Constructor token (uppercase start)."""
-
-    name: str
-
-    @property
-    def value(self) -> str:
-        return self.name
-
-    @property
-    def type(self) -> str:
-        return "CONSTRUCTOR"
-
-    def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"ConstructorToken({self.value!r}, {self.location})"
-
-
-@dataclass(frozen=True, kw_only=True)
 class NumberToken(TokenBase):
     """Numeric literal token."""
 
@@ -603,7 +582,6 @@ __all__ = [
     "Token",
     "TokenBase",
     "IdentifierToken",
-    "ConstructorToken",
     "NumberToken",
     "StringToken",
     "KeywordToken",

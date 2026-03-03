@@ -1,6 +1,7 @@
 """Desugaring passes for surface language.
 
-Converts syntactic sugar to simpler core constructs.
+Each pass is an independent transformation that can be composed.
+This module provides a collection of standalone desugaring functions.
 """
 
 from __future__ import annotations
@@ -17,17 +18,62 @@ from systemf.surface.types import (
     SurfacePattern,
     SurfacePrimOpDecl,
     SurfaceTerm,
+    SurfaceTermDeclaration,
     SurfaceTypeAbs,
     SurfaceTypeApp,
+    SurfaceTypeArrow,
+    SurfaceTypeForall,
     SurfaceVar,
     SurfaceAnn,
 )
 from systemf.utils.location import Location
 
 
+# =============================================================================
+# Pass 1: If-Then-Else to Case
+# =============================================================================
+
+
+def desugar_if_then_else(term: SurfaceTerm) -> SurfaceTerm:
+    r"""Convert if-then-else to case expression.
+
+    Transforms:
+        if c then t else f
+    To:
+        case c of { True -> t | False -> f }
+
+    This is a bottom-up pass - desugars children first, then the node itself.
+    """
+    # First, recursively desugar children
+    term = _desugar_children(term, desugar_if_then_else)
+
+    # Then transform this node if it's an If
+    match term:
+        case SurfaceIf(cond=cond, then_branch=then_branch, else_branch=else_branch, location=loc):
+            return SurfaceCase(
+                scrutinee=cond,
+                branches=[
+                    SurfaceBranch(
+                        pattern=SurfacePattern(constructor="True", vars=[], location=loc),
+                        body=then_branch,
+                        location=loc,
+                    ),
+                    SurfaceBranch(
+                        pattern=SurfacePattern(constructor="False", vars=[], location=loc),
+                        body=else_branch,
+                        location=loc,
+                    ),
+                ],
+                location=loc,
+            )
+    return term
+
+
+# =============================================================================
+# Pass 2: Operators to Primitive Applications
+# =============================================================================
+
 # Operator to primitive operation name mapping
-# Maps surface operators to primitive names (without $prim. prefix)
-# The prefix is added by the evaluator when looking up implementations
 OPERATOR_TO_PRIM: dict[str, str] = {
     "+": "int_plus",
     "-": "int_minus",
@@ -41,298 +87,331 @@ OPERATOR_TO_PRIM: dict[str, str] = {
 }
 
 
-class Desugarer:
-    """Desugars surface syntax to simpler forms.
+def desugar_operators(term: SurfaceTerm) -> SurfaceTerm:
+    """Convert operator expressions to primitive operation applications.
 
-    Performs transformations like:
-    - if-then-else -> case expressions
-    - let bindings -> lambda applications
-    - Operator expressions -> primitive operation applications
+    Transforms:
+        left + right  ->  ($prim.int_plus left) right
+        left - right  ->  ($prim.int_minus left) right
+        etc.
     """
+    # First, recursively desugar children
+    term = _desugar_children(term, desugar_operators)
 
-    def desugar(self, term: SurfaceTerm) -> SurfaceTerm:
-        """Apply all desugaring passes to a term.
+    # Then transform this node if it's an operator
+    match term:
+        case SurfaceOp(left=left, op=op, right=right, location=loc):
+            prim_name = OPERATOR_TO_PRIM.get(op)
+            if prim_name is None:
+                return term  # Unknown operator, leave as-is
 
-        Args:
-            term: Surface term with potential syntactic sugar
+            # Create the primitive variable reference
+            prim_var = SurfaceVar(name=prim_name, location=loc)
 
-        Returns:
-            Desugared surface term
-        """
-        # Recursively desugar subterms first
-        term = self._desugar_children(term)
+            # Build: ((prim left) right)
+            first_app = SurfaceApp(func=prim_var, arg=left, location=loc)
+            return SurfaceApp(func=first_app, arg=right, location=loc)
 
-        # Apply desugaring transformations
-        term = self._desugar_if_then_else(term)
-        term = self._desugar_multi_arg_lambda(term)
-        term = self._desugar_letrec(term)
-        term = self._desugar_operators(term)
+    return term
 
-        return term
 
-    def _desugar_children(self, term: SurfaceTerm) -> SurfaceTerm:
-        """Recursively desugar children of a term."""
-        match term:
-            case SurfaceAbs(var=var, var_type=var_type, body=body, location=loc):
-                assert body is not None
-                return SurfaceAbs(var=var, var_type=var_type, body=self.desugar(body), location=loc)
+# =============================================================================
+# Pass 3: Implicit Type Abstractions for Rank-1 Polymorphism
+# =============================================================================
 
-            case SurfaceApp(func=func, arg=arg, location=loc):
-                assert func is not None and arg is not None
-                return SurfaceApp(func=self.desugar(func), arg=self.desugar(arg), location=loc)
 
-            case SurfaceTypeAbs(var=var, body=body, location=loc):
-                assert body is not None
-                return SurfaceTypeAbs(var=var, body=self.desugar(body), location=loc)
+def desugar_implicit_type_abstractions(decl: SurfaceTermDeclaration) -> SurfaceTermDeclaration:
+    """Insert implicit type abstractions for rank-1 polymorphism.
 
-            case SurfaceTypeApp(func=func, type_arg=type_arg, location=loc):
-                assert func is not None
-                return SurfaceTypeApp(func=self.desugar(func), type_arg=type_arg, location=loc)
+    Inserts Λa. for each ∀a. at the top level, unless the body already
+    starts with a type abstraction.
 
-            case SurfaceLet(bindings=bindings, body=body, location=loc):
-                assert body is not None
-                # bindings is list of (name, var_type, value)
-                new_bindings = [
-                    (name, var_type, self.desugar(value)) for name, var_type, value in bindings
-                ]
-                return SurfaceLet(bindings=new_bindings, body=self.desugar(body), location=loc)
+    Examples:
+        id : ∀a. a → a = λx → x
+        -- Becomes: Λa. λx → x
 
-            case SurfaceAnn(term=inner, type=type_ann, location=loc):
-                assert inner is not None
-                return SurfaceAnn(term=self.desugar(inner), type=type_ann, location=loc)
+        const : ∀a. ∀b. a → b → a = λx y → x
+        -- Becomes: Λa. Λb. λx y → x
+    """
+    type_ann = decl.type_annotation
+    body = decl.body
 
-            case SurfaceConstructor(name=name, args=args, location=loc):
-                return SurfaceConstructor(
-                    name=name, args=[self.desugar(arg) for arg in args], location=loc
-                )
+    # Collect rank-1 (top-level) forall-bound type variables
+    type_vars: list[str] = []
+    current_type = type_ann
 
-            case SurfaceCase(scrutinee=scrutinee, branches=branches, location=loc):
-                assert scrutinee is not None
-                new_branches = []
-                for branch in branches:
-                    assert branch.body is not None
-                    new_branches.append(
-                        SurfaceBranch(
-                            pattern=branch.pattern,
-                            body=self.desugar(branch.body),
-                            location=branch.location,
-                        )
-                    )
-                return SurfaceCase(
-                    scrutinee=self.desugar(scrutinee),
-                    branches=new_branches,
+    while isinstance(current_type, SurfaceTypeForall):
+        type_vars.append(current_type.var)
+        current_type = current_type.body
+
+    # If no type variables at rank-1, return as-is
+    if not type_vars:
+        return decl
+
+    # Simple check: if body already starts with SurfaceTypeAbs, don't insert
+    if isinstance(body, SurfaceTypeAbs):
+        return decl
+
+    # Wrap body with type abstractions
+    new_body = body
+    for var in reversed(type_vars):
+        new_body = SurfaceTypeAbs(
+            var=var,
+            body=new_body,
+            location=decl.location,
+        )
+
+    return SurfaceTermDeclaration(
+        name=decl.name,
+        type_annotation=decl.type_annotation,
+        body=new_body,
+        location=decl.location,
+        docstring=decl.docstring,
+        pragma=decl.pragma,
+    )
+
+
+# =============================================================================
+# Pass 4: Multi-Arg Lambda to Nested Single-Arg Lambdas
+# =============================================================================
+
+
+def desugar_multi_arg_lambda(term: SurfaceTerm) -> SurfaceTerm:
+    r"""Convert multi-parameter lambda to nested single-parameter lambdas.
+
+    Transforms:
+        \x y z -> body
+    To:
+        \x -> \y -> \z -> body
+
+    This pass handles the SurfaceAbs.params list and converts it to
+    nested SurfaceAbs nodes with single params.
+    """
+    # First, recursively desugar children
+    term = _desugar_children(term, desugar_multi_arg_lambda)
+
+    # Then transform this node if it's a multi-arg lambda
+    match term:
+        case SurfaceAbs(params=params, body=body, location=loc):
+            if len(params) <= 1 or body is None:
+                return term  # Single param, no params, or no body - no desugaring needed
+
+            # Build nested lambdas from right to left
+            # \x y z -> body becomes nested single-arg lambdas
+            result: SurfaceTerm = body
+            for var_name, var_type in reversed(params):
+                result = SurfaceAbs(
+                    params=[(var_name, var_type)],
+                    body=result,
                     location=loc,
                 )
+            return result
 
-            case SurfaceOp(left=left, op=op, right=right, location=loc):
-                assert left is not None and right is not None
-                return SurfaceOp(
-                    left=self.desugar(left), op=op, right=self.desugar(right), location=loc
-                )
-
-            case _:
-                return term
-
-    def _desugar_if_then_else(self, term: SurfaceTerm) -> SurfaceTerm:
-        """Convert if-then-else to case expression.
-
-        Transforms:
-            if c then t else f
-        To:
-            case c of { True -> t | False -> f }
-        """
-        match term:
-            case SurfaceIf(
-                cond=cond, then_branch=then_branch, else_branch=else_branch, location=loc
-            ):
-                return SurfaceCase(
-                    scrutinee=cond,
-                    branches=[
-                        SurfaceBranch(
-                            pattern=SurfacePattern(constructor="True", vars=[], location=loc),
-                            body=then_branch,
-                            location=loc,
-                        ),
-                        SurfaceBranch(
-                            pattern=SurfacePattern(constructor="False", vars=[], location=loc),
-                            body=else_branch,
-                            location=loc,
-                        ),
-                    ],
-                    location=loc,
-                )
-        return term
-
-    def _desugar_multi_arg_lambda(self, term: SurfaceTerm) -> SurfaceTerm:
-        """Convert multi-argument lambda to nested single-argument lambdas.
-
-        Example:
-            \\x y -> body
-        Becomes:
-            \\x -> \\y -> body
-        """
-        # This is handled by the parser now, but could be added here
-        # if we support multi-arg syntax like \\x y -> ...
-        return term
-
-    def _desugar_letrec(self, term: SurfaceTerm) -> SurfaceTerm:
-        r"""Convert recursive let to fixpoint.
-
-        Note: System F doesn't have recursion by default.
-        This is a placeholder for when we add fixpoint constructs.
-
-        Transforms:
-            letrec f = \x -> ... f ... in body
-        To:
-            let f = fix (\f -> \x -> ... f ...) in body
-        """
-        # Placeholder - System F doesn't have recursion by default
-        return term
-
-    def _desugar_operators(self, term: SurfaceTerm) -> SurfaceTerm:
-        """Convert operator expressions to primitive operation applications.
-
-        Transforms:
-            left + right  ->  ($prim.int.plus left) right
-            left - right  ->  ($prim.int.minus left) right
-            left * right  ->  ($prim.int.multiply left) right
-            left / right  ->  ($prim.int.divide left) right
-            left == right ->  ($prim.int.eq left) right
-            left < right  ->  ($prim.int.lt left) right
-            left > right  ->  ($prim.int.gt left) right
-            left <= right ->  ($prim.int.le left) right
-            left >= right ->  ($prim.int.ge left) right
-        """
-        match term:
-            case SurfaceOp(left=left, op=op, right=right, location=loc):
-                # Get the primitive operation name
-                prim_name = OPERATOR_TO_PRIM.get(op)
-                if prim_name is None:
-                    # Unknown operator, return as-is
-                    return term
-
-                # Create the primitive variable reference
-                prim_var = SurfaceVar(name=prim_name, location=loc)
-
-                # Build: ((prim left) right)
-                # First apply: (prim left)
-                first_app = SurfaceApp(func=prim_var, arg=left, location=loc)
-                # Then apply: ((prim left) right)
-                return SurfaceApp(func=first_app, arg=right, location=loc)
-
-            case _:
-                return term
+    return term
 
 
-class LetToLambdaDesugarer:
-    r"""Desugar let bindings to lambda applications.
+# =============================================================================
+# Pass 5: Let to Lambda Application (Optional)
+# =============================================================================
+
+
+def desugar_let_to_application(term: SurfaceTerm) -> SurfaceTerm:
+    r"""Convert let bindings to lambda applications.
 
     Transforms:
         let x = e1 in e2
     To:
         (\x -> e2) e1
+
+    Note: This is optional as System F supports let directly.
     """
+    # First, recursively desugar children
+    term = _desugar_children(term, desugar_let_to_application)
 
-    def desugar(self, term: SurfaceTerm) -> SurfaceTerm:
-        """Desugar all let bindings to lambda applications."""
-        match term:
-            case SurfaceLet(bindings=bindings, body=body, location=loc):
-                assert body is not None
-                # For now, handle single binding
-                # bindings is list of (name, var_type, value)
-                if len(bindings) != 1:
-                    # Multi-binding let - for now just desugar children
-                    new_bindings = [
-                        (name, var_type, self.desugar(value)) for name, var_type, value in bindings
-                    ]
-                    return SurfaceLet(bindings=new_bindings, body=self.desugar(body), location=loc)
+    match term:
+        case SurfaceLet(bindings=bindings, body=body, location=loc):
+            if len(bindings) != 1:
+                return term  # Multi-binding let - keep as-is for now
 
-                name, var_type, value = bindings[0]
-                # Recursively desugar subterms
-                value = self.desugar(value)
-                body = self.desugar(body)
+            name, var_type, value = bindings[0]
 
-                # Transform to: (\name -> body) value
-                lam = SurfaceAbs(var=name, var_type=var_type, body=body, location=loc)
-                return SurfaceApp(func=lam, arg=value, location=loc)
+            # Transform to: (\name -> body) value
+            lam = SurfaceAbs(params=[(name, var_type)], body=body, location=loc)
+            return SurfaceApp(func=lam, arg=value, location=loc)
 
-            case SurfaceAbs(var=var, var_type=var_type, body=body, location=loc):
-                assert body is not None
-                return SurfaceAbs(var=var, var_type=var_type, body=self.desugar(body), location=loc)
+    return term
 
-            case SurfaceApp(func=func, arg=arg, location=loc):
-                assert func is not None and arg is not None
-                return SurfaceApp(func=self.desugar(func), arg=self.desugar(arg), location=loc)
 
-            case SurfaceTypeAbs(var=var, body=body, location=loc):
-                assert body is not None
-                return SurfaceTypeAbs(var=var, body=self.desugar(body), location=loc)
+# =============================================================================
+# Pass 4b: Multi-Var Type Abstraction to Nested Single-Var
+# =============================================================================
 
-            case SurfaceTypeApp(func=func, type_arg=type_arg, location=loc):
-                assert func is not None
-                return SurfaceTypeApp(func=self.desugar(func), type_arg=type_arg, location=loc)
 
-            case SurfaceAnn(term=inner, type=type_ann, location=loc):
-                assert inner is not None
-                return SurfaceAnn(term=self.desugar(inner), type=type_ann, location=loc)
+def desugar_multi_var_type_abs(term: SurfaceTerm) -> SurfaceTerm:
+    r"""Convert multi-variable type abstraction to nested single-variable abstractions.
 
-            case SurfaceConstructor(name=name, args=args, location=loc):
-                return SurfaceConstructor(
-                    name=name, args=[self.desugar(arg) for arg in args], location=loc
-                )
+    Transforms:
+        /\a b c. body
+    To:
+        /\a. /\b. /\c. body
 
-            case SurfaceCase(scrutinee=scrutinee, branches=branches, location=loc):
-                assert scrutinee is not None
-                new_branches = []
-                for branch in branches:
-                    assert branch.body is not None
-                    new_branches.append(
-                        SurfaceBranch(
-                            pattern=branch.pattern,
-                            body=self.desugar(branch.body),
-                            location=branch.location,
-                        )
-                    )
-                return SurfaceCase(
-                    scrutinee=self.desugar(scrutinee),
-                    branches=new_branches,
+    This pass handles the SurfaceTypeAbs.vars list and converts it to
+    nested SurfaceTypeAbs nodes with single vars.
+    """
+    # First, recursively desugar children
+    term = _desugar_children(term, desugar_multi_var_type_abs)
+
+    # Then transform this node if it's a multi-var type abstraction
+    match term:
+        case SurfaceTypeAbs(vars=vars, body=body, location=loc):
+            if len(vars) <= 1 or body is None:
+                return term  # Single var, no vars, or no body - no desugaring needed
+
+            # Build nested type abstractions from right to left
+            # /\a b c. body becomes nested single-var type abstractions
+            result: SurfaceTerm = body
+            for var_name in reversed(vars):
+                result = SurfaceTypeAbs(
+                    vars=[var_name],
+                    body=result,
                     location=loc,
                 )
+            return result
 
-            case SurfaceOp(left=left, op=op, right=right, location=loc):
-                assert left is not None and right is not None
-                return SurfaceOp(
-                    left=self.desugar(left), op=op, right=self.desugar(right), location=loc
-                )
+    return term
 
-            case _:
+
+# =============================================================================
+# Utility: Child Desugaring Helper
+# =============================================================================
+
+
+def _desugar_children(term: SurfaceTerm, desugar_fn) -> SurfaceTerm:
+    """Recursively apply a desugar function to all children of a term.
+
+    This is a generic helper used by all desugaring passes.
+    """
+    match term:
+        case SurfaceAbs(params=params, body=body, location=loc):
+            if body is None:
                 return term
+            return SurfaceAbs(params=params, body=desugar_fn(body), location=loc)
+
+        case SurfaceApp(func=func, arg=arg, location=loc):
+            assert func is not None and arg is not None
+            return SurfaceApp(func=desugar_fn(func), arg=desugar_fn(arg), location=loc)
+
+        case SurfaceTypeAbs(vars=vars, body=body, location=loc):
+            if body is None:
+                return term
+            return SurfaceTypeAbs(vars=vars, body=desugar_fn(body), location=loc)
+
+        case SurfaceTypeApp(func=func, type_arg=type_arg, location=loc):
+            assert func is not None
+            return SurfaceTypeApp(func=desugar_fn(func), type_arg=type_arg, location=loc)
+
+        case SurfaceLet(bindings=bindings, body=body, location=loc):
+            assert body is not None
+            new_bindings = [
+                (name, var_type, desugar_fn(value)) for name, var_type, value in bindings
+            ]
+            return SurfaceLet(bindings=new_bindings, body=desugar_fn(body), location=loc)
+
+        case SurfaceAnn(term=inner, type=type_ann, location=loc):
+            assert inner is not None
+            return SurfaceAnn(term=desugar_fn(inner), type=type_ann, location=loc)
+
+        case SurfaceConstructor(name=name, args=args, location=loc):
+            return SurfaceConstructor(
+                name=name, args=[desugar_fn(arg) for arg in args], location=loc
+            )
+
+        case SurfaceCase(scrutinee=scrutinee, branches=branches, location=loc):
+            assert scrutinee is not None
+            new_branches = []
+            for branch in branches:
+                assert branch.body is not None
+                new_branches.append(
+                    SurfaceBranch(
+                        pattern=branch.pattern,
+                        body=desugar_fn(branch.body),
+                        location=branch.location,
+                    )
+                )
+            return SurfaceCase(scrutinee=desugar_fn(scrutinee), branches=new_branches, location=loc)
+
+        case SurfaceOp(left=left, op=op, right=right, location=loc):
+            assert left is not None and right is not None
+            return SurfaceOp(left=desugar_fn(left), op=op, right=desugar_fn(right), location=loc)
+
+        case _:
+            return term
 
 
 # =============================================================================
-# Convenience Functions
+# Composite Pass (for convenience)
 # =============================================================================
 
 
+def desugar_term(term: SurfaceTerm) -> SurfaceTerm:
+    """Apply all term-level desugaring passes.
+
+    Passes are applied in order:
+    1. Multi-var type abstractions -> nested single-var
+    2. Multi-arg lambdas -> nested single-arg
+    3. If-then-else -> case
+    4. Operators -> primitive applications
+    """
+    term = desugar_multi_var_type_abs(term)
+    term = desugar_multi_arg_lambda(term)
+    term = desugar_if_then_else(term)
+    term = desugar_operators(term)
+    return term
+
+
+def desugar_declaration(decl: SurfaceTermDeclaration) -> SurfaceTermDeclaration:
+    """Apply all desugaring passes to a declaration.
+
+    Passes are applied in order:
+    1. Insert implicit type abstractions (for rank-1 polymorphism)
+    2. Desugar the body (if-then-else, operators)
+    """
+    # Pass 1: Insert implicit type abstractions
+    decl = desugar_implicit_type_abstractions(decl)
+
+    # Pass 2: Desugar the body (if it exists)
+    new_body = decl.body
+    if new_body is not None:
+        new_body = desugar_term(new_body)
+
+    return SurfaceTermDeclaration(
+        name=decl.name,
+        type_annotation=decl.type_annotation,
+        body=new_body,
+        location=decl.location,
+        docstring=decl.docstring,
+        pragma=decl.pragma,
+    )
+
+
+# =============================================================================
+# Legacy API (for backwards compatibility)
+# =============================================================================
+
+
+class Desugarer:
+    """Legacy desugarer - wraps the new functional API."""
+
+    def desugar(self, term: SurfaceTerm) -> SurfaceTerm:
+        """Apply all desugaring passes."""
+        return desugar_term(term)
+
+
+# Legacy convenience function
 def desugar(term: SurfaceTerm) -> SurfaceTerm:
-    """Apply all desugaring passes to a term.
-
-    Args:
-        term: Surface term to desugar
-
-    Returns:
-        Desugared surface term
-    """
-    return Desugarer().desugar(term)
+    """Apply all desugaring passes to a term."""
+    return desugar_term(term)
 
 
-def desugar_lets(term: SurfaceTerm) -> SurfaceTerm:
-    """Desugar let bindings to lambda applications.
-
-    Args:
-        term: Surface term
-
-    Returns:
-        Term with all let bindings converted to applications
-    """
-    return LetToLambdaDesugarer().desugar(term)
+# Legacy alias
+insert_implicit_type_abstractions = desugar_implicit_type_abstractions

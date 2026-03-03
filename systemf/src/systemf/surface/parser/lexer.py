@@ -11,7 +11,6 @@ import re
 from systemf.surface.parser.types import (
     CaseToken,
     CommentToken,
-    ConstructorToken,
     DataToken,
     DelimiterToken,
     DelimiterType,
@@ -109,9 +108,8 @@ class Lexer:
         # Literals
         ("STRING", r'"([^"\\]|\\.)*"'),
         ("NUMBER", r"\d+"),
-        # Identifiers and constructors (order matters!)
-        ("CONSTRUCTOR", r"[A-Z][a-zA-Z0-9_]*"),
-        ("IDENT", r"[a-z_][a-zA-Z0-9_']*"),
+        # Identifiers (all names treated uniformly)
+        ("IDENT", r"[a-zA-Z_][a-zA-Z0-9_']*"),
     ]
 
     def __init__(self, source: str, filename: str | None = None) -> None:
@@ -279,8 +277,6 @@ class Lexer:
             return DocstringToken(docstring_type=token_type, content=content, location=loc)
         elif token_type == "IDENT":
             return IdentifierToken(name=value, location=loc)
-        elif token_type == "CONSTRUCTOR":
-            return ConstructorToken(name=value, location=loc)
         elif token_type == "NUMBER":
             return NumberToken(number=value, location=loc)
         elif token_type == "STRING":
