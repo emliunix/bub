@@ -265,6 +265,37 @@ const = λx → λy → x  -- Use λx y → instead
 - Could provide cleaner semantics than current placeholder trick
 - Need to investigate: `μX.T` with `fold`/`unfold` operations
 
+#### Design Decision: Early Binding for REPL
+
+**Rationale for Early Binding:**
+1. **LLM Fork Isolation**: When LLM functions are called, we need to return meaningful values
+   - Must freeze all types used in LLM return types
+   - Prevent redefinition from breaking type checking across REPL sessions
+
+2. **REPL Context Snapshot**: For each LLM call
+   - Snapshot current REPL context (types, values, constructors)
+   - Start fresh REPL environment for the LLM computation
+   - Return value must be well-typed in original context
+
+3. **Isorecursive Types Elaboration**:
+   ```
+   Surface (Nominal):    data List a = Nil | Cons a (List a)
+   Core (Isorecursive):  List a = μX. Unit + (a × X)
+   Elaboration:          Insert fold/unfold at data constructor boundaries
+   ```
+   
+   **Required Changes**:
+   - Core AST: Add `Fold`, `Unfold`, `Rec` (recursive type) terms
+   - Elaborator: Transform nominal data declarations to isorecursive
+   - Type Checker: Adapt bidirectional inference for `μX.T`
+   - Pattern matching: Generate unfold in case expressions
+
+**Implementation Path**:
+1. Add isorecursive type constructors to core types
+2. Extend elaborator to insert pack/unfold operations
+3. Adapt bidirectional type checking for recursive types
+4. Update REPL to support context snapshots for LLM calls
+
 ### Next Steps
 
 #### Completed ✅
