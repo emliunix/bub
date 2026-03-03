@@ -187,6 +187,63 @@ class Lexer:
                 self.column += 1
         self.pos += len(text)
 
+    def _process_escape_sequences(self, s: str) -> str:
+        """Process escape sequences in a string literal.
+
+        Converts standard escape sequences to their actual characters:
+        - \\n -> newline (ASCII 10)
+        - \\t -> tab (ASCII 9)
+        - \\r -> carriage return (ASCII 13)
+        - \\\\ -> backslash
+        - \\\" -> double quote
+        - \\b -> backspace (ASCII 8)
+        - \\f -> form feed (ASCII 12)
+        - \\0 -> null (ASCII 0)
+
+        Args:
+            s: The raw string content (without quotes)
+
+        Returns:
+            String with escape sequences processed
+        """
+        result = []
+        i = 0
+        while i < len(s):
+            if s[i] == "\\" and i + 1 < len(s):
+                next_char = s[i + 1]
+                if next_char == "n":
+                    result.append("\n")
+                    i += 2
+                elif next_char == "t":
+                    result.append("\t")
+                    i += 2
+                elif next_char == "r":
+                    result.append("\r")
+                    i += 2
+                elif next_char == "\\":
+                    result.append("\\")
+                    i += 2
+                elif next_char == '"':
+                    result.append('"')
+                    i += 2
+                elif next_char == "b":
+                    result.append("\b")
+                    i += 2
+                elif next_char == "f":
+                    result.append("\f")
+                    i += 2
+                elif next_char == "0":
+                    result.append("\0")
+                    i += 2
+                else:
+                    # Unknown escape sequence, keep as-is
+                    result.append(s[i])
+                    i += 1
+            else:
+                result.append(s[i])
+                i += 1
+        return "".join(result)
+
     def _create_token(self, match: re.Match) -> Token | None:
         """Create appropriate token from regex match."""
         token_type = match.lastgroup
@@ -227,8 +284,9 @@ class Lexer:
         elif token_type == "NUMBER":
             return NumberToken(number=value, location=loc)
         elif token_type == "STRING":
-            # Remove quotes from string value
+            # Remove quotes from string value and process escape sequences
             string_value = value[1:-1]
+            string_value = self._process_escape_sequences(string_value)
             return StringToken(string=string_value, location=loc)
         elif token_type == "DATA":
             return DataToken(keyword=value, location=loc)

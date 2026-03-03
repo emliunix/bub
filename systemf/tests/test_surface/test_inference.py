@@ -26,6 +26,7 @@ from systemf.core.types import (
     PrimitiveType,
 )
 from systemf.surface.types import (
+    SurfaceLit,
     ScopedVar,
     ScopedAbs,
     SurfaceApp,
@@ -39,8 +40,6 @@ from systemf.surface.types import (
     SurfacePattern,
     SurfaceIf,
     SurfaceTuple,
-    SurfaceIntLit,
-    SurfaceStringLit,
     SurfaceOp,
     SurfaceToolCall,
     SurfaceTypeVar,
@@ -115,39 +114,43 @@ class TestLiteralInference:
 
     def test_integer_literal_inference(self, elab, empty_ctx):
         """Integer literals should infer to Int type."""
-        lit = SurfaceIntLit(42, DUMMY_LOC)
+        lit = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         core_term, ty = elab.infer(lit, empty_ctx)
 
-        assert isinstance(core_term, core.IntLit)
+        assert isinstance(core_term, core.Lit)
+        assert core_term.prim_type == "Int"
         assert core_term.value == 42
         assert isinstance(ty, TypeConstructor)
         assert ty.name == "Int"
 
     def test_string_literal_inference(self, elab, empty_ctx):
         """String literals should infer to String type."""
-        lit = SurfaceStringLit("hello", DUMMY_LOC)
+        lit = SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC)
         core_term, ty = elab.infer(lit, empty_ctx)
 
-        assert isinstance(core_term, core.StringLit)
+        assert isinstance(core_term, core.Lit)
+        assert core_term.prim_type == "String"
         assert core_term.value == "hello"
         assert isinstance(ty, TypeConstructor)
         assert ty.name == "String"
 
     def test_negative_integer_literal(self, elab, empty_ctx):
         """Negative integers should also infer to Int."""
-        lit = SurfaceIntLit(-123, DUMMY_LOC)
+        lit = SurfaceLit(prim_type="Int", value=-123, location=DUMMY_LOC)
         core_term, ty = elab.infer(lit, empty_ctx)
 
-        assert isinstance(core_term, core.IntLit)
+        assert isinstance(core_term, core.Lit)
+        assert core_term.prim_type == "Int"
         assert core_term.value == -123
         assert ty.name == "Int"
 
     def test_empty_string_literal(self, elab, empty_ctx):
         """Empty string should infer to String."""
-        lit = SurfaceStringLit("", DUMMY_LOC)
+        lit = SurfaceLit(prim_type="String", value="", location=DUMMY_LOC)
         core_term, ty = elab.infer(lit, empty_ctx)
 
-        assert isinstance(core_term, core.StringLit)
+        assert isinstance(core_term, core.Lit)
+        assert core_term.prim_type == "String"
         assert core_term.value == ""
         assert ty.name == "String"
 
@@ -163,9 +166,9 @@ class TestLambdaAbstraction:
     def test_lambda_with_annotation(self, elab, empty_ctx):
         """Lambda with type annotation should use that type."""
         # \x:Int -> x
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", int_type, body, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=int_type, body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(abs_term, empty_ctx)
 
@@ -178,8 +181,8 @@ class TestLambdaAbstraction:
     def test_lambda_without_annotation(self, elab, empty_ctx):
         """Lambda without annotation creates meta type variable."""
         # \x -> x (identity function)
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", None, body, DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=None, body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(abs_term, empty_ctx)
 
@@ -192,8 +195,8 @@ class TestLambdaAbstraction:
     def test_lambda_check_with_expected_arrow(self, elab, empty_ctx):
         """Check lambda against expected function type."""
         # \x -> x : Int -> Int
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", None, body, DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=None, body=body, location=DUMMY_LOC)
         expected = TypeArrow(TypeConstructor("Int", []), TypeConstructor("Int", []))
 
         core_term = elab.check(abs_term, expected, empty_ctx)
@@ -205,9 +208,9 @@ class TestLambdaAbstraction:
     def test_nested_lambda(self, elab, empty_ctx):
         """Nested lambda creates curried function type."""
         # \x -> \y -> x (const function)
-        inner_body = ScopedVar(1, "x", DUMMY_LOC)  # x is now at index 1
-        inner_abs = ScopedAbs("y", None, inner_body, DUMMY_LOC)
-        outer_abs = ScopedAbs("x", None, inner_abs, DUMMY_LOC)
+        inner_body = ScopedVar(index=1, debug_name="x", location=DUMMY_LOC)  # x is now at index 1
+        inner_abs = ScopedAbs(var_name="y", var_type=None, body=inner_body, location=DUMMY_LOC)
+        outer_abs = ScopedAbs(var_name="x", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(outer_abs, empty_ctx)
 
@@ -219,9 +222,9 @@ class TestLambdaAbstraction:
     def test_lambda_with_parameter_doc(self, elab, empty_ctx):
         """Lambda preserves parameter documentation in type."""
         # \x:Int -- ^ Input value -> x
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", int_type, body, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=int_type, body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(abs_term, empty_ctx)
 
@@ -241,11 +244,11 @@ class TestApplication:
     def test_simple_application(self, elab, int_var_ctx):
         """Apply identity function to variable."""
         # (\x:Int -> x) x0
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", int_type, body, DUMMY_LOC)
-        arg = ScopedVar(0, "x0", DUMMY_LOC)
-        app = SurfaceApp(abs_term, arg, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=int_type, body=body, location=DUMMY_LOC)
+        arg = ScopedVar(index=0, debug_name="x0", location=DUMMY_LOC)
+        app = SurfaceApp(func=abs_term, arg=arg, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(app, int_var_ctx)
 
@@ -256,10 +259,10 @@ class TestApplication:
     def test_application_with_inference(self, elab, int_var_ctx):
         """Application where function type is inferred."""
         # (\x -> x) 42 - identity applied to int
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", None, body, DUMMY_LOC)
-        arg = SurfaceIntLit(42, DUMMY_LOC)
-        app = SurfaceApp(abs_term, arg, DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=None, body=body, location=DUMMY_LOC)
+        arg = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
+        app = SurfaceApp(func=abs_term, arg=arg, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(app, int_var_ctx)
 
@@ -269,14 +272,22 @@ class TestApplication:
     def test_curried_application(self, elab, empty_ctx):
         """Curried function application."""
         # (\x -> \y -> x) 1 2
-        inner_body = ScopedVar(1, "x", DUMMY_LOC)
-        inner_abs = ScopedAbs("y", None, inner_body, DUMMY_LOC)
-        outer_abs = ScopedAbs("x", None, inner_abs, DUMMY_LOC)
+        inner_body = ScopedVar(index=1, debug_name="x", location=DUMMY_LOC)
+        inner_abs = ScopedAbs(var_name="y", var_type=None, body=inner_body, location=DUMMY_LOC)
+        outer_abs = ScopedAbs(var_name="x", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         # First application: (\x -> \y -> x) 1
-        app1 = SurfaceApp(outer_abs, SurfaceIntLit(1, DUMMY_LOC), DUMMY_LOC)
+        app1 = SurfaceApp(
+            func=outer_abs,
+            arg=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
         # Second application: result 2
-        app2 = SurfaceApp(app1, SurfaceIntLit(2, DUMMY_LOC), DUMMY_LOC)
+        app2 = SurfaceApp(
+            func=app1,
+            arg=SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         core_term, ty = elab.infer(app2, empty_ctx)
 
@@ -287,11 +298,11 @@ class TestApplication:
     def test_application_type_mismatch(self, elab, empty_ctx):
         """Application with wrong argument type should error."""
         # (\x:Int -> x) "hello" - applying String where Int expected
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", int_type, body, DUMMY_LOC)
-        arg = SurfaceStringLit("hello", DUMMY_LOC)
-        app = SurfaceApp(abs_term, arg, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=int_type, body=body, location=DUMMY_LOC)
+        arg = SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC)
+        app = SurfaceApp(func=abs_term, arg=arg, location=DUMMY_LOC)
 
         with pytest.raises((TypeMismatchError, UnificationError)):
             elab.infer(app, empty_ctx)
@@ -308,9 +319,9 @@ class TestPolymorphism:
     def test_type_abstraction_inference(self, elab, empty_ctx):
         """Type abstraction infers forall type."""
         # /\a. \x -> x (polymorphic identity)
-        inner_body = ScopedVar(0, "x", DUMMY_LOC)
-        inner_abs = ScopedAbs("x", None, inner_body, DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", inner_abs, DUMMY_LOC)
+        inner_body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        inner_abs = ScopedAbs(var_name="x", var_type=None, body=inner_body, location=DUMMY_LOC)
+        type_abs = SurfaceTypeAbs(var="a", body=inner_abs, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(type_abs, empty_ctx)
 
@@ -322,13 +333,13 @@ class TestPolymorphism:
     def test_type_application(self, elab, empty_ctx):
         """Type application instantiates polymorphic type."""
         # (/\a. \x:a -> x) @Int
-        type_var = SurfaceTypeVar("a", DUMMY_LOC)
-        inner_body = ScopedVar(0, "x", DUMMY_LOC)
-        inner_abs = ScopedAbs("x", type_var, inner_body, DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", inner_abs, DUMMY_LOC)
+        type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        inner_body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        inner_abs = ScopedAbs(var_name="x", var_type=type_var, body=inner_body, location=DUMMY_LOC)
+        type_abs = SurfaceTypeAbs(var="a", body=inner_abs, location=DUMMY_LOC)
 
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        type_app = SurfaceTypeApp(type_abs, int_type, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        type_app = SurfaceTypeApp(func=type_abs, type_arg=int_type, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(type_app, empty_ctx)
 
@@ -341,10 +352,10 @@ class TestPolymorphism:
     def test_polymorphic_identity_check(self, elab, empty_ctx):
         """Check polymorphic identity against forall type."""
         # /\a. \x:a -> x : forall a. a -> a
-        type_var = SurfaceTypeVar("a", DUMMY_LOC)
-        inner_body = ScopedVar(0, "x", DUMMY_LOC)
-        inner_abs = ScopedAbs("x", type_var, inner_body, DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", inner_abs, DUMMY_LOC)
+        type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        inner_body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        inner_abs = ScopedAbs(var_name="x", var_type=type_var, body=inner_body, location=DUMMY_LOC)
+        type_abs = SurfaceTypeAbs(var="a", body=inner_abs, location=DUMMY_LOC)
 
         expected = TypeForall("a", TypeArrow(TypeVar("a"), TypeVar("a")))
 
@@ -365,9 +376,9 @@ class TestLetBindings:
     def test_simple_let(self, elab, empty_ctx):
         """Simple let binding with type inference."""
         # let x = 42 in x
-        value = SurfaceIntLit(42, DUMMY_LOC)
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        let_term = SurfaceLet([("x", None, value)], body, DUMMY_LOC)
+        value = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[("x", None, value)], body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 
@@ -378,10 +389,10 @@ class TestLetBindings:
     def test_let_with_annotation(self, elab, empty_ctx):
         """Let binding with type annotation."""
         # let x : Int = 42 in x
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        value = SurfaceIntLit(42, DUMMY_LOC)
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        let_term = SurfaceLet([("x", int_type, value)], body, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        value = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[("x", int_type, value)], body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 
@@ -392,11 +403,11 @@ class TestLetBindings:
         """Let with multiple sequential bindings."""
         # let x = 1, y = 2 in y
         bindings = [
-            ("x", None, SurfaceIntLit(1, DUMMY_LOC)),
-            ("y", None, SurfaceIntLit(2, DUMMY_LOC)),
+            ("x", None, SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC)),
+            ("y", None, SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC)),
         ]
-        body = ScopedVar(0, "y", DUMMY_LOC)  # y is most recent (index 0)
-        let_term = SurfaceLet(bindings, body, DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="y", location=DUMMY_LOC)  # y is most recent (index 0)
+        let_term = SurfaceLet(bindings=bindings, body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 
@@ -406,17 +417,23 @@ class TestLetBindings:
     def test_let_function_binding(self, elab, empty_ctx):
         """Let binding with function value."""
         # let f = \x:Int -> x in f 42
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        lambda_body = ScopedVar(0, "x", DUMMY_LOC)
-        lambda_term = ScopedAbs("x", int_type, lambda_body, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        lambda_body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        lambda_term = ScopedAbs(
+            var_name="x", var_type=int_type, body=lambda_body, location=DUMMY_LOC
+        )
 
         # f is at index 0, so we use ScopedVar(0, "f")
         # But we're applying it, so we need to construct the application
         bindings = [("f", None, lambda_term)]
 
         # f 42
-        app = SurfaceApp(ScopedVar(0, "f", DUMMY_LOC), SurfaceIntLit(42, DUMMY_LOC), DUMMY_LOC)
-        let_term = SurfaceLet(bindings, app, DUMMY_LOC)
+        app = SurfaceApp(
+            func=ScopedVar(index=0, debug_name="f", location=DUMMY_LOC),
+            arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        let_term = SurfaceLet(bindings=bindings, body=app, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 
@@ -428,11 +445,17 @@ class TestLetBindings:
         """Let binding shadows outer variable."""
         # let x = 42 in let x = "hello" in x
         inner_let = SurfaceLet(
-            [("x", None, SurfaceStringLit("hello", DUMMY_LOC))],
-            ScopedVar(0, "x", DUMMY_LOC),
-            DUMMY_LOC,
+            bindings=[
+                ("x", None, SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC))
+            ],
+            body=ScopedVar(index=0, debug_name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
-        outer_let = SurfaceLet([("x", None, SurfaceIntLit(42, DUMMY_LOC))], inner_let, DUMMY_LOC)
+        outer_let = SurfaceLet(
+            bindings=[("x", None, SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC))],
+            body=inner_let,
+            location=DUMMY_LOC,
+        )
 
         core_term, ty = elab.infer(outer_let, empty_ctx)
 
@@ -451,23 +474,28 @@ class TestTypeAnnotations:
     def test_annotation_inference(self, elab, empty_ctx):
         """Type annotation guides inference."""
         # (42 : Int)
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        ann_term = SurfaceAnn(SurfaceIntLit(42, DUMMY_LOC), int_type, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        ann_term = SurfaceAnn(
+            term=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            type=int_type,
+            location=DUMMY_LOC,
+        )
 
         core_term, ty = elab.infer(ann_term, empty_ctx)
 
-        assert isinstance(core_term, core.IntLit)
+        assert isinstance(core_term, core.Lit)
+        assert core_term.prim_type == "Int"
         assert ty.name == "Int"
 
     def test_annotation_check(self, elab, empty_ctx):
         """Check term against annotation."""
         # (\x -> x) : Int -> Int
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", None, body, DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=None, body=body, location=DUMMY_LOC)
 
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC)
-        ann_term = SurfaceAnn(abs_term, arrow_type, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
+        ann_term = SurfaceAnn(term=abs_term, type=arrow_type, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(ann_term, empty_ctx)
 
@@ -477,8 +505,12 @@ class TestTypeAnnotations:
     def test_annotation_mismatch(self, elab, empty_ctx):
         """Annotation that doesn't match term type should error."""
         # (42 : String) - Int annotated as String
-        str_type = SurfaceTypeConstructor("String", [], DUMMY_LOC)
-        ann_term = SurfaceAnn(SurfaceIntLit(42, DUMMY_LOC), str_type, DUMMY_LOC)
+        str_type = SurfaceTypeConstructor(name="String", args=[], location=DUMMY_LOC)
+        ann_term = SurfaceAnn(
+            term=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            type=str_type,
+            location=DUMMY_LOC,
+        )
 
         with pytest.raises((TypeMismatchError, UnificationError)):
             elab.infer(ann_term, empty_ctx)
@@ -495,7 +527,7 @@ class TestVariableReferences:
     def test_bound_variable(self, elab, int_var_ctx):
         """Reference to bound variable infers its type."""
         # x0 (where x0 : Int)
-        var = ScopedVar(0, "x", DUMMY_LOC)
+        var = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
 
         core_term, ty = elab.infer(var, int_var_ctx)
 
@@ -513,8 +545,8 @@ class TestVariableReferences:
             ]
         )
 
-        var_x = ScopedVar(1, "x", DUMMY_LOC)
-        var_y = ScopedVar(0, "y", DUMMY_LOC)
+        var_x = ScopedVar(index=1, debug_name="x", location=DUMMY_LOC)
+        var_y = ScopedVar(index=0, debug_name="y", location=DUMMY_LOC)
 
         _, ty_x = elab.infer(var_x, ctx)
         _, ty_y = elab.infer(var_y, ctx)
@@ -524,7 +556,7 @@ class TestVariableReferences:
 
     def test_out_of_bounds_variable(self, elab, empty_ctx):
         """Variable index out of bounds should error."""
-        var = ScopedVar(5, "x", DUMMY_LOC)
+        var = ScopedVar(index=5, debug_name="x", location=DUMMY_LOC)
 
         with pytest.raises(TypeError):
             elab.infer(var, empty_ctx)
@@ -543,7 +575,7 @@ class TestConstructorsAndCases:
         # True
         ctx = TypeContext(constructors={"True": TypeConstructor("Bool", [])})
 
-        constr = SurfaceConstructor("True", [], DUMMY_LOC)
+        constr = SurfaceConstructor(name="True", args=[], location=DUMMY_LOC)
         core_term, ty = elab.infer(constr, ctx)
 
         assert isinstance(core_term, core.Constructor)
@@ -561,7 +593,11 @@ class TestConstructorsAndCases:
             }
         )
 
-        constr = SurfaceConstructor("Just", [SurfaceIntLit(42, DUMMY_LOC)], DUMMY_LOC)
+        constr = SurfaceConstructor(
+            name="Just",
+            args=[SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)],
+            location=DUMMY_LOC,
+        )
         core_term, ty = elab.infer(constr, ctx)
 
         assert isinstance(core_term, core.Constructor)
@@ -576,13 +612,21 @@ class TestConstructorsAndCases:
 
         branches = [
             SurfaceBranch(
-                SurfacePattern("True", [], DUMMY_LOC), SurfaceIntLit(1, DUMMY_LOC), DUMMY_LOC
+                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+                location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                SurfacePattern("False", [], DUMMY_LOC), SurfaceIntLit(0, DUMMY_LOC), DUMMY_LOC
+                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+                location=DUMMY_LOC,
             ),
         ]
-        case_term = SurfaceCase(SurfaceConstructor("True", [], DUMMY_LOC), branches, DUMMY_LOC)
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            branches=branches,
+            location=DUMMY_LOC,
+        )
 
         core_term, ty = elab.infer(case_term, ctx)
 
@@ -604,15 +648,22 @@ class TestConstructorsAndCases:
 
         branches = [
             SurfaceBranch(
-                SurfacePattern("Pair", ["a", "b"], DUMMY_LOC),
-                ScopedVar(1, "a", DUMMY_LOC),  # a is at index 1 (b is at 0)
-                DUMMY_LOC,
+                pattern=SurfacePattern(constructor="Pair", vars=["a", "b"], location=DUMMY_LOC),
+                body=ScopedVar(
+                    index=1, debug_name="a", location=DUMMY_LOC
+                ),  # a is at index 1 (b is at 0)
+                location=DUMMY_LOC,
             ),
         ]
         scrut = SurfaceConstructor(
-            "Pair", [SurfaceIntLit(1, DUMMY_LOC), SurfaceIntLit(2, DUMMY_LOC)], DUMMY_LOC
+            name="Pair",
+            args=[
+                SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+                SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
+            ],
+            location=DUMMY_LOC,
         )
-        case_term = SurfaceCase(scrut, branches, DUMMY_LOC)
+        case_term = SurfaceCase(scrutinee=scrut, branches=branches, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(case_term, ctx)
 
@@ -631,10 +682,10 @@ class TestConditionals:
         """Simple if expression."""
         # if True then 1 else 0
         if_term = SurfaceIf(
-            SurfaceConstructor("True", [], DUMMY_LOC),
-            SurfaceIntLit(1, DUMMY_LOC),
-            SurfaceIntLit(0, DUMMY_LOC),
-            DUMMY_LOC,
+            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            then_branch=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            else_branch=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         core_term, ty = elab.infer(if_term, empty_ctx)
@@ -646,10 +697,10 @@ class TestConditionals:
         """If branches must have matching types."""
         # if True then "hello" else "world"
         if_term = SurfaceIf(
-            SurfaceConstructor("True", [], DUMMY_LOC),
-            SurfaceStringLit("hello", DUMMY_LOC),
-            SurfaceStringLit("world", DUMMY_LOC),
-            DUMMY_LOC,
+            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            then_branch=SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
+            else_branch=SurfaceLit(prim_type="String", value="world", location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         core_term, ty = elab.infer(if_term, empty_ctx)
@@ -660,10 +711,10 @@ class TestConditionals:
         """If with mismatched branch types should error."""
         # if True then 1 else "hello"
         if_term = SurfaceIf(
-            SurfaceConstructor("True", [], DUMMY_LOC),
-            SurfaceIntLit(1, DUMMY_LOC),
-            SurfaceStringLit("hello", DUMMY_LOC),
-            DUMMY_LOC,
+            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            then_branch=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            else_branch=SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         with pytest.raises((TypeMismatchError, UnificationError)):
@@ -682,7 +733,11 @@ class TestTuples:
         """Simple tuple of two elements."""
         # (1, 2)
         tuple_term = SurfaceTuple(
-            [SurfaceIntLit(1, DUMMY_LOC), SurfaceIntLit(2, DUMMY_LOC)], DUMMY_LOC
+            elements=[
+                SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+                SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
+            ],
+            location=DUMMY_LOC,
         )
 
         core_term, ty = elab.infer(tuple_term, empty_ctx)
@@ -697,7 +752,11 @@ class TestTuples:
         """Tuple with elements of different types."""
         # (1, "hello")
         tuple_term = SurfaceTuple(
-            [SurfaceIntLit(1, DUMMY_LOC), SurfaceStringLit("hello", DUMMY_LOC)], DUMMY_LOC
+            elements=[
+                SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+                SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
+            ],
+            location=DUMMY_LOC,
         )
 
         core_term, ty = elab.infer(tuple_term, empty_ctx)
@@ -721,7 +780,10 @@ class TestOperators:
         """Integer addition."""
         # 1 + 2
         op_term = SurfaceOp(
-            SurfaceIntLit(1, DUMMY_LOC), "+", SurfaceIntLit(2, DUMMY_LOC), DUMMY_LOC
+            left=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            op="+",
+            right=SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         core_term, ty = elab.infer(op_term, empty_ctx)
@@ -733,7 +795,10 @@ class TestOperators:
         """Integer comparison."""
         # 1 == 2
         op_term = SurfaceOp(
-            SurfaceIntLit(1, DUMMY_LOC), "==", SurfaceIntLit(2, DUMMY_LOC), DUMMY_LOC
+            left=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            op="==",
+            right=SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         core_term, ty = elab.infer(op_term, empty_ctx)
@@ -746,7 +811,10 @@ class TestOperators:
         """Operator with mismatched operand types."""
         # 1 + "hello"
         op_term = SurfaceOp(
-            SurfaceIntLit(1, DUMMY_LOC), "+", SurfaceStringLit("hello", DUMMY_LOC), DUMMY_LOC
+            left=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            op="+",
+            right=SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         with pytest.raises((TypeMismatchError, UnificationError)):
@@ -764,7 +832,7 @@ class TestToolCalls:
     def test_tool_call_no_args(self, elab, empty_ctx):
         """Tool call with no arguments."""
         # @now
-        tool_call = SurfaceToolCall("now", [], DUMMY_LOC)
+        tool_call = SurfaceToolCall(tool_name="now", args=[], location=DUMMY_LOC)
 
         core_term, ty = elab.infer(tool_call, empty_ctx)
 
@@ -775,7 +843,11 @@ class TestToolCalls:
     def test_tool_call_with_args(self, elab, empty_ctx):
         """Tool call with arguments."""
         # @print "hello"
-        tool_call = SurfaceToolCall("print", [SurfaceStringLit("hello", DUMMY_LOC)], DUMMY_LOC)
+        tool_call = SurfaceToolCall(
+            tool_name="print",
+            args=[SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC)],
+            location=DUMMY_LOC,
+        )
 
         core_term, ty = elab.infer(tool_call, empty_ctx)
 
@@ -794,7 +866,7 @@ class TestTypeErrors:
     def test_type_mismatch_error_message(self, elab, empty_ctx):
         """Type mismatch includes expected and actual types."""
         # Trying to check Int as String
-        int_term = SurfaceIntLit(42, DUMMY_LOC)
+        int_term = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         str_type = TypeConstructor("String", [])
 
         with pytest.raises(TypeMismatchError) as exc_info:
@@ -822,7 +894,7 @@ class TestTypeErrors:
     def test_undefined_constructor(self, elab, empty_ctx):
         """Undefined constructor creates meta type (no error)."""
         # Unknown constructor creates meta type
-        constr = SurfaceConstructor("Unknown", [], DUMMY_LOC)
+        constr = SurfaceConstructor(name="Unknown", args=[], location=DUMMY_LOC)
 
         # Should not error - just creates meta type
         core_term, ty = elab.infer(constr, empty_ctx)
@@ -877,17 +949,26 @@ class TestComplexExpressions:
     def test_nested_let_lambda(self, elab, empty_ctx):
         """Nested let with lambda."""
         # let f = \x:Int -> x + 1 in f 42
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
 
         # \x:Int -> x + 1
         lambda_body = SurfaceOp(
-            ScopedVar(0, "x", DUMMY_LOC), "+", SurfaceIntLit(1, DUMMY_LOC), DUMMY_LOC
+            left=ScopedVar(index=0, debug_name="x", location=DUMMY_LOC),
+            op="+",
+            right=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
-        lambda_term = ScopedAbs("x", int_type, lambda_body, DUMMY_LOC)
+        lambda_term = ScopedAbs(
+            var_name="x", var_type=int_type, body=lambda_body, location=DUMMY_LOC
+        )
 
         # let f = lambda in f 42
-        app = SurfaceApp(ScopedVar(0, "f", DUMMY_LOC), SurfaceIntLit(42, DUMMY_LOC), DUMMY_LOC)
-        let_term = SurfaceLet([("f", None, lambda_term)], app, DUMMY_LOC)
+        app = SurfaceApp(
+            func=ScopedVar(index=0, debug_name="f", location=DUMMY_LOC),
+            arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        let_term = SurfaceLet(bindings=[("f", None, lambda_term)], body=app, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 
@@ -900,10 +981,10 @@ class TestComplexExpressions:
         # Simplified: just check the polymorphic id type
 
         # /\a. \x:a -> x
-        type_var = SurfaceTypeVar("a", DUMMY_LOC)
-        inner_body = ScopedVar(0, "x", DUMMY_LOC)
-        inner_abs = ScopedAbs("x", type_var, inner_body, DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", inner_abs, DUMMY_LOC)
+        type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        inner_body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        inner_abs = ScopedAbs(var_name="x", var_type=type_var, body=inner_body, location=DUMMY_LOC)
+        type_abs = SurfaceTypeAbs(var="a", body=inner_abs, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(type_abs, empty_ctx)
 
@@ -914,20 +995,26 @@ class TestComplexExpressions:
         # ((\f -> \x -> f x) (\y -> y)) 42
 
         # \y -> y
-        id_body = ScopedVar(0, "y", DUMMY_LOC)
-        id_fn = ScopedAbs("y", None, id_body, DUMMY_LOC)
+        id_body = ScopedVar(index=0, debug_name="y", location=DUMMY_LOC)
+        id_fn = ScopedAbs(var_name="y", var_type=None, body=id_body, location=DUMMY_LOC)
 
         # \f -> \x -> f x
         inner_app = SurfaceApp(
-            ScopedVar(1, "f", DUMMY_LOC), ScopedVar(0, "x", DUMMY_LOC), DUMMY_LOC
+            func=ScopedVar(index=1, debug_name="f", location=DUMMY_LOC),
+            arg=ScopedVar(index=0, debug_name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
-        inner_lambda = ScopedAbs("x", None, inner_app, DUMMY_LOC)
-        outer_lambda = ScopedAbs("f", None, inner_lambda, DUMMY_LOC)
+        inner_lambda = ScopedAbs(var_name="x", var_type=None, body=inner_app, location=DUMMY_LOC)
+        outer_lambda = ScopedAbs(var_name="f", var_type=None, body=inner_lambda, location=DUMMY_LOC)
 
         # Apply id to outer lambda
-        app1 = SurfaceApp(outer_lambda, id_fn, DUMMY_LOC)
+        app1 = SurfaceApp(func=outer_lambda, arg=id_fn, location=DUMMY_LOC)
         # Apply 42 to result
-        app2 = SurfaceApp(app1, SurfaceIntLit(42, DUMMY_LOC), DUMMY_LOC)
+        app2 = SurfaceApp(
+            func=app1,
+            arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         core_term, ty = elab.infer(app2, empty_ctx)
 
@@ -942,16 +1029,24 @@ class TestComplexExpressions:
 
         branches = [
             SurfaceBranch(
-                SurfacePattern("True", [], DUMMY_LOC), SurfaceIntLit(1, DUMMY_LOC), DUMMY_LOC
+                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+                location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                SurfacePattern("False", [], DUMMY_LOC), SurfaceIntLit(0, DUMMY_LOC), DUMMY_LOC
+                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+                location=DUMMY_LOC,
             ),
         ]
-        case_term = SurfaceCase(ScopedVar(0, "x", DUMMY_LOC), branches, DUMMY_LOC)
+        case_term = SurfaceCase(
+            scrutinee=ScopedVar(index=0, debug_name="x", location=DUMMY_LOC),
+            branches=branches,
+            location=DUMMY_LOC,
+        )
 
-        bool_type = SurfaceTypeConstructor("Bool", [], DUMMY_LOC)
-        abs_term = ScopedAbs("x", bool_type, case_term, DUMMY_LOC)
+        bool_type = SurfaceTypeConstructor(name="Bool", args=[], location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=bool_type, body=case_term, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(abs_term, ctx)
 
@@ -970,7 +1065,7 @@ class TestElaborateTerm:
     def test_elaborate_term_with_context(self):
         """elaborate_term with provided context."""
         ctx = TypeContext(term_types=[TypeConstructor("Int", [])])
-        var = ScopedVar(0, "x", DUMMY_LOC)
+        var = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
 
         core_term, ty = elaborate_term(var, ctx)
 
@@ -979,20 +1074,21 @@ class TestElaborateTerm:
 
     def test_elaborate_term_without_context(self):
         """elaborate_term without context creates empty one."""
-        lit = SurfaceIntLit(42, DUMMY_LOC)
+        lit = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
 
         core_term, ty = elaborate_term(lit)
 
-        assert isinstance(core_term, core.IntLit)
+        assert isinstance(core_term, core.Lit)
+        assert core_term.prim_type == "Int"
         assert ty.name == "Int"
 
     def test_elaborate_term_polymorphic(self):
         """elaborate_term with polymorphic function."""
         # /\a. \x:a -> x
-        type_var = SurfaceTypeVar("a", DUMMY_LOC)
-        inner_body = ScopedVar(0, "x", DUMMY_LOC)
-        inner_abs = ScopedAbs("x", type_var, inner_body, DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", inner_abs, DUMMY_LOC)
+        type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        inner_body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        inner_abs = ScopedAbs(var_name="x", var_type=type_var, body=inner_body, location=DUMMY_LOC)
+        type_abs = SurfaceTypeAbs(var="a", body=inner_abs, location=DUMMY_LOC)
 
         core_term, ty = elaborate_term(type_abs)
 
@@ -1009,7 +1105,7 @@ class TestEdgeCases:
 
     def test_empty_context(self, elab):
         """Inference with completely empty context."""
-        lit = SurfaceIntLit(0, DUMMY_LOC)
+        lit = SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC)
         core_term, ty = elab.infer(lit, TypeContext())
 
         assert ty.name == "Int"
@@ -1018,13 +1114,13 @@ class TestEdgeCases:
         """Very deeply nested lambda."""
         # Build deeply nested lambda: \x1 -> \x2 -> ... \xn -> x1
         depth = 10
-        body = ScopedVar(depth - 1, "x1", DUMMY_LOC)
+        body = ScopedVar(index=depth - 1, debug_name="x1", location=DUMMY_LOC)
 
         for i in range(2, depth + 1):
-            body = ScopedAbs(f"x{i}", None, body, DUMMY_LOC)
+            body = ScopedAbs(var_name=f"x{i}", var_type=None, body=body, location=DUMMY_LOC)
 
         # Wrap in outermost lambda
-        term = ScopedAbs("x1", None, body, DUMMY_LOC)
+        term = ScopedAbs(var_name="x1", var_type=None, body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(term, empty_ctx)
 
@@ -1036,8 +1132,8 @@ class TestEdgeCases:
     def test_identity_function_inference(self, elab, empty_ctx):
         """The classic identity function."""
         # \x -> x
-        body = ScopedVar(0, "x", DUMMY_LOC)
-        abs_term = ScopedAbs("x", None, body, DUMMY_LOC)
+        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        abs_term = ScopedAbs(var_name="x", var_type=None, body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(abs_term, empty_ctx)
 
@@ -1049,9 +1145,9 @@ class TestEdgeCases:
     def test_const_function_inference(self, elab, empty_ctx):
         """The const function: \\x -> \\y -> x."""
         # \x -> \y -> x
-        inner_body = ScopedVar(1, "x", DUMMY_LOC)
-        inner_abs = ScopedAbs("y", None, inner_body, DUMMY_LOC)
-        outer_abs = ScopedAbs("x", None, inner_abs, DUMMY_LOC)
+        inner_body = ScopedVar(index=1, debug_name="x", location=DUMMY_LOC)
+        inner_abs = ScopedAbs(var_name="y", var_type=None, body=inner_body, location=DUMMY_LOC)
+        outer_abs = ScopedAbs(var_name="x", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(outer_abs, empty_ctx)
 
@@ -1072,7 +1168,7 @@ class TestEdgeCases:
 
 class TestPolymorphicConstructors:
     """Tests for polymorphic constructors and pattern matching.
-    
+
     These tests verify that:
     1. Constructor types use proper type variables (not meta-variables)
     2. Pattern matching works with polymorphic constructors
@@ -1083,81 +1179,81 @@ class TestPolymorphicConstructors:
         """Simple constructor application should work."""
         from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import ElaborationPipeline
-        
-        source = '''
+
+        source = """
         data Maybe a = Nothing | Just a
         x : Maybe Int = Just 42
-        '''
-        
+        """
+
         tokens = Lexer(source).tokenize()
         decls = Parser(tokens).parse()
         pipeline = ElaborationPipeline(module_name="test")
         result = pipeline.run(decls)
-        
+
         assert result.success, f"Elaboration failed: {result.errors}"
-        assert 'x' in result.module.global_types
+        assert "x" in result.module.global_types
 
     def test_pattern_matching_same_type(self):
         """Pattern matching without type transformation."""
         from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import ElaborationPipeline
-        
-        source = '''
+
+        source = """
         data Maybe a = Nothing | Just a
         
         f : Maybe Int → Maybe Int = λm:Maybe Int →
           case m of { Nothing → Nothing | Just x → Just x }
-        '''
-        
+        """
+
         tokens = Lexer(source).tokenize()
         decls = Parser(tokens).parse()
         pipeline = ElaborationPipeline(module_name="test")
         result = pipeline.run(decls)
-        
+
         assert result.success, f"Elaboration failed: {result.errors}"
 
     def test_pattern_matching_type_abstraction_same(self):
         """Pattern matching with type abstraction (same type)."""
         from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import ElaborationPipeline
-        
-        source = '''
+
+        source = """
         data Maybe a = Nothing | Just a
         
         f : ∀a. Maybe a → Maybe a = Λa. λm:Maybe a →
           case m of { Nothing → Nothing | Just x → Just x }
-        '''
-        
+        """
+
         tokens = Lexer(source).tokenize()
         decls = Parser(tokens).parse()
         pipeline = ElaborationPipeline(module_name="test")
         result = pipeline.run(decls)
-        
+
         assert result.success, f"Elaboration failed: {result.errors}"
 
     def test_mapMaybe_without_transformation(self):
         """mapMaybe returning Nothing (no transformation)."""
         from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import ElaborationPipeline
-        
-        source = '''
+
+        source = """
         data Maybe a = Nothing | Just a
         
         mapMaybe : ∀a. ∀b. (a → b) → Maybe a → Maybe b =
           Λa. Λb. λf:(a → b) → λm:Maybe a →
             case m of { Nothing → Nothing | Just x → Nothing }
-        '''
-        
+        """
+
         tokens = Lexer(source).tokenize()
         decls = Parser(tokens).parse()
         pipeline = ElaborationPipeline(module_name="test")
         result = pipeline.run(decls)
-        
+
         assert result.success, f"Elaboration failed: {result.errors}"
 
     def test_mapMaybe_with_function_application(self):
         """Full mapMaybe with type transformation - the critical test case.
-        
+
         This test verifies that:
         1. Constructor types use proper type variables (a, not _a)
         2. Pattern matching binds pattern variables correctly
@@ -1166,25 +1262,25 @@ class TestPolymorphicConstructors:
         """
         from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import ElaborationPipeline
-        
-        source = '''
+
+        source = """
         data Maybe a = Nothing | Just a
         
         mapMaybe : ∀a. ∀b. (a → b) → Maybe a → Maybe b =
           Λa. Λb. λf:(a → b) → λm:Maybe a →
             case m of { Nothing → Nothing | Just x → Just (f x) }
-        '''
-        
+        """
+
         tokens = Lexer(source).tokenize()
         decls = Parser(tokens).parse()
         pipeline = ElaborationPipeline(module_name="test")
         result = pipeline.run(decls)
-        
+
         assert result.success, f"Elaboration failed: {result.errors}"
-        
+
         # Verify the type is correct
-        assert 'mapMaybe' in result.module.global_types
-        mapMaybe_type = result.module.global_types['mapMaybe']
+        assert "mapMaybe" in result.module.global_types
+        mapMaybe_type = result.module.global_types["mapMaybe"]
         # Should be: ∀a. ∀b. (a → b) → Maybe a → Maybe b
         assert isinstance(mapMaybe_type, TypeForall)
 
@@ -1192,28 +1288,28 @@ class TestPolymorphicConstructors:
         """Test Either type with mapRight (transforms Right, keeps Left)."""
         from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import ElaborationPipeline
-        
-        source = '''
+
+        source = """
         data Either a b = Left a | Right b
         
         mapRight : ∀a. ∀b. ∀c. (b → c) → Either a b → Either a c =
           Λa. Λb. Λc. λf:(b → c) → λe:Either a b →
             case e of { Left x → Left x | Right y → Right (f y) }
-        '''
-        
+        """
+
         tokens = Lexer(source).tokenize()
         decls = Parser(tokens).parse()
         pipeline = ElaborationPipeline(module_name="test")
         result = pipeline.run(decls)
-        
+
         assert result.success, f"Elaboration failed: {result.errors}"
 
     def test_list_map(self):
         """Test List type with map function."""
         from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import ElaborationPipeline
-        
-        source = '''
+
+        source = """
         data List a = Nil | Cons a (List a)
         
         map : ∀a. ∀b. (a → b) → List a → List b =
@@ -1222,13 +1318,13 @@ class TestPolymorphicConstructors:
               Nil → Nil
             | Cons x xs' → Cons (f x) xs'
             }
-        '''
-        
+        """
+
         tokens = Lexer(source).tokenize()
         decls = Parser(tokens).parse()
         pipeline = ElaborationPipeline(module_name="test")
         result = pipeline.run(decls)
-        
+
         # This may fail due to recursion not being in scope
         # but it tests the pattern matching aspect
         # For now, just ensure no exception is raised

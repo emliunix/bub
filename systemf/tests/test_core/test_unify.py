@@ -57,39 +57,38 @@ class TestSubstitution:
         assert s.apply(TypeVar("a")) == TypeVar("b")
         assert s.apply(TypeVar("c")) == TypeVar("c")
 
-    def test_apply_arrow(self):
-        """Test applying substitution to arrow type."""
-        s = Substitution.singleton("a", TypeVar("x"))
-        t = TypeArrow(TypeVar("a"), TypeVar("b"))
-        result = s.apply(t)
-        expected = TypeArrow(TypeVar("x"), TypeVar("b"))
-        assert result == expected
-
-    def test_apply_forall(self):
-        """Test applying substitution to forall type."""
-        s = Substitution.singleton("b", TypeVar("x"))
-        body = TypeArrow(TypeVar("a"), TypeVar("b"))
-        t = TypeForall("a", body)
-        result = s.apply(t)
-        expected_body = TypeArrow(TypeVar("a"), TypeVar("x"))
-        expected = TypeForall("a", expected_body)
-        assert result == expected
-
-    def test_apply_forall_avoids_capture(self):
-        """Test substitution avoids capturing bound variables."""
-        s = Substitution.singleton("a", TypeVar("x"))
-        t = TypeForall("a", TypeVar("a"))
-        result = s.apply(t)
-        # Bound variable 'a' should not be substituted
-        assert result == t
-
-    def test_apply_constructor(self):
-        """Test applying substitution to constructor."""
-        s = Substitution.singleton("a", TypeVar("x"))
-        t = TypeConstructor("List", [TypeVar("a")])
-        result = s.apply(t)
-        expected = TypeConstructor("List", [TypeVar("x")])
-        assert result == expected
+    @pytest.mark.parametrize(
+        "subst, input_type, expected",
+        [
+            # Arrow type
+            (
+                Substitution.singleton("a", TypeVar("x")),
+                TypeArrow(TypeVar("a"), TypeVar("b")),
+                TypeArrow(TypeVar("x"), TypeVar("b")),
+            ),
+            # Forall type
+            (
+                Substitution.singleton("b", TypeVar("x")),
+                TypeForall("a", TypeArrow(TypeVar("a"), TypeVar("b"))),
+                TypeForall("a", TypeArrow(TypeVar("a"), TypeVar("x"))),
+            ),
+            # Forall avoids capture
+            (
+                Substitution.singleton("a", TypeVar("x")),
+                TypeForall("a", TypeVar("a")),
+                TypeForall("a", TypeVar("a")),
+            ),
+            # Constructor
+            (
+                Substitution.singleton("a", TypeVar("x")),
+                TypeConstructor("List", [TypeVar("a")]),
+                TypeConstructor("List", [TypeVar("x")]),
+            ),
+        ],
+    )
+    def test_apply(self, subst, input_type, expected):
+        """Test applying substitution to various type constructors."""
+        assert subst.apply(input_type) == expected
 
     def test_compose_identity(self):
         """Test composition with empty substitution."""
@@ -128,18 +127,14 @@ class TestUnifyVariables:
         assert result == Substitution.empty()
 
     def test_var_with_type(self):
-        """Test unifying variable with concrete type."""
+        """Test unifying variable with concrete type (symmetric)."""
         t1 = TypeVar("a")
         t2 = TypeConstructor("Int", [])
         result = unify(t1, t2)
         assert result == Substitution.singleton("a", t2)
-
-    def test_type_with_var(self):
-        """Test unifying concrete type with variable."""
-        t1 = TypeConstructor("Int", [])
-        t2 = TypeVar("a")
-        result = unify(t1, t2)
-        assert result == Substitution.singleton("a", t1)
+        # Symmetry: unify(t2, t1) should produce same substitution
+        result_sym = unify(t2, t1)
+        assert result_sym == Substitution.singleton("a", t2)
 
 
 class TestUnifyArrows:

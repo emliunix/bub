@@ -21,7 +21,7 @@ Example:
     >>> loc = Location("test", 1, 1)
     >>>
     >>> # \\x -> x with annotation
-    >>> abs_term = ScopedAbs("x", SurfaceTypeConstructor("Int", [], loc),
+    >>> abs_term = ScopedAbs("x", SurfaceTypeConstructor(name="Int", args=[], location=loc),
     ...                      ScopedVar(0, "x", loc), loc)
     >>> core_term, ty = elab.infer(abs_term, ctx)
 """
@@ -40,6 +40,7 @@ from systemf.core.types import (
     PrimitiveType,
 )
 from systemf.surface.types import (
+    GlobalVar,
     SurfaceType,
     SurfaceTypeVar,
     SurfaceTypeArrow,
@@ -58,10 +59,10 @@ from systemf.surface.types import (
     SurfacePattern,
     SurfaceIf,
     SurfaceTuple,
-    SurfaceIntLit,
-    SurfaceStringLit,
+    SurfaceLit,
     SurfaceOp,
     SurfaceToolCall,
+    SurfaceDeclaration,
 )
 from systemf.surface.inference.context import TypeContext
 from systemf.surface.inference.errors import (
@@ -156,28 +157,33 @@ class TypeElaborator:
             Core type representation
         """
         match ty:
-            case SurfaceTypeVar(name, location):
-                # Check if it's a bound type variable
-                if ctx.is_bound_type(name):
-                    # Convert to de Bruijn index
-                    index = ctx.lookup_type_var_index(name)
-                    return TypeVar(name)
-                # Free type variable - create a fresh meta-variable for inference
-                # This handles polymorphic type annotations like (a -> b) in definitions
-                return self._fresh_meta(name)
+            case SurfaceTypeVar(location=_, name=name):
+                # Check if it's a type variable (lowercase or underscore) vs constructor (uppercase)
+                if name[0].islower() or name == "_":
+                    # It's a type variable
+                    if ctx.is_bound_type(name):
+                        # Convert to de Bruijn index
+                        index = ctx.lookup_type_var_index(name)
+                        return TypeVar(name)
+                    # Free type variable - create a fresh meta-variable for inference
+                    # This handles polymorphic type annotations like (a -> b) in definitions
+                    return self._fresh_meta(name)
+                else:
+                    # It's a type constructor (Int, Bool, etc.)
+                    return TypeConstructor(name, [])
 
-            case SurfaceTypeArrow(arg, ret, param_doc, location):
+            case SurfaceTypeArrow(location=_, arg=arg, ret=ret, param_doc=param_doc):
                 core_arg = self._surface_to_core_type(arg, ctx)
                 core_ret = self._surface_to_core_type(ret, ctx)
                 return TypeArrow(core_arg, core_ret, param_doc)
 
-            case SurfaceTypeForall(var, body, location):
+            case SurfaceTypeForall(location=_, var=var, body=body):
                 # Extend context with bound variable
                 new_ctx = ctx.extend_type(var)
                 core_body = self._surface_to_core_type(body, new_ctx)
                 return TypeForall(var, core_body)
 
-            case SurfaceTypeConstructor(name, args, location):
+            case SurfaceTypeConstructor(location=_, name=name, args=args):
                 core_args = [self._surface_to_core_type(arg, ctx) for arg in args]
                 return TypeConstructor(name, core_args)
 
@@ -197,8 +203,7 @@ class TypeElaborator:
         | SurfaceCase
         | SurfaceIf
         | SurfaceTuple
-        | SurfaceIntLit
-        | SurfaceStringLit
+        | SurfaceLit
         | SurfaceOp
         | SurfaceToolCall,
         ctx: TypeContext,
@@ -228,7 +233,7 @@ class TypeElaborator:
             >>> assert str(ty) == "Int"
         """
         match term:
-            case ScopedVar(index, debug_name, location):
+            case ScopedVar(location=location, index=index, debug_name=debug_name):
                 # Look up variable type in context
                 try:
                     var_type = ctx.lookup_term_type(index)
@@ -243,7 +248,23 @@ class TypeElaborator:
                         term,
                     )
 
-            case ScopedAbs(var_name, var_type, body, location):
+            case GlobalVar(location=location, name=name):
+                # Global variable: look up by name from context
+                try:
+                    var_type = ctx.lookup_global(name)
+                    # Apply current substitution
+                    var_type = self._apply_subst(var_type)
+                    # Create Global node for global variables
+                    core_term = core.Global(location, name)
+                    return (core_term, var_type)
+                except NameError:
+                    raise TypeError(
+                        f"Undefined global variable '{name}'",
+                        location,
+                        term,
+                    )
+
+            case ScopedAbs(location=location, var_name=var_name, var_type=var_type, body=body):
                 # Lambda abstraction: type depends on annotation or inference
                 if var_type is not None:
                     # Use annotation
@@ -266,7 +287,7 @@ class TypeElaborator:
                 core_term = core.Abs(location, var_name, core_var_type, core_body)
                 return (core_term, arrow_type)
 
-            case SurfaceApp(func, arg, location):
+            case SurfaceApp(location=location, func=func, arg=arg):
                 # Application: infer function type, check argument
                 core_func, func_type = self.infer(func, ctx)
 
@@ -310,7 +331,7 @@ class TypeElaborator:
                             context="in application",
                         )
 
-            case SurfaceTypeAbs(var, body, location):
+            case SurfaceTypeAbs(location=location, var=var, body=body):
                 # Type abstraction: forall var. body_type
                 # Extend context with type variable
                 new_ctx = ctx.extend_type(var)
@@ -324,7 +345,7 @@ class TypeElaborator:
                 core_term = core.TAbs(location, var, core_body)
                 return (core_term, forall_type)
 
-            case SurfaceTypeApp(func, type_arg, location):
+            case SurfaceTypeApp(location=location, func=func, type_arg=type_arg):
                 # Type application: func @type_arg
                 core_func, func_type = self.infer(func, ctx)
 
@@ -361,7 +382,7 @@ class TypeElaborator:
                             context="in type application",
                         )
 
-            case SurfaceLet(bindings, body, location):
+            case SurfaceLet(location=location, bindings=bindings, body=body):
                 # Let binding: process sequentially
                 new_ctx = ctx
                 core_bindings = []
@@ -392,14 +413,14 @@ class TypeElaborator:
 
                 return (result, body_type)
 
-            case SurfaceAnn(term_inner, type_ann, location):
+            case SurfaceAnn(location=location, term=term_inner, type=type_ann):
                 # Type annotation: check term against annotation
                 ann_type = self._surface_to_core_type(type_ann, ctx)
                 core_term = self.check(term_inner, ann_type, ctx)
                 final_type = self._apply_subst(ann_type)
                 return (core_term, final_type)
 
-            case SurfaceConstructor(name, args, location):
+            case SurfaceConstructor(location=location, name=name, args=args):
                 # Look up constructor type
                 try:
                     con_type = ctx.lookup_constructor(name)
@@ -443,7 +464,7 @@ class TypeElaborator:
                 core_term = core.Constructor(location, name, core_args)
                 return (core_term, result_type)
 
-            case SurfaceCase(scrutinee, branches, location):
+            case SurfaceCase(location=location, scrutinee=scrutinee, branches=branches):
                 # Pattern matching: infer scrutinee type, check branches
                 core_scrut, scrut_type = self.infer(scrutinee, ctx)
 
@@ -476,7 +497,9 @@ class TypeElaborator:
                 core_term = core.Case(location, core_scrut, core_branches)
                 return (core_term, final_result_type)
 
-            case SurfaceIf(cond, then_branch, else_branch, location):
+            case SurfaceIf(
+                location=location, cond=cond, then_branch=then_branch, else_branch=else_branch
+            ):
                 # Desugar to case: if c then t else f  ==>  case c of True -> t | False -> f
                 # First, check condition is Bool-like
                 core_cond, cond_type = self.infer(cond, ctx)
@@ -506,7 +529,7 @@ class TypeElaborator:
 
                 return (core_term, final_type)
 
-            case SurfaceTuple(elements, location):
+            case SurfaceTuple(location=location, elements=elements):
                 # Tuple desugars to nested Pairs
                 # (a, b, c) -> Pair a (Pair b c)
                 if not elements:
@@ -545,19 +568,13 @@ class TypeElaborator:
 
                 return (core_term, result_type)
 
-            case SurfaceIntLit(value, location):
-                # Integer literal: look up Int type
-                int_type = TypeConstructor("Int", [])
-                core_term = core.IntLit(location, value)
-                return (core_term, int_type)
+            case SurfaceLit(prim_type=prim_type, value=value, location=location):
+                # Literal: look up type based on prim_type
+                lit_type = TypeConstructor(prim_type, [])
+                core_term = core.Lit(source_loc=location, prim_type=prim_type, value=value)
+                return (core_term, lit_type)
 
-            case SurfaceStringLit(value, location):
-                # String literal: look up String type
-                str_type = TypeConstructor("String", [])
-                core_term = core.StringLit(location, value)
-                return (core_term, str_type)
-
-            case SurfaceOp(left, op, right, location):
+            case SurfaceOp(location=location, left=left, op=op, right=right):
                 # Operator: desugar to primitive application
                 # For now, treat as function application with primitive
                 core_left, left_type = self.infer(left, ctx)
@@ -580,7 +597,7 @@ class TypeElaborator:
 
                 return (core_term, result_type)
 
-            case SurfaceToolCall(tool_name, args, location):
+            case SurfaceToolCall(location=location, tool_name=tool_name, args=args):
                 # Tool call: check arguments and return appropriate type
                 core_args = []
                 for arg in args:
@@ -609,8 +626,7 @@ class TypeElaborator:
         | SurfaceCase
         | SurfaceIf
         | SurfaceTuple
-        | SurfaceIntLit
-        | SurfaceStringLit
+        | SurfaceLit
         | SurfaceOp
         | SurfaceToolCall,
         expected: Type,
@@ -644,7 +660,7 @@ class TypeElaborator:
         expected = self._apply_subst(expected)
 
         match term:
-            case ScopedAbs(var_name, var_type, body, location):
+            case ScopedAbs(location=location, var_name=var_name, var_type=var_type, body=body):
                 # Lambda: expected should be an arrow type
                 match expected:
                     case TypeArrow(param_type, ret_type):
@@ -688,7 +704,7 @@ class TypeElaborator:
                             context="lambda expression requires function type",
                         )
 
-            case SurfaceTypeAbs(var, body, location):
+            case SurfaceTypeAbs(location=location, var=var, body=body):
                 # Type abstraction: expected should be forall
                 match expected:
                     case TypeForall(exp_var, exp_body):
@@ -722,7 +738,7 @@ class TypeElaborator:
                             context="type abstraction requires polymorphic type",
                         )
 
-            case SurfaceLet(bindings, body, location):
+            case SurfaceLet(location=location, bindings=bindings, body=body):
                 # Let: process bindings, then check body
                 new_ctx = ctx
                 core_bindings = []
@@ -753,7 +769,7 @@ class TypeElaborator:
 
                 return result
 
-            case SurfaceAnn(term_inner, type_ann, location):
+            case SurfaceAnn(location=location, term=term_inner, type=type_ann):
                 # Annotation: check annotated type against expected
                 ann_type = self._surface_to_core_type(type_ann, ctx)
                 ann_type = self._apply_subst(ann_type)
@@ -763,7 +779,7 @@ class TypeElaborator:
                 # Now check term against the (unified) type
                 return self.check(term_inner, expected, ctx)
 
-            case SurfaceCase(scrutinee, branches, location):
+            case SurfaceCase(location=location, scrutinee=scrutinee, branches=branches):
                 # Case expression: infer scrutinee, check branches against expected result
                 core_scrut, scrut_type = self.infer(scrutinee, ctx)
 
@@ -1033,6 +1049,8 @@ class TypeElaborator:
         self,
         decls: list[SurfaceDeclaration],
         constructors: dict[str, Type] | None = None,
+        global_types: dict[str, Type] | None = None,
+        global_terms: set[str] | None = None,
     ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type], dict[str, Type]]:
         """Elaborate multiple declarations with mutual recursion support.
 
@@ -1085,7 +1103,10 @@ class TypeElaborator:
         )
 
         # Phase 1: Collect all type signatures first
-        global_types: dict[str, Type] = {}
+        # Start with existing global context from REPL (accumulated style)
+        global_types: dict[str, Type] = dict(global_types) if global_types else {}
+        existing_terms: set[str] = set(global_terms) if global_terms else set()
+
         term_decls: list[SurfaceTermDeclaration] = []
         other_decls: list[tuple[int, SurfaceDeclaration]] = []
 
@@ -1293,7 +1314,7 @@ class TypeElaborator:
             full_name = f"llm.{name}"
             pragma_str = pragma.get("LLM")
         else:
-            full_name = f"$prim.{name}"
+            full_name = name
             pragma_str = None
 
         return core.TermDeclaration(
@@ -1336,8 +1357,7 @@ def elaborate_term(
     | SurfaceCase
     | SurfaceIf
     | SurfaceTuple
-    | SurfaceIntLit
-    | SurfaceStringLit
+    | SurfaceLit
     | SurfaceOp
     | SurfaceToolCall,
     ctx: Optional[TypeContext] = None,

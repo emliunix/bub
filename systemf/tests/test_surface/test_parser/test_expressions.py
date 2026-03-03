@@ -20,8 +20,7 @@ from systemf.surface.parser import (
 from systemf.surface.types import (
     SurfaceVar,
     SurfaceConstructor,
-    SurfaceIntLit,
-    SurfaceStringLit,
+    SurfaceLit,
     SurfaceAbs,
     SurfaceTypeAbs,
     SurfaceApp,
@@ -51,14 +50,14 @@ class TestAtomParser:
         """Parse an integer literal."""
         tokens = lex("42")
         result = atom_parser().parse(tokens)
-        assert isinstance(result, SurfaceIntLit)
+        assert isinstance(result, SurfaceLit)
         assert result.value == 42
 
     def test_string_literal(self):
         """Parse a string literal."""
         tokens = lex('"hello"')
         result = atom_parser().parse(tokens)
-        assert isinstance(result, SurfaceStringLit)
+        assert isinstance(result, SurfaceLit)
         assert result.value == "hello"
 
     def test_parenthesized_expression(self):
@@ -415,17 +414,17 @@ class TestTupleParser:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceTuple)
         assert len(result.elements) == 3
-        assert isinstance(result.elements[0], SurfaceIntLit)
+        assert isinstance(result.elements[0], SurfaceLit)
         assert result.elements[0].value == 1
 
     def test_tuple_mixed(self):
         """Parse tuple with mixed elements."""
-        from systemf.surface.types import SurfaceTuple, SurfaceIntLit, SurfaceConstructor
+        from systemf.surface.types import SurfaceTuple, SurfaceLit, SurfaceConstructor
 
         tokens = lex("(1, True)")
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceTuple)
-        assert isinstance(result.elements[0], SurfaceIntLit)
+        assert isinstance(result.elements[0], SurfaceLit)
         assert isinstance(result.elements[1], SurfaceConstructor)
 
     def test_nested_tuple(self):
@@ -437,4 +436,4 @@ class TestTupleParser:
         assert isinstance(result, SurfaceTuple)
         assert len(result.elements) == 2
         assert isinstance(result.elements[0], SurfaceTuple)
-        assert isinstance(result.elements[1], SurfaceIntLit)
+        assert isinstance(result.elements[1], SurfaceLit)

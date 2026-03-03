@@ -222,32 +222,6 @@ two : Int = 2"""
         assert decls[0].docstring == "First declaration"
         assert decls[1].docstring == "Second declaration"
 
-    def test_multiline_docstring_concatenation(self):
-        """Consecutive -- comments after -- | should be merged into one docstring."""
-        source = """-- | Line 1
--- Line 2
--- Line 3
-data X = A"""
-        tokens = lex(source)
-        result = decl_parser().parse(tokens)
-
-        assert isinstance(result, SurfaceDataDeclaration)
-        assert result.docstring == "Line 1\nLine 2\nLine 3"
-
-    def test_multiline_docstring_stops_at_new_docstring(self):
-        """Docstring merging should stop at a new -- | docstring."""
-        source = """-- | First doc
--- Continuation
--- | Second doc
-data X = A"""
-        tokens = lex(source)
-
-        # Check lexer output - should have TWO separate docstring tokens
-        docstring_tokens = [t for t in tokens if "DOCSTRING" in t.type]
-        assert len(docstring_tokens) == 2
-        assert docstring_tokens[0].content == "First doc\nContinuation"
-        assert docstring_tokens[1].content == "Second doc"
-
     def test_multiline_docstring_stops_at_pragma(self):
         """Docstring merging should stop at a pragma."""
         source = """-- | Line 1

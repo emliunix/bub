@@ -44,8 +44,7 @@ from systemf.surface.types import (
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceConstructor,
-    SurfaceIntLit,
-    SurfaceStringLit,
+    SurfaceLit,
     SurfaceAnn,
     SurfaceType,
     SurfaceCase,
@@ -54,6 +53,8 @@ from systemf.surface.types import (
     SurfaceLet,
     SurfaceIf,
     SurfaceOp,
+    SurfaceTuple,
+    SurfacePatternTuple,
 )
 
 # Type variable for generic parsers
@@ -174,18 +175,22 @@ def variable_parser() -> P[SurfaceVar]:
     @generate
     def parser():
         token = yield match_token("IDENT")
-        return SurfaceVar(token.value, token.location)
+        return SurfaceVar(name=token.value, location=token.location)
 
     return parser
 
 
-def constructor_parser(constraint: ValidIndent | None = None) -> P[SurfaceConstructor]:
+def constructor_parser(
+    constraint: ValidIndent | None = None, greedy: bool = True
+) -> P[SurfaceConstructor]:
     """Parse a constructor application or nullary constructor.
 
     Tries to parse arguments greedily until no more atoms can be parsed.
 
     Args:
         constraint: Optional layout constraint for checking argument columns
+        greedy: If True, parse arguments greedily (for patterns).
+                If False, only parse constructor name (for expressions).
 
     Returns:
         SurfaceConstructor with the constructor name and arguments
@@ -196,6 +201,11 @@ def constructor_parser(constraint: ValidIndent | None = None) -> P[SurfaceConstr
         token = yield match_token("CONSTRUCTOR")
         name = token.value
         loc = token.location
+
+        if not greedy:
+            # For expressions: only parse constructor name
+            # Application is handled by app_parser
+            return SurfaceConstructor(name=name, args=[], location=loc)
 
         # Parse arguments greedily (constructor application)
         args: list[SurfaceTerm] = []
@@ -212,16 +222,16 @@ def constructor_parser(constraint: ValidIndent | None = None) -> P[SurfaceConstr
                 break
             args.append(arg_result)
 
-        return SurfaceConstructor(name, args, loc)
+        return SurfaceConstructor(name=name, args=args, location=loc)
 
     return parser
 
 
-def literal_parser() -> P[SurfaceIntLit | SurfaceStringLit]:
+def literal_parser() -> P[SurfaceLit]:
     """Parse an integer or string literal.
 
     Returns:
-        SurfaceIntLit or SurfaceStringLit with the value and location
+        SurfaceLit with the value and location
     """
 
     @generate
@@ -229,12 +239,16 @@ def literal_parser() -> P[SurfaceIntLit | SurfaceStringLit]:
         # Try integer literal first
         num_token = yield match_token("NUMBER").optional()
         if num_token is not None:
-            return SurfaceIntLit(int(num_token.value), num_token.location)
+            return SurfaceLit(
+                prim_type="Int", value=int(num_token.value), location=num_token.location
+            )
 
         # Try string literal
         str_token = yield match_token("STRING").optional()
         if str_token is not None:
-            return SurfaceStringLit(str_token.value, str_token.location)
+            return SurfaceLit(
+                prim_type="String", value=str_token.value, location=str_token.location
+            )
 
         # Neither matched - fail
         yield fail("expected literal")
@@ -273,7 +287,7 @@ def tuple_parser() -> P[SurfaceTerm]:
             if close_paren is not None:
                 break
 
-        return SurfaceTuple(elements, loc)
+        return SurfaceTuple(elements=elements, location=loc)
 
     return parser
 
@@ -323,8 +337,10 @@ def atom_base_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
         if paren is not None:
             return paren
 
-        # Try constructor (includes nullary constructors)
-        con = yield constructor_parser(constraint).optional()
+        # Try constructor (non-greedy for expressions)
+        # In expressions, constructor application has same precedence as function app
+        # So "Nil xs" parses as two atoms, not constructor with argument
+        con = yield constructor_parser(constraint, greedy=False).optional()
         if con is not None:
             return con
 
@@ -364,24 +380,16 @@ def atom_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
 
         # Apply post-fix operators greedily
         while True:
-            # Type application with @
+            # Type application with @ (only syntax supported)
             type_app = yield (match_symbol("@") >> type_parser()).optional()
             if type_app is not None:
-                atom = SurfaceTypeApp(atom, type_app, atom.location)
-                continue
-
-            # Type application with brackets
-            type_bracket = yield (
-                match_symbol("[") >> type_parser() << match_symbol("]")
-            ).optional()
-            if type_bracket is not None:
-                atom = SurfaceTypeApp(atom, type_bracket, atom.location)
+                atom = SurfaceTypeApp(func=atom, type_arg=type_app, location=atom.location)
                 continue
 
             # Type annotation
             type_ann = yield (match_symbol(":") >> type_parser()).optional()
             if type_ann is not None:
-                atom = SurfaceAnn(atom, type_ann, atom.location)
+                atom = SurfaceAnn(term=atom, type=type_ann, location=atom.location)
                 continue
 
             break
@@ -435,7 +443,7 @@ def app_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 
         result = first
         for arg in args:
-            result = SurfaceApp(result, arg, loc)
+            result = SurfaceApp(func=result, arg=arg, location=loc)
 
         return result
 
@@ -493,7 +501,7 @@ def multiplicative_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         # Build left-associative tree
         result = left
         for op, right in ops_and_rights:
-            result = SurfaceOp(result, op.value, right, loc)
+            result = SurfaceOp(left=result, op=op.value, right=right, location=loc)
 
         return result
 
@@ -531,7 +539,7 @@ def additive_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         # Build left-associative tree
         result = left
         for op, right in ops_and_rights:
-            result = SurfaceOp(result, op.value, right, loc)
+            result = SurfaceOp(left=result, op=op.value, right=right, location=loc)
 
         return result
 
@@ -569,7 +577,7 @@ def comparison_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         # Build left-associative tree
         result = left
         for op, right in ops_and_rights:
-            result = SurfaceOp(result, op.value, right, loc)
+            result = SurfaceOp(left=result, op=op.value, right=right, location=loc)
 
         return result
 
@@ -606,7 +614,7 @@ def logical_and_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         # Build left-associative tree
         result = left
         for op, right in ops_and_rights:
-            result = SurfaceOp(result, op.value, right, loc)
+            result = SurfaceOp(left=result, op=op.value, right=right, location=loc)
 
         return result
 
@@ -643,7 +651,7 @@ def logical_or_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
         # Build left-associative tree
         result = left
         for op, right in ops_and_rights:
-            result = SurfaceOp(result, op.value, right, loc)
+            result = SurfaceOp(left=result, op=op.value, right=right, location=loc)
 
         return result
 
@@ -724,7 +732,11 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
         # Reverse iterate to build nested structure
         for var_name, var_type in reversed(annotated_params):
             result = SurfaceAbs(
-                var_name, var_type, result, loc, param_docstrings if result is body else []
+                var=var_name,
+                var_type=var_type,
+                body=result,
+                location=loc,
+                param_docstrings=param_docstrings if result is body else [],
             )
 
         return result
@@ -760,7 +772,7 @@ def type_abs_parser(constraint: ValidIndent) -> P[SurfaceTypeAbs]:
         # Build nested type abstractions from right to left
         result = body
         for var_token in reversed(var_tokens):
-            result = SurfaceTypeAbs(var_token.value, result, loc)
+            result = SurfaceTypeAbs(var=var_token.value, body=result, location=loc)
 
         return result
 
@@ -799,14 +811,14 @@ def pattern_base_parser() -> P[SurfacePattern]:
                     break
                 vars.append(var_result.value)
 
-            return SurfacePattern(constructor, vars, loc)
+            return SurfacePattern(constructor=constructor, vars=vars, location=loc)
 
         # Try variable pattern (just an identifier)
         var_token = yield match_token("IDENT").optional()
         if var_token is not None:
             # Variable pattern is just a constructor with no args
             # (treated as a catch-all variable)
-            return SurfacePattern(var_token.value, [], var_token.location)
+            return SurfacePattern(constructor=var_token.value, vars=[], location=var_token.location)
 
         # No match
         yield fail("expected pattern")
@@ -845,7 +857,7 @@ def pattern_tuple_parser() -> P[SurfacePattern]:
             if close_paren is not None:
                 break
 
-        return SurfacePatternTuple(elements, loc)
+        return SurfacePatternTuple(elements=elements, location=loc)
 
     return parser
 
@@ -895,13 +907,13 @@ def case_alt(constraint: ValidIndent) -> P[SurfaceBranch]:
         # This prevents the expression from consuming subsequent branches
         expr_constraint: ValidIndent
         match constraint:
-            case AtPos(col):
-                expr_constraint = AfterPos(col + 1)
+            case AtPos(col=c):
+                expr_constraint = AfterPos(col=c + 1)
             case _:
                 expr_constraint = constraint
 
         body = yield expr_parser(expr_constraint)
-        return SurfaceBranch(pat, body, loc)
+        return SurfaceBranch(pattern=pat, body=body, location=loc)
 
     return parser
 
@@ -929,7 +941,7 @@ def case_parser(constraint: ValidIndent) -> P[SurfaceCase]:
         # Parse branches (supports both explicit braces { ... } and layout indentation)
         branches = yield block(case_alt)
 
-        return SurfaceCase(scrutinee, branches, loc)
+        return SurfaceCase(scrutinee=scrutinee, branches=branches, location=loc)
 
     return parser
 
@@ -978,8 +990,8 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, Optional[SurfaceType], 
         # This prevents consuming the next binding which is at column col
         expr_constraint: ValidIndent
         match constraint:
-            case AtPos(col):
-                expr_constraint = AfterPos(col + 1)  # Strictly greater than binding column
+            case AtPos(col=c):
+                expr_constraint = AfterPos(col=c + 1)  # Strictly greater than binding column
             case _:
                 expr_constraint = constraint
 
@@ -990,7 +1002,7 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, Optional[SurfaceType], 
         if params:
             # Build nested lambdas from right to left
             for param in reversed(params):
-                value = SurfaceAbs(param, None, value, loc)
+                value = SurfaceAbs(var=param, var_type=None, body=value, location=loc)
 
         return (var_name, var_type, value)
 
@@ -1017,14 +1029,14 @@ def let_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 
         # Enter layout mode: capture column of first binding token
         col = yield column()
-        bindings = yield block_entries(AtPos(col), let_binding)
+        bindings = yield block_entries(AtPos(col=col), let_binding)
 
         # Validate 'in' keyword is at >= parent's column
         yield must_continue(constraint, "in")
         yield match_keyword("in")
         body = yield expr_parser(constraint)
 
-        return SurfaceLet(bindings, body, loc)
+        return SurfaceLet(bindings=bindings, body=body, location=loc)
 
     return parser
 
@@ -1053,7 +1065,7 @@ def if_parser(constraint: ValidIndent) -> P[SurfaceIf]:
         then_branch = yield expr_parser(constraint)
         yield match_keyword("else")
         else_branch = yield expr_parser(constraint)
-        return SurfaceIf(cond, then_branch, else_branch, loc)
+        return SurfaceIf(cond=cond, then_branch=then_branch, else_branch=else_branch, location=loc)
 
     return parser
 

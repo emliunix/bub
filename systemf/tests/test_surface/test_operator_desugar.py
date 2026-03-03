@@ -8,7 +8,7 @@ import pytest
 from systemf.surface.types import (
     SurfaceApp,
     SurfaceCase,
-    SurfaceIntLit,
+    SurfaceLit,
     SurfaceOp,
     SurfaceVar,
 )
@@ -20,127 +20,156 @@ class TestOperatorToPrimitiveMapping:
     """Tests for the operator to primitive name mapping."""
 
     def test_plus_mapping(self):
-        """+ maps to $prim.int_plus."""
-        assert OPERATOR_TO_PRIM["+"] == "$prim.int_plus"
+        """+ maps to int_plus (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM["+"] == "int_plus"
 
     def test_minus_mapping(self):
-        """- maps to $prim.int_minus."""
-        assert OPERATOR_TO_PRIM["-"] == "$prim.int_minus"
+        """- maps to int_minus (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM["-"] == "int_minus"
 
     def test_multiply_mapping(self):
-        """* maps to $prim.int_multiply."""
-        assert OPERATOR_TO_PRIM["*"] == "$prim.int_multiply"
+        """* maps to int_multiply (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM["*"] == "int_multiply"
 
     def test_divide_mapping(self):
-        """/ maps to $prim.int_divide."""
-        assert OPERATOR_TO_PRIM["/"] == "$prim.int_divide"
+        """/ maps to int_divide (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM["/"] == "int_divide"
 
     def test_eq_mapping(self):
-        """== maps to $prim.int_eq."""
-        assert OPERATOR_TO_PRIM["=="] == "$prim.int_eq"
+        """== maps to int_eq (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM["=="] == "int_eq"
 
     def test_lt_mapping(self):
-        """< maps to $prim.int_lt."""
-        assert OPERATOR_TO_PRIM["<"] == "$prim.int_lt"
+        """< maps to int_lt (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM["<"] == "int_lt"
 
     def test_gt_mapping(self):
-        """> maps to $prim.int_gt."""
-        assert OPERATOR_TO_PRIM[">"] == "$prim.int_gt"
+        """> maps to int_gt (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM[">"] == "int_gt"
 
     def test_le_mapping(self):
-        """<= maps to $prim.int_le."""
-        assert OPERATOR_TO_PRIM["<="] == "$prim.int_le"
+        """<= maps to int_le (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM["<="] == "int_le"
 
     def test_ge_mapping(self):
-        """>= maps to $prim.int_ge."""
-        assert OPERATOR_TO_PRIM[">="] == "$prim.int_ge"
+        """>= maps to int_ge (without $prim. prefix)."""
+        assert OPERATOR_TO_PRIM[">="] == "int_ge"
 
 
 class TestOperatorDesugaring:
     """Tests for desugaring operators to primitive calls."""
 
     def test_desugar_addition(self):
-        """Desugar + to $prim.int_plus application."""
+        """Desugar + to int_plus application."""
         term = parse_expression("1 + 2")
         desugared = desugar(term)
 
-        # Should be: (($prim.int_plus 1) 2)
+        # Should be: ((int_plus 1) 2)
+        # Structure: SurfaceApp(SurfaceApp(SurfaceVar("int_plus"), left), right)
         assert isinstance(desugared, SurfaceApp)
-        assert isinstance(desugared.func, SurfaceApp)
+        assert isinstance(desugared.func, SurfaceApp)  # (int_plus 1)
         assert isinstance(desugared.func.func, SurfaceVar)
-        assert desugared.func.func.name == "$prim.int_plus"
-        assert isinstance(desugared.func.arg, SurfaceIntLit)
+        assert desugared.func.func.name == "int_plus"
+        assert isinstance(desugared.func.arg, SurfaceLit)
         assert desugared.func.arg.value == 1
-        assert isinstance(desugared.arg, SurfaceIntLit)
+        assert isinstance(desugared.arg, SurfaceLit)
         assert desugared.arg.value == 2
 
     def test_desugar_subtraction(self):
-        """Desugar - to $prim.int_minus application."""
+        """Desugar - to int_minus application."""
         term = parse_expression("5 - 3")
         desugared = desugar(term)
 
+        # Should be: ((int_minus 5) 3)
         assert isinstance(desugared, SurfaceApp)
+        assert isinstance(desugared.func, SurfaceApp)
         assert isinstance(desugared.func.func, SurfaceVar)
-        assert desugared.func.func.name == "$prim.int_minus"
+        assert desugared.func.func.name == "int_minus"
+        assert isinstance(desugared.func.arg, SurfaceLit)
+        assert desugared.func.arg.value == 5
+        assert isinstance(desugared.arg, SurfaceLit)
+        assert desugared.arg.value == 3
 
     def test_desugar_multiplication(self):
-        """Desugar * to $prim.int_multiply application."""
+        """Desugar * to int_multiply application."""
         term = parse_expression("4 * 5")
         desugared = desugar(term)
 
+        # Should be: ((int_multiply 4) 5)
         assert isinstance(desugared, SurfaceApp)
+        assert isinstance(desugared.func, SurfaceApp)
         assert isinstance(desugared.func.func, SurfaceVar)
-        assert desugared.func.func.name == "$prim.int_multiply"
+        assert desugared.func.func.name == "int_multiply"
 
     def test_desugar_division(self):
-        """Desugar / to $prim.int_divide application."""
+        """Desugar / to int_divide application."""
         term = parse_expression("10 / 2")
         desugared = desugar(term)
 
+        # Should be: ((int_divide 10) 2)
         assert isinstance(desugared, SurfaceApp)
+        assert isinstance(desugared.func, SurfaceApp)
         assert isinstance(desugared.func.func, SurfaceVar)
-        assert desugared.func.func.name == "$prim.int_divide"
+        assert desugared.func.func.name == "int_divide"
 
     def test_desugar_equality(self):
-        """Desugar == to $prim.int_eq application."""
+        """Desugar == to int_eq application."""
         term = parse_expression("x == y")
         desugared = desugar(term)
 
+        # Should be: ((int_eq x) y)
         assert isinstance(desugared, SurfaceApp)
+        assert isinstance(desugared.func, SurfaceApp)
         assert isinstance(desugared.func.func, SurfaceVar)
-        assert desugared.func.func.name == "$prim.int_eq"
+        assert desugared.func.func.name == "int_eq"
+        assert isinstance(desugared.func.arg, SurfaceVar)
+        assert desugared.func.arg.name == "x"
+        assert isinstance(desugared.arg, SurfaceVar)
+        assert desugared.arg.name == "y"
 
     def test_desugar_less_than(self):
-        """Desugar < to $prim.int_lt application."""
+        """Desugar < to int_lt application."""
         term = parse_expression("x < y")
         desugared = desugar(term)
 
+        # Should be: ((int_lt x) y)
         assert isinstance(desugared, SurfaceApp)
-        assert desugared.func.func.name == "$prim.int_lt"
+        assert isinstance(desugared.func, SurfaceApp)
+        assert isinstance(desugared.func.func, SurfaceVar)
+        assert desugared.func.func.name == "int_lt"
 
     def test_desugar_greater_than(self):
-        """Desugar > to $prim.int_gt application."""
+        """Desugar > to int_gt application."""
         term = parse_expression("x > y")
         desugared = desugar(term)
 
+        # Should be: ((int_gt x) y)
         assert isinstance(desugared, SurfaceApp)
-        assert desugared.func.func.name == "$prim.int_gt"
+        assert isinstance(desugared.func, SurfaceApp)
+        assert isinstance(desugared.func.func, SurfaceVar)
+        assert desugared.func.func.name == "int_gt"
 
     def test_desugar_less_than_equal(self):
-        """Desugar <= to $prim.int_le application."""
+        """Desugar <= to int_le application."""
         term = parse_expression("x <= y")
         desugared = desugar(term)
 
+        # Should be: ((int_le x) y)
         assert isinstance(desugared, SurfaceApp)
-        assert desugared.func.func.name == "$prim.int_le"
+        assert isinstance(desugared.func, SurfaceApp)
+        assert isinstance(desugared.func.func, SurfaceVar)
+        assert desugared.func.func.name == "int_le"
 
     def test_desugar_greater_than_equal(self):
-        """Desugar >= to $prim.int_ge application."""
+        """Desugar >= to int_ge application."""
         term = parse_expression("x >= y")
         desugared = desugar(term)
 
+        # Should be: ((int_ge x) y)
         assert isinstance(desugared, SurfaceApp)
-        assert desugared.func.func.name == "$prim.int_ge"
+        assert isinstance(desugared.func, SurfaceApp)
+        assert isinstance(desugared.func.func, SurfaceVar)
+        assert desugared.func.func.name == "int_ge"
 
     def test_desugar_preserves_precedence(self):
         """Desugaring preserves operator precedence."""
@@ -148,31 +177,39 @@ class TestOperatorDesugaring:
         term = parse_expression("1 + 2 * 3")
         desugared = desugar(term)
 
-        # Should be: (($prim.int_plus 1) (($prim.int_multiply 2) 3))
+        # Should be: ((int_plus 1) ((int_multiply 2) 3))
+        # So desugared is the outer + application
         assert isinstance(desugared, SurfaceApp)
+        assert isinstance(desugared.func, SurfaceApp)
         assert isinstance(desugared.func.func, SurfaceVar)
-        assert desugared.func.func.name == "$prim.int_plus"
-
-        # The right argument should be the multiplication
+        assert desugared.func.func.name == "int_plus"
+        # Left operand is 1
+        assert isinstance(desugared.func.arg, SurfaceLit)
+        assert desugared.func.arg.value == 1
+        # Right operand should be the desugared * expression
         assert isinstance(desugared.arg, SurfaceApp)
+        assert isinstance(desugared.arg.func, SurfaceApp)
         assert isinstance(desugared.arg.func.func, SurfaceVar)
-        assert desugared.arg.func.func.name == "$prim.int_multiply"
+        assert desugared.arg.func.func.name == "int_multiply"
 
     def test_desugar_complex_expression(self):
         """Desugar complex expression with multiple operators."""
         term = parse_expression("1 + 2 + 3")
         desugared = desugar(term)
 
-        # Should be: (($prim.int_plus (($prim.int_plus 1) 2)) 3)
+        # Left-associative: ((1 + 2) + 3)
+        # Should be: ((int_plus ((int_plus 1) 2)) 3)
         assert isinstance(desugared, SurfaceApp)
-        assert desugared.func.func.name == "$prim.int_plus"
+        assert isinstance(desugared.func, SurfaceApp)
+        assert isinstance(desugared.func.func, SurfaceVar)
+        assert desugared.func.func.name == "int_plus"
 
     def test_desugar_preserves_location(self):
         """Desugaring preserves source location information."""
         term = parse_expression("1 + 2")
         desugared = desugar(term)
 
-        # Check that the location is preserved in the application
+        # Check that the location is preserved
         assert hasattr(desugared, "location")
         assert desugared.location is not None
 
@@ -184,7 +221,7 @@ class TestDesugarInContext:
         """Operators in let bindings are desugared."""
         from systemf.surface.parser import parse_program
 
-        source = """sum = 1 + 2"""
+        source = """sum : Int = 1 + 2"""
         decls = parse_program(source)
 
         # The body should be the operator expression
@@ -198,17 +235,22 @@ class TestDesugarInContext:
         desugarer = Desugarer()
         desugared_body = desugarer.desugar(body)
 
+        # Should be desugared to SurfaceApp
         assert isinstance(desugared_body, SurfaceApp)
-        assert desugared_body.func.func.name == "$prim.int_plus"
+        assert isinstance(desugared_body.func, SurfaceApp)
+        assert isinstance(desugared_body.func.func, SurfaceVar)
+        assert desugared_body.func.func.name == "int_plus"
 
     def test_operator_in_lambda(self):
         """Operators in lambda bodies are desugared."""
         term = parse_expression(r"\x -> x + 1")
         desugared = desugar(term)
 
-        # Lambda body should be desugared to prim application
+        # Lambda body should be desugared to SurfaceApp
         assert isinstance(desugared.body, SurfaceApp)
-        assert desugared.body.func.func.name == "$prim.int_plus"
+        assert isinstance(desugared.body.func, SurfaceApp)
+        assert isinstance(desugared.body.func.func, SurfaceVar)
+        assert desugared.body.func.func.name == "int_plus"
 
     def test_operator_in_case(self):
         """Operators in case branches - NOTE: Not currently supported in branch bodies."""
@@ -223,9 +265,9 @@ class TestDesugarInContext:
         assert len(term.branches) == 2
 
         # Verify branches have simple literals
-        assert isinstance(term.branches[0].body, SurfaceIntLit)
+        assert isinstance(term.branches[0].body, SurfaceLit)
         assert term.branches[0].body.value == 1
-        assert isinstance(term.branches[1].body, SurfaceIntLit)
+        assert isinstance(term.branches[1].body, SurfaceLit)
         assert term.branches[1].body.value == 2
 
     def test_nested_operators(self):
@@ -233,13 +275,19 @@ class TestDesugarInContext:
         term = parse_expression("(1 + 2) * (3 + 4)")
         desugared = desugar(term)
 
-        # Should be fully desugared to prim applications
+        # Should be: ((int_multiply ((int_plus 1) 2)) ((int_plus 3) 4))
         assert isinstance(desugared, SurfaceApp)
-        assert desugared.func.func.name == "$prim.int_multiply"
+        assert isinstance(desugared.func, SurfaceApp)
+        assert isinstance(desugared.func.func, SurfaceVar)
+        assert desugared.func.func.name == "int_multiply"
 
-        # Both arguments should be desugared additions
-        assert isinstance(desugared.func.arg, SurfaceApp)
-        assert desugared.func.arg.func.func.name == "$prim.int_plus"
+        # Both operands should be desugared + expressions
+        assert isinstance(desugared.func.arg, SurfaceApp)  # (1 + 2)
+        assert isinstance(desugared.func.arg.func, SurfaceApp)
+        assert isinstance(desugared.func.arg.func.func, SurfaceVar)
+        assert desugared.func.arg.func.func.name == "int_plus"
 
-        assert isinstance(desugared.arg, SurfaceApp)
-        assert desugared.arg.func.func.name == "$prim.int_plus"
+        assert isinstance(desugared.arg, SurfaceApp)  # (3 + 4)
+        assert isinstance(desugared.arg.func, SurfaceApp)
+        assert isinstance(desugared.arg.func.func, SurfaceVar)
+        assert desugared.arg.func.func.name == "int_plus"

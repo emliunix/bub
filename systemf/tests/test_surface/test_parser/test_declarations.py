@@ -22,8 +22,8 @@ from systemf.surface.types import (
     SurfaceTypeConstructor,
     SurfaceTypeApp,
     SurfaceTypeTuple,
-    equals_ignore_location,
 )
+from systemf.utils.ast_utils import equals_ignore_location
 
 
 class TestDataDeclaration:

@@ -19,7 +19,7 @@ from systemf.utils.location import Location
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class AnyIndent:
     """Inside braces, no column checking.
 
@@ -30,7 +30,7 @@ class AnyIndent:
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class AtPos:
     """Must be at exact column.
 
@@ -42,7 +42,7 @@ class AtPos:
     col: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class AfterPos:
     """At or after column.
 
@@ -55,7 +55,7 @@ class AfterPos:
     col: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EndOfBlock:
     """Block has ended.
 
@@ -98,7 +98,7 @@ class Token(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TokenBase:
     """Base class for all tokens with location information.
 
@@ -119,7 +119,7 @@ class TokenBase:
         return self.location.line
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class IdentifierToken(TokenBase):
     """Identifier token (lowercase or underscore start)."""
 
@@ -140,7 +140,7 @@ class IdentifierToken(TokenBase):
         return f"IdentifierToken({self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ConstructorToken(TokenBase):
     """Constructor token (uppercase start)."""
 
@@ -161,7 +161,7 @@ class ConstructorToken(TokenBase):
         return f"ConstructorToken({self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class NumberToken(TokenBase):
     """Numeric literal token."""
 
@@ -182,7 +182,7 @@ class NumberToken(TokenBase):
         return f"NumberToken({self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class StringToken(TokenBase):
     """String literal token."""
 
@@ -203,7 +203,7 @@ class StringToken(TokenBase):
         return f"StringToken({self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class KeywordToken(TokenBase):
     """Base class for keyword tokens (data, let, in, case, of, forall, type).
 
@@ -231,7 +231,7 @@ class KeywordToken(TokenBase):
 # Specific keyword token classes
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class LambdaToken(TokenBase):
     """Lambda token (small lambda)."""
 
@@ -246,7 +246,7 @@ class LambdaToken(TokenBase):
         return self.symbol
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TypeLambdaToken(TokenBase):
     """Type lambda token (big lambda)."""
 
@@ -261,42 +261,42 @@ class TypeLambdaToken(TokenBase):
         return self.symbol
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DataToken(KeywordToken):
     """Data declaration keyword: data"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class LetToken(KeywordToken):
     """Let binding keyword: let"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class InToken(KeywordToken):
     """In keyword for let bindings"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CaseToken(KeywordToken):
     """Case expression keyword: case"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class OfToken(KeywordToken):
     """Of keyword for case expressions"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ForallToken(KeywordToken):
     """Forall keyword (universal quantifier)."""
 
@@ -305,42 +305,42 @@ class ForallToken(KeywordToken):
         return "FORALL"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TypeToken(KeywordToken):
     """Type declaration keyword: type"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class IfToken(KeywordToken):
     """If keyword: if"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ThenToken(KeywordToken):
     """Then keyword: then"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ElseToken(KeywordToken):
     """Else keyword: else"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PrimTypeToken(KeywordToken):
     """Primitive type keyword: prim_type"""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PrimOpToken(KeywordToken):
     """Primitive operator keyword: prim_op"""
 
@@ -420,7 +420,7 @@ class TokenType:
     TYPELAMBDA = "TYPELAMBDA"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class OperatorToken(TokenBase):
     """Operator token."""
 
@@ -460,7 +460,7 @@ class DelimiterType:
     ALL = frozenset([LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE, COMMA])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DelimiterToken(TokenBase):
     """Delimiter token (parentheses, brackets, braces, comma)."""
 
@@ -482,7 +482,7 @@ class DelimiterToken(TokenBase):
         return f"DelimiterToken({self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PragmaToken:
     """Pragma token capturing parsed content between {-# and #-}.
 
@@ -513,7 +513,7 @@ class PragmaToken:
         return f"PragmaToken({self.key!r}, {self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DocstringToken:
     """Docstring token (-- | or -- ^)."""
 
@@ -536,7 +536,7 @@ class DocstringToken:
         return f"DocstringToken({self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CommentToken(TokenBase):
     """Regular comment token (-- ...)."""
 
@@ -557,7 +557,7 @@ class CommentToken(TokenBase):
         return f"CommentToken({self.value!r}, {self.location})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EOFToken(TokenBase):
     """End of file token."""
 

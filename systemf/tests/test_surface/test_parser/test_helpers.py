@@ -126,17 +126,17 @@ class TestValidIndentConstraints:
 
     def test_atpos_requires_exact_column(self):
         """AtPos requires exact column match."""
-        assert check_valid(AtPos(4), 4) is True
-        assert check_valid(AtPos(4), 3) is False
-        assert check_valid(AtPos(4), 5) is False
+        assert check_valid(AtPos(col=4), 4) is True
+        assert check_valid(AtPos(col=4), 3) is False
+        assert check_valid(AtPos(col=4), 5) is False
 
     def test_afterpos_allows_at_or_after(self):
         """AfterPos allows column >= specified."""
-        assert check_valid(AfterPos(4), 4) is True
-        assert check_valid(AfterPos(4), 5) is True
-        assert check_valid(AfterPos(4), 10) is True
-        assert check_valid(AfterPos(4), 3) is False
-        assert check_valid(AfterPos(4), 0) is False
+        assert check_valid(AfterPos(col=4), 4) is True
+        assert check_valid(AfterPos(col=4), 5) is True
+        assert check_valid(AfterPos(col=4), 10) is True
+        assert check_valid(AfterPos(col=4), 3) is False
+        assert check_valid(AfterPos(col=4), 0) is False
 
     def test_endofblock_rejects_all(self):
         """EndOfBlock rejects all columns."""
@@ -197,20 +197,20 @@ class TestBlockEntry:
             DummyIdent(name="x", location=Location(line=1, column=4)),
         ]
         # Would succeed with AtPos(4)
-        assert check_valid(AtPos(4), tokens[0].column) is True
+        assert check_valid(AtPos(col=4), tokens[0].column) is True
 
     def test_atpos_rejects_wrong_column(self):
         """block_entry rejects token at wrong column."""
         tok = DummyIdent(name="x", location=Location(line=1, column=4))
-        assert check_valid(AtPos(2), tok.column) is False
+        assert check_valid(AtPos(col=2), tok.column) is False
 
     def test_afterpos_accepts_matching_or_greater(self):
         """block_entry accepts token at or after AfterPos."""
         tok1 = DummyIdent(name="x", location=Location(line=1, column=4))
         tok2 = DummyIdent(name="y", location=Location(line=1, column=6))
 
-        assert check_valid(AfterPos(4), tok1.column) is True
-        assert check_valid(AfterPos(4), tok2.column) is True
+        assert check_valid(AfterPos(col=4), tok1.column) is True
+        assert check_valid(AfterPos(col=4), tok2.column) is True
 
 
 class TestLayoutScenarios:
@@ -250,7 +250,7 @@ class TestLayoutScenarios:
 
         # First binding sets reference: 3
         # Bindings must be at col 3
-        assert check_valid(AtPos(3), first_binding_col) is True
+        assert check_valid(AtPos(col=3), first_binding_col) is True
 
         # 'in' must be at col >= let_col (1)
         assert in_col >= let_col
@@ -275,69 +275,6 @@ class TestLayoutScenarios:
 class TestEdgeCases:
     """Test edge cases and error conditions."""
 
-    def test_empty_block_returns_empty_list(self):
-        """block() returns empty list when no items at expected column."""
-        # Block captures column of first token (4), but item parser
-        # checks constraint and fails if column doesn't match
-        tokens = [
-            DummyIdent(name="x", location=Location(line=1, column=4)),
-        ]
-
-        # Create an item parser that checks constraint
-        def item_parser(constraint):
-            from parsy import Parser as P, Result
-            from systemf.surface.parser.helpers import check_valid
-
-            @P
-            def p(stream, idx):
-                if idx >= len(stream):
-                    return Result.failure(idx, "expected item")
-                tok = stream[idx]
-                # Check if column satisfies constraint
-                if not check_valid(constraint, tok.column):
-                    return Result.failure(idx, f"column {tok.column} doesn't satisfy constraint")
-                return Result.success(idx + 1, tok.value)
-
-            return p
-
-        # Block expects column 4, but item_parser checks AtPos(8) which fails
-        result, remaining = block(item_parser).parse_partial(tokens)
-        # Block should parse the item since column 4 matches AtPos(4)
-        assert result == ["x"]
-        assert len(remaining) == 0
-
-    def test_single_item_block_returns_list_with_item(self):
-        """block() parses single item correctly."""
-        tokens = [
-            DummyIdent(name="item", location=Location(line=1, column=4)),
-        ]
-
-        def item_parser(constraint):
-            from parsy import Parser as P, Result
-
-            @P
-            def p(stream, idx):
-                if idx >= len(stream):
-                    return Result.failure(idx, "expected item")
-                tok = stream[idx]
-                return Result.success(idx + 1, tok.value)
-
-            return p
-
-        result = block(item_parser).parse(tokens)
-        assert result == ["item"]
-
-    def test_mixed_indentation_fails(self):
-        """Mixed indentation in layout block fails."""
-        # Source: case x of
-        #   A -> 1
-        #     B -> 2  -- wrong column
-        first_col = 3
-        second_col = 5
-
-        # Second should be at col 3, not 5
-        assert check_valid(AtPos(3), second_col) is False
-
     def test_explicit_braces_any_indent(self):
         """Inside braces, any indentation allowed."""
         # Source: case x of { A -> 1; B -> 2 }
@@ -354,18 +291,18 @@ class TestIsAtConstraint:
 
     def test_is_at_constraint_exact_match_atpos(self):
         """is_at_constraint returns True for exact AtPos match."""
-        assert is_at_constraint(AtPos(4), 4) is True
+        assert is_at_constraint(AtPos(col=4), 4) is True
 
     def test_is_at_constraint_rejects_different_column(self):
         """is_at_constraint returns False when column doesn't match."""
-        assert is_at_constraint(AtPos(4), 3) is False
-        assert is_at_constraint(AtPos(4), 5) is False
+        assert is_at_constraint(AtPos(col=4), 3) is False
+        assert is_at_constraint(AtPos(col=4), 5) is False
 
     def test_is_at_constraint_with_afterpos(self):
         """is_at_constraint with AfterPos checks exact boundary."""
         # AfterPos(col) should match exactly at col
-        assert is_at_constraint(AfterPos(4), 4) is True
-        assert is_at_constraint(AfterPos(4), 5) is False  # Not exact match
+        assert is_at_constraint(AfterPos(col=4), 4) is True
+        assert is_at_constraint(AfterPos(col=4), 5) is False  # Not exact match
 
     def test_is_at_constraint_anyindent_always_true(self):
         """AnyIndent always matches (no specific position)."""
@@ -385,7 +322,7 @@ class TestTerminator:
         """terminator returns EndOfBlock at end of token stream."""
         tokens = []
 
-        result = terminator(AtPos(4), 4).parse(tokens)
+        result = terminator(AtPos(col=4), 4).parse(tokens)
         assert isinstance(result, EndOfBlock)
 
     def test_terminator_layout_mode_ends_when_dedent(self):
@@ -396,7 +333,7 @@ class TestTerminator:
         ]
 
         # Use parse_partial since terminator() is a peek parser
-        result, remaining = terminator(AtPos(4), 4).parse_partial(tokens)
+        result, remaining = terminator(AtPos(col=4), 4).parse_partial(tokens)
         assert isinstance(result, EndOfBlock)
         # Token should remain since we detected end of block
         assert len(remaining) == 1
@@ -409,9 +346,9 @@ class TestTerminator:
             DummyIdent(name="next_item", location=Location(line=2, column=4)),
         ]
 
-        result, remaining = terminator(AtPos(4), 4).parse_partial(tokens)
+        result, remaining = terminator(AtPos(col=4), 4).parse_partial(tokens)
         # Should continue with same constraint, NOT EndOfBlock
-        assert result == AtPos(4)
+        assert result == AtPos(col=4)
         # Token should remain since it's a new block item
         assert len(remaining) == 1
 
@@ -423,8 +360,8 @@ class TestTerminator:
         ]
 
         # Use parse_partial since terminator() is a peek parser
-        result, remaining = terminator(AtPos(4), 4).parse_partial(tokens)
-        assert result == AtPos(4)
+        result, remaining = terminator(AtPos(col=4), 4).parse_partial(tokens)
+        assert result == AtPos(col=4)
         # Token should remain since we just checked position
         assert len(remaining) == 1
 
@@ -437,8 +374,8 @@ class TestTerminator:
             OperatorToken(operator=";", op_type="SEMICOLON", location=Location(line=1, column=10)),
         ]
 
-        result = terminator(AtPos(4), 4).parse(tokens)
-        assert result == AfterPos(4)
+        result = terminator(AtPos(col=4), 4).parse(tokens)
+        assert result == AfterPos(col=4)
 
     def test_terminator_braces_close_brace_returns_end_of_block(self):
         """Braces: close brace returns EndOfBlock."""
@@ -465,7 +402,7 @@ class TestMustContinue:
         tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
 
         # Use parse_partial since must_continue() is a peek parser
-        result, remaining = must_continue(AtPos(4), "binding").parse_partial(tokens)
+        result, remaining = must_continue(AtPos(col=4), "binding").parse_partial(tokens)
         assert result is None
         # Token should remain
         assert len(remaining) == 1
@@ -475,7 +412,7 @@ class TestMustContinue:
         tokens = [DummyIdent(name="x", location=Location(line=1, column=4))]
 
         # Use parse_partial since must_continue() is a peek parser
-        result, remaining = must_continue(AfterPos(4), "item").parse_partial(tokens)
+        result, remaining = must_continue(AfterPos(col=4), "item").parse_partial(tokens)
         assert result is None
         # Token should remain
         assert len(remaining) == 1

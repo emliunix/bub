@@ -36,17 +36,14 @@ class ScopeContext:
     type_names: list[str] = field(default_factory=list)
     globals: set[str] = field(default_factory=set)
 
-    def lookup_term(self, name: str) -> int:
+    def lookup_term(self, name: str) -> int | None:
         """Get the de Bruijn index for a term variable name.
 
         Args:
             name: The variable name to look up
 
         Returns:
-            The de Bruijn index (0 = most recent binder)
-
-        Raises:
-            NameError: If the name is not bound in the current scope
+            The de Bruijn index (0 = most recent binder), or None if not found
 
         Example:
             >>> ctx = ScopeContext(term_names=["y", "x"])
@@ -54,15 +51,13 @@ class ScopeContext:
             0
             >>> ctx.lookup_term("x")
             1
+            >>> ctx.lookup_term("z")
+            None
         """
         for i, n in enumerate(self.term_names):
             if n == name:
                 return i
-        if name in self.globals:
-            # Global variables are treated as free (not bound by lambda)
-            # They will be resolved later in the pipeline
-            raise NameError(f"Global variable '{name}' should be handled separately")
-        raise NameError(f"Undefined variable '{name}'")
+        return None
 
     def lookup_type(self, name: str) -> int:
         """Get the de Bruijn index for a type variable name.

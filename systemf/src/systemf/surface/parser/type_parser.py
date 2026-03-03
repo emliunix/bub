@@ -187,7 +187,7 @@ def type_tuple_parser() -> P[SurfaceType]:
         if close_paren is not None:
             break
 
-    return SurfaceTypeTuple(elements, loc)
+    return SurfaceTypeTuple(elements=elements, location=loc)
 
 
 def type_atom_parser() -> P[SurfaceType]:
@@ -216,14 +216,16 @@ def type_atom_parser() -> P[SurfaceType]:
         if con_token is not None:
             from systemf.surface.types import SurfaceTypeConstructor
 
-            return SurfaceTypeConstructor(con_token.value, [], con_token.location)
+            return SurfaceTypeConstructor(
+                name=con_token.value, args=[], location=con_token.location
+            )
 
         # Try type variable
         var_token = yield match_token("IDENT").optional()
         if var_token is not None:
             from systemf.surface.types import SurfaceTypeVar
 
-            return SurfaceTypeVar(var_token.value, var_token.location)
+            return SurfaceTypeVar(name=var_token.value, location=var_token.location)
 
         # No match - return None (will be handled by optional)
         return None
@@ -277,20 +279,22 @@ def type_app_parser() -> P[SurfaceType]:
     # The first element must be a type constructor name
     # We use SurfaceTypeConstructor to represent applied types like "List Int"
     match first:
-        case SurfaceTypeConstructor(name, [], _):
-            return SurfaceTypeConstructor(name, args, loc)
-        case SurfaceTypeVar(name, _):
+        case SurfaceTypeConstructor(name=name, args=[], location=_):
+            return SurfaceTypeConstructor(name=name, args=args, location=loc)
+        case SurfaceTypeVar(name=name, location=_):
             # For type variables (like in higher-kinded contexts),
             # we still use constructor representation
-            return SurfaceTypeConstructor(name, args, loc)
+            return SurfaceTypeConstructor(name=name, args=args, location=loc)
         case _:
             # Fallback: if first is already a constructor with args, append to it
             match first:
-                case SurfaceTypeConstructor(name, existing_args, _):
-                    return SurfaceTypeConstructor(name, existing_args + args, loc)
+                case SurfaceTypeConstructor(name=name, args=existing_args, location=_):
+                    return SurfaceTypeConstructor(
+                        name=name, args=existing_args + args, location=loc
+                    )
                 case _:
                     # For other cases, try to extract name
-                    return SurfaceTypeConstructor(str(first), args, loc)
+                    return SurfaceTypeConstructor(name=str(first), args=args, location=loc)
 
 
 @generate
@@ -316,7 +320,7 @@ def type_arrow_parser() -> P[SurfaceType]:
 
     # Parse right side (recursively for right-associativity)
     right = yield type_arrow_parser
-    return SurfaceTypeArrow(left, right, loc)
+    return SurfaceTypeArrow(arg=left, ret=right, location=loc)
 
 
 @generate
@@ -347,7 +351,7 @@ def type_forall_parser() -> P[SurfaceType]:
     # Build nested foralls from right to left
     result = body
     for var_token in reversed(var_tokens):
-        result = SurfaceTypeForall(var_token.value, result, loc)
+        result = SurfaceTypeForall(var=var_token.value, body=result, location=loc)
 
     return result
 

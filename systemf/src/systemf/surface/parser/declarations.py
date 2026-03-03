@@ -47,7 +47,7 @@ from systemf.surface.parser.expressions import expr_parser as _expr_parser_facto
 from systemf.surface.parser.helpers import AnyIndent, AtPos, AfterPos, ValidIndent, column
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _ParserState:
     """Immutable state container for the top-level declaration parser.
 
@@ -401,7 +401,7 @@ def term_parser() -> P[SurfaceTermDeclaration]:
         # Capture column of first body token for layout constraint
         # Multi-line bodies should stop when we see a token at/before this column
         body_col = yield column()
-        body_constraint = AfterPos(body_col - 1)
+        body_constraint = AfterPos(col=body_col - 1)
 
         # Parse expression body with layout constraint
         body = yield _expr_parser_factory(body_constraint)

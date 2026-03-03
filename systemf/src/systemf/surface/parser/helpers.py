@@ -77,10 +77,10 @@ def check_valid(constraint: ValidIndent, col: int) -> bool:
     match constraint:
         case AnyIndent():
             return True
-        case AtPos(c):
-            return col == c
-        case AfterPos(c):
-            return col >= c
+        case AtPos() as ap:
+            return col == ap.col
+        case AfterPos() as apos:
+            return col >= apos.col
         case EndOfBlock():
             return False
     return False
@@ -108,10 +108,10 @@ def is_at_constraint(constraint: ValidIndent, col: int) -> bool:
     match constraint:
         case AnyIndent():
             return True
-        case AtPos(c):
-            return col == c
-        case AfterPos(c):
-            return col == c
+        case AtPos() as ap:
+            return col == ap.col
+        case AfterPos() as apos:
+            return col == apos.col
         case EndOfBlock():
             return False
     return False
@@ -194,7 +194,7 @@ def block(item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
         start_col = tokens[index].location.column
 
         # Use block_entries with AtPos constraint
-        entries_result = block_entries(AtPos(start_col), item)(tokens, index)
+        entries_result = block_entries(AtPos(col=start_col), item)(tokens, index)
 
         if entries_result.status:
             return entries_result
@@ -353,10 +353,10 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
             match constraint:
                 case AnyIndent():
                     return Result.success(index + 1, AnyIndent())
-                case AtPos(c):
-                    return Result.success(index + 1, AfterPos(c))
-                case AfterPos(c):
-                    return Result.success(index + 1, AfterPos(c))
+                case AtPos() as ap:
+                    return Result.success(index + 1, AfterPos(col=ap.col))
+                case AfterPos() as apos:
+                    return Result.success(index + 1, AfterPos(col=apos.col))
                 case EndOfBlock():
                     return Result.success(index + 1, EndOfBlock())
 
@@ -366,10 +366,10 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
             match constraint:
                 case AnyIndent():
                     return Result.success(index + 1, AnyIndent())
-                case AtPos(c):
-                    return Result.success(index + 1, AtPos(c))
-                case AfterPos(c):
-                    return Result.success(index + 1, AfterPos(c))
+                case AtPos() as ap:
+                    return Result.success(index + 1, AtPos(col=ap.col))
+                case AfterPos() as apos:
+                    return Result.success(index + 1, AfterPos(col=apos.col))
                 case EndOfBlock():
                     return Result.success(index + 1, EndOfBlock())
 
@@ -387,23 +387,23 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
         # AfterPos(c): col <= c -> switch to AtPos(c) (back to exact column)
         #             col > c  -> continue with AfterPos(c)
         match constraint:
-            case AtPos(c):
-                if col < c:
+            case AtPos() as ap:
+                if col < ap.col:
                     # Strictly dedented - block ends
                     return Result.success(index, EndOfBlock())
-                elif col == c:
+                elif col == ap.col:
                     # Same column - new item in block, continue with same constraint
-                    return Result.success(index, AtPos(c))
+                    return Result.success(index, AtPos(col=ap.col))
                 else:
                     # Further indented - continuation, same constraint
-                    return Result.success(index, AtPos(c))
-            case AfterPos(c):
-                if col <= c:
+                    return Result.success(index, AtPos(col=ap.col))
+            case AfterPos() as apos:
+                if col <= apos.col:
                     # At or before reference - switch back to exact column
-                    return Result.success(index, AtPos(c))
+                    return Result.success(index, AtPos(col=apos.col))
                 else:
                     # After reference - continue with AfterPos
-                    return Result.success(index, AfterPos(c))
+                    return Result.success(index, AfterPos(col=apos.col))
             case AnyIndent():
                 # In braces mode, any column is fine
                 return Result.success(index, AnyIndent())

@@ -18,7 +18,6 @@ from pathlib import Path
 from systemf.surface.parser import Lexer
 from systemf.surface.parser import Parser, ParseError
 from systemf.surface.pipeline import ElaborationPipeline, PipelineResult
-from systemf.surface.desugar import desugar
 from systemf.core.module import LLMMetadata
 from systemf.core.types import Type
 from systemf.eval.machine import Evaluator
@@ -137,11 +136,18 @@ class REPL:
             if not source.strip():
                 return LoadResult(success=True, count=0)
 
+            # Files should contain full declarations only
             tokens = Lexer(source, filename=str(filepath)).tokenize()
             surface_decls = Parser(tokens).parse()
 
             # Use the new pipeline for elaboration
-            result = self.pipeline.run(surface_decls, constructors=self.constructor_types)
+            # Pass accumulated global context for REPL-style elaboration
+            result = self.pipeline.run(
+                surface_decls,
+                constructors=self.constructor_types,
+                global_types=self.global_types,
+                global_terms=self.global_terms,
+            )
 
             if not result.success:
                 # Handle pipeline errors
@@ -177,7 +183,53 @@ class REPL:
             return LoadResult(success=True, count=len(values))
 
         except Exception as e:
+            import traceback
+
+            traceback.print_exc()
             return LoadResult(success=False, count=0, error=str(e))
+
+    def _parse_source(self, source: str, filename: str = "<input>") -> list:
+        """Parse source code, trying expression first, then declarations.
+
+        This implements a unified parsing approach:
+        1. Try parsing as expression
+        2. If successful, wrap as `it : _ = <expr>` declaration
+        3. If expression parsing fails, try parsing as declarations
+
+        This allows files to contain either expressions or declarations,
+        eliminating the syntax inconsistency between prelude and user files.
+
+        Args:
+            source: The source code to parse
+            filename: Filename for error reporting
+
+        Returns:
+            List of surface declarations
+        """
+        from systemf.surface.types import SurfaceTermDeclaration, SurfaceTypeVar
+        from systemf.utils.location import Location
+
+        # Try parsing as expression first
+        try:
+            tokens = Lexer(source, filename=filename).tokenize()
+            surface_term = Parser(tokens).parse_expression()
+
+            # Success - wrap as declaration `it : _ = <expr>`
+            loc = Location(line=1, column=1, file=filename)
+            temp_decl = SurfaceTermDeclaration(
+                name="it",
+                type_annotation=SurfaceTypeVar(name="_", location=loc),
+                body=surface_term,
+                location=loc,
+            )
+            return [temp_decl]
+        except ParseError:
+            # Expression parsing failed, try declarations
+            pass
+
+        # Try parsing as declarations
+        tokens = Lexer(source, filename=filename).tokenize()
+        return Parser(tokens).parse()
 
     def _load_prelude(self) -> None:
         """Load the prelude file if it exists."""
@@ -352,8 +404,17 @@ class REPL:
             try:
                 surface_decls = Parser(tokens).parse()
 
-                # Run the pipeline
-                result = self.pipeline.run(surface_decls, constructors=self.constructor_types)
+                # If no declarations parsed, treat as expression
+                if not surface_decls:
+                    raise ParseError("No declarations found")
+
+                # Run the pipeline with accumulated global context
+                result = self.pipeline.run(
+                    surface_decls,
+                    constructors=self.constructor_types,
+                    global_types=self.global_types,
+                    global_terms=self.global_terms,
+                )
 
                 if not result.success:
                     # Handle errors from pipeline
@@ -387,24 +448,26 @@ class REPL:
                 tokens = Lexer(source).tokenize()
                 surface_term = Parser(tokens).parse_expression()
 
-                # Desugar operators before elaboration
-                surface_term = desugar(surface_term)
-
                 # For expressions, we need to create a temporary declaration
-                # and run it through the pipeline
+                # and run it through the pipeline (desugaring happens in pipeline)
                 from systemf.surface.types import SurfaceTermDeclaration, SurfaceTypeVar
                 from systemf.utils.location import Location
 
                 loc = Location(line=1, column=1, file="repl")
                 temp_decl = SurfaceTermDeclaration(
                     name="it",
-                    type_annotation=SurfaceTypeVar("_", loc),  # Will be inferred
+                    type_annotation=SurfaceTypeVar(name="_", location=loc),  # Will be inferred
                     body=surface_term,
                     location=loc,
                 )
 
-                # Run through pipeline
-                result = self.pipeline.run([temp_decl], constructors=self.constructor_types)
+                # Run through pipeline with accumulated global context
+                result = self.pipeline.run(
+                    [temp_decl],
+                    constructors=self.constructor_types,
+                    global_types=self.global_types,
+                    global_terms=self.global_terms,
+                )
 
                 if not result.success:
                     for error in result.errors:
@@ -428,7 +491,7 @@ class REPL:
                     self.global_values["it"] = value
                     self.global_terms.add("it")
 
-                    print(f"it : {ty} = {self._format_value(value)}")
+                    print(f"it :: {ty} = {self._format_value(value)}")
 
         except Exception as e:
             print(f"\nError: {e}")

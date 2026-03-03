@@ -48,6 +48,7 @@ from systemf.surface.inference.errors import (
 )
 from systemf.surface.llm.pragma_pass import LLMPragmaPass, LLMPragmaResult
 from systemf.surface.types import SurfaceDeclaration, SurfaceTermDeclaration
+from systemf.surface.desugar import desugar
 
 
 @dataclass
@@ -113,10 +114,13 @@ class ElaborationPipeline:
         self,
         declarations: list[SurfaceDeclaration],
         constructors: Optional[dict[str, Type]] = None,
+        global_types: Optional[dict[str, Type]] = None,
+        global_terms: Optional[set[str]] = None,
     ) -> PipelineResult:
         """Run the full elaboration pipeline on a list of declarations.
 
-        Executes all three phases:
+        Executes all phases:
+        0. Desugaring - Surface AST → Desugared Surface AST
         1. Scope checking - Surface AST → Scoped AST
         2. Type elaboration - Scoped AST → Core AST with types
         3. LLM pragma pass - Transform LLM functions
@@ -129,14 +133,19 @@ class ElaborationPipeline:
             PipelineResult containing the compiled module and status
         """
         try:
+            # Phase 0: Desugar surface syntax (if-then-else, operators, etc.)
+            declarations = self._desugar_declarations(declarations)
+
             # Phase 1 & 2: Scope check and type elaborate
-            core_decls, ctx, global_types, new_constructors = self._elaborate_declarations(
-                declarations, constructors
+            # Pass accumulated global context for REPL-style elaboration
+            core_decls, ctx, new_global_types, new_constructors = self._elaborate_declarations(
+                declarations, constructors, global_types, global_terms
             )
 
             # Phase 3: Process LLM pragmas
+            # Use new_global_types which includes accumulated + new types
             final_decls, llm_functions = self._process_llm_pragmas(
-                declarations, core_decls, global_types
+                declarations, core_decls, new_global_types
             )
 
             # Collect docstrings
@@ -146,11 +155,12 @@ class ElaborationPipeline:
             all_constructors = (constructors or {}) | new_constructors
 
             # Create the module
+            # Use new_global_types (includes accumulated + newly defined types)
             module = Module(
                 name=self.module_name,
                 declarations=final_decls,
                 constructor_types=all_constructors,
-                global_types=global_types,
+                global_types=new_global_types or {},
                 primitive_types={},
                 docstrings=docstrings,
                 llm_functions=llm_functions,
@@ -216,6 +226,8 @@ class ElaborationPipeline:
         self,
         declarations: list[SurfaceDeclaration],
         constructors: Optional[dict[str, Type]],
+        global_types: Optional[dict[str, Type]] = None,
+        global_terms: Optional[set[str]] = None,
     ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type], dict[str, Type]]:
         """Run Phase 1 (scope checking) and Phase 2 (type elaboration).
 
@@ -225,12 +237,16 @@ class ElaborationPipeline:
         Args:
             declarations: Surface declarations
             constructors: Optional constructor types
+            global_types: Accumulated global types from REPL (optional)
+            global_terms: Accumulated global term names from REPL (optional)
 
         Returns:
             Tuple of (core declarations, type context, global types, constructor types)
         """
         try:
-            return self.type_elaborator.elaborate_declarations(declarations, constructors)
+            return self.type_elaborator.elaborate_declarations(
+                declarations, constructors, global_types, global_terms
+            )
         except (UndefinedVariableError, TypeError, UnificationError) as e:
             # Convert to ElaborationError and re-raise for outer handler
             self._errors.append(
@@ -241,6 +257,43 @@ class ElaborationPipeline:
             )
             # Return empty results
             return [], TypeContext(), {}, {}
+
+    def _desugar_declarations(
+        self,
+        declarations: list[SurfaceDeclaration],
+    ) -> list[SurfaceDeclaration]:
+        """Phase 0: Desugar surface syntax.
+
+        Transforms high-level surface constructs into simpler forms:
+        - if-then-else → case expressions
+        - Multi-argument lambdas → nested single-argument lambdas
+        - Operators → primitive applications
+
+        Args:
+            declarations: Surface declarations to desugar
+
+        Returns:
+            Desugared declarations
+        """
+        desugared = []
+        for decl in declarations:
+            if isinstance(decl, SurfaceTermDeclaration):
+                # Desugar the body term
+                desugared_body = desugar(decl.body)
+                desugared.append(
+                    SurfaceTermDeclaration(
+                        name=decl.name,
+                        type_annotation=decl.type_annotation,
+                        body=desugared_body,
+                        location=decl.location,
+                        docstring=decl.docstring,
+                        pragma=decl.pragma,
+                    )
+                )
+            else:
+                # Data declarations don't need desugaring
+                desugared.append(decl)
+        return desugared
 
     def _process_llm_pragmas(
         self,
@@ -279,10 +332,14 @@ class ElaborationPipeline:
                         surface_decl, core_decl.type_annotation
                     )
 
-                    final_decls.append(result.declaration)
-
-                    if result.is_llm and result.metadata is not None:
-                        llm_functions[result.metadata.function_name] = result.metadata
+                    # If it's an LLM function, use the transformed declaration
+                    # Otherwise, use the already-elaborated core declaration
+                    if result.is_llm:
+                        final_decls.append(result.declaration)
+                        if result.metadata is not None:
+                            llm_functions[result.metadata.function_name] = result.metadata
+                    else:
+                        final_decls.append(core_decl)
                 else:
                     # No surface decl found, use as-is
                     final_decls.append(core_decl)

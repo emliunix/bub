@@ -72,8 +72,8 @@ class TestNestedCaseLet:
         assert false_tok.column == 3
 
         # Check consistency with AtPos constraint
-        assert check_valid(AtPos(3), true_tok.column)
-        assert check_valid(AtPos(3), false_tok.column)
+        assert check_valid(AtPos(col=3), true_tok.column)
+        assert check_valid(AtPos(col=3), false_tok.column)
 
     def test_let_bindings_deeper_than_case(self):
         """Let bindings must be indented past the case branch."""
@@ -105,22 +105,22 @@ class TestNestedCaseLet:
         """'in' must not be dedented past the parent's reference column."""
         # This is a layout validation test
         # 'in' at col 2 when parent is at col 2 should pass
-        assert check_valid(AfterPos(2), 2)  # At boundary
-        assert check_valid(AfterPos(2), 4)  # Indented further
+        assert check_valid(AfterPos(col=2), 2)  # At boundary
+        assert check_valid(AfterPos(col=2), 4)  # Indented further
 
     def test_nested_constraint_validation(self):
         """Constraints flow correctly through nested blocks."""
-        # Outer: case branches at AtPos(2)
-        # Inner: let bindings at AtPos(4)
+        # Outer: case branches at AtPos(col=2)
+        # Inner: let bindings at AtPos(col=4)
 
         # Branch at col 2 is valid
-        assert check_valid(AtPos(2), 2)
+        assert check_valid(AtPos(col=2), 2)
 
         # Binding at col 4 is valid for let block
-        assert check_valid(AtPos(4), 4)
+        assert check_valid(AtPos(col=4), 4)
 
         # But binding at col 4 is NOT at case branch column
-        assert not check_valid(AtPos(2), 4)
+        assert not check_valid(AtPos(col=2), 4)
 
     def test_terminator_detects_branch_end(self):
         """Terminator detects when we've left the case block."""
@@ -174,8 +174,8 @@ class TestErrorCases:
         true_col = 2
         false_col = 4
 
-        # False at col 4 does NOT satisfy AtPos(2)
-        assert not check_valid(AtPos(2), false_col)
+        # False at col 4 does NOT satisfy AtPos(col=2)
+        assert not check_valid(AtPos(col=2), false_col)
 
     def test_dedented_let_binding(self):
         """Let binding dedented past case branch should fail."""
@@ -183,9 +183,9 @@ class TestErrorCases:
         # Binding at col 0 - violates constraint
         binding_col = 0
 
-        # Does NOT satisfy AtPos(4) or even AfterPos(2)
-        assert not check_valid(AtPos(4), binding_col)
-        assert not check_valid(AfterPos(2), binding_col)
+        # Does NOT satisfy AtPos(col=4) or even AfterPos(col=2)
+        assert not check_valid(AtPos(col=4), binding_col)
+        assert not check_valid(AfterPos(col=2), binding_col)
 
     def test_in_keyword_dedented(self):
         """'in' dedented past 'let' column should fail."""
@@ -193,7 +193,7 @@ class TestErrorCases:
         # 'in' at col 0 - definitely wrong
         in_col = 0
 
-        assert not check_valid(AfterPos(8), in_col)
+        assert not check_valid(AfterPos(col=8), in_col)
 
 
 class TestParserShowcase:
@@ -202,6 +202,9 @@ class TestParserShowcase:
     These tests demonstrate the full range of System F syntax as defined
     in syntax.md, showcasing layout-sensitive parsing, expressions, and
     declarations working together.
+
+    TODO: These tests currently just check "parses without error" which
+    provides minimal value. They should be enhanced with actual AST assertions.
     """
 
     def test_simple_function_definition(self):

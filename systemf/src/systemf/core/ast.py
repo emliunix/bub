@@ -174,33 +174,24 @@ class Let(Term):
 
 
 @dataclass(frozen=True)
-class IntLit(Term):
-    """Integer literal: 42
+class Lit(Term):
+    """Primitive literal: Int, String, Float, etc.
 
-    Created directly by the parser from NUMBER tokens.
-    Type checker looks up the Int type from prelude-populated registry.
+    Unified representation for all primitive literals.
+    The prim_type field indicates the primitive type.
+
+    Attributes:
+        prim_type: The primitive type name ("Int", "String", "Float", etc.)
+        value: The literal value
     """
 
-    value: int = 0
-    # source_loc inherited from Term
+    prim_type: str = ""
+    value: object = None
 
     def __str__(self) -> str:
+        if self.prim_type == "String":
+            return f'"{self.value}"'
         return str(self.value)
-
-
-@dataclass(frozen=True)
-class StringLit(Term):
-    """String literal: "hello"
-
-    Created directly by the parser from STRING tokens.
-    Type checker looks up the String type from prelude-populated registry.
-    """
-
-    value: str = ""
-    # source_loc inherited from Term
-
-    def __str__(self) -> str:
-        return f'"{self.value}"'
 
 
 @dataclass(frozen=True)
@@ -276,6 +267,4 @@ Declaration = DataDeclaration | TermDeclaration
 
 
 # Export the term union for type checking
-TermRepr = Union[
-    Var, Abs, App, TAbs, TApp, Constructor, Case, Let, ToolCall, IntLit, StringLit, PrimOp
-]
+TermRepr = Union[Var, Abs, App, TAbs, TApp, Constructor, Case, Let, ToolCall, Lit, PrimOp]

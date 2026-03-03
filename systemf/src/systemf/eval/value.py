@@ -55,11 +55,42 @@ class VNeutral:
 
 
 @dataclass(frozen=True)
+class VPrim:
+    """Unified primitive value representation.
+
+    All primitive values (Int, String, etc.) are represented uniformly
+    with a type tag and underlying Python value. This simplifies primitive
+    operations and ensures consistency.
+
+    Attributes:
+        prim_type: The primitive type name (e.g., "Int", "String")
+        value: The underlying Python value
+    """
+
+    prim_type: str
+    value: object
+
+    def __str__(self) -> str:
+        if self.prim_type == "String":
+            return f'"{self.value}"'
+        return str(self.value)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare primitive values."""
+        if not isinstance(other, VPrim):
+            return NotImplemented
+        return self.prim_type == other.prim_type and self.value == other.value
+
+
+@dataclass(frozen=True)
 class VInt:
-    """Runtime integer value.
+    """Runtime integer value (deprecated, use VPrim).
 
     Represents a primitive integer at runtime.
     Created by evaluating IntLit terms.
+
+    Note: This is kept for backward compatibility. New code should use
+    VPrim("Int", value) instead.
     """
 
     value: int
@@ -70,10 +101,13 @@ class VInt:
 
 @dataclass(frozen=True)
 class VString:
-    """Runtime string value.
+    """Runtime string value (deprecated, use VPrim).
 
     Represents a primitive string at runtime.
     Created by evaluating StringLit terms.
+
+    Note: This is kept for backward compatibility. New code should use
+    VPrim("String", value) instead.
     """
 
     value: str
@@ -134,8 +168,9 @@ Value = (
     | VTypeClosure
     | VConstructor
     | VNeutral
-    | VInt
-    | VString
+    | VInt  # Deprecated: use VPrim instead
+    | VString  # Deprecated: use VPrim instead
+    | VPrim
     | VToolResult
     | VPrimOp
     | VPrimOpPartial

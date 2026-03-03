@@ -75,7 +75,7 @@ class LLMPragmaPass:
         >>> # Process declaration with LLM pragma
         >>> decl = SurfaceTermDeclaration(
         ...     name="translate",
-        ...     type_annotation=SurfaceTypeConstructor("String", [], loc),
+        ...     type_annotation=SurfaceTypeConstructor(name="String", args=[], location=loc),
         ...     body=SurfaceAbs("text", None, SurfaceVar(0, "text", loc), loc),
         ...     location=loc,
         ...     docstring="Translate to French",
@@ -108,9 +108,9 @@ class LLMPragmaPass:
             case SurfacePrimOpDecl():
                 return self._process_prim_op_declaration(decl, core_type)
             case _:
-                # Other declaration types don't have LLM pragmas
+                # Other declaration types don't have LLM pragmas - pass through unchanged
                 return LLMPragmaResult(
-                    declaration=self._convert_non_llm_declaration(decl),
+                    declaration=decl,
                     metadata=None,
                     is_llm=False,
                 )
@@ -133,9 +133,10 @@ class LLMPragmaPass:
         pragma_config = self._extract_pragma_config(decl.pragma)
 
         if pragma_config is None:
-            # Not an LLM function - return regular declaration
+            # Not an LLM function - skip and let main elaborator handle it
+            # Return the original surface declaration unchanged
             return LLMPragmaResult(
-                declaration=self._convert_non_llm_declaration(decl, core_type),
+                declaration=decl,  # Pass through unchanged
                 metadata=None,
                 is_llm=False,
             )
@@ -387,7 +388,7 @@ class LLMPragmaPass:
         return core.TermDeclaration(
             name=decl.name,
             type_annotation=core_type,
-            body=core.PrimOp(decl.location, f"$prim.{decl.name}"),
+            body=core.PrimOp(decl.location, f"{decl.name}"),
             pragma=None,
             docstring=decl.docstring,
             param_docstrings=None,

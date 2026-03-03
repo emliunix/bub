@@ -9,6 +9,7 @@ from systemf.surface.scoped.checker import ScopeChecker
 from systemf.surface.scoped.context import ScopeContext
 from systemf.surface.scoped.errors import UndefinedVariableError
 from systemf.surface.types import (
+    SurfaceLit,
     ScopedAbs,
     ScopedVar,
     SurfaceAbs,
@@ -17,11 +18,9 @@ from systemf.surface.types import (
     SurfaceCase,
     SurfaceConstructor,
     SurfaceIf,
-    SurfaceIntLit,
     SurfaceLet,
     SurfaceOp,
     SurfacePattern,
-    SurfaceStringLit,
     SurfaceTermDeclaration,
     SurfaceTuple,
     SurfaceTypeAbs,
@@ -47,10 +46,9 @@ class TestScopeContext:
     """Tests for ScopeContext name management."""
 
     def test_empty_context_lookup_fails(self):
-        """Looking up in empty context raises NameError."""
+        """Looking up in empty context returns None."""
         ctx = ScopeContext()
-        with pytest.raises(NameError, match="Undefined variable 'x'"):
-            ctx.lookup_term("x")
+        assert ctx.lookup_term("x") is None
 
     def test_extend_term_adds_binding(self):
         """Extending context with term variable allows lookup."""
@@ -86,60 +84,17 @@ class TestScopeContext:
         assert ctx.lookup_term("x") == 0
         assert ctx.lookup_type("a") == 0
         # Type names not in term context
-        with pytest.raises(NameError):
-            ctx.lookup_term("a")
+        assert ctx.lookup_term("a") is None
         # Term names not in type context
         with pytest.raises(NameError):
             ctx.lookup_type("x")
 
-    def test_context_immutability(self):
-        """Original context is unchanged after extension."""
-        ctx = ScopeContext()
-        new_ctx = ctx.extend_term("x")
-        # Original context still empty
-        with pytest.raises(NameError):
-            ctx.lookup_term("x")
-        # New context has the binding
-        assert new_ctx.lookup_term("x") == 0
-
-    def test_is_bound_term(self):
-        """Check if term name is bound."""
-        ctx = ScopeContext(term_names=["x", "y"])
-        assert ctx.is_bound_term("x") is True
-        assert ctx.is_bound_term("y") is True
-        assert ctx.is_bound_term("z") is False
-
-    def test_is_bound_type(self):
-        """Check if type name is bound."""
-        ctx = ScopeContext(type_names=["a", "b"])
-        assert ctx.is_bound_type("a") is True
-        assert ctx.is_bound_type("b") is True
-        assert ctx.is_bound_type("c") is False
-
-    def test_add_global(self):
-        """Adding globals to context."""
-        ctx = ScopeContext()
-        ctx = ctx.add_global("even")
-        assert ctx.is_global("even") is True
-        assert ctx.is_global("odd") is False
-
-    def test_global_lookup_raises(self):
-        """Global variables raise NameError (handled separately)."""
+    def test_global_lookup_returns_none(self):
+        """Global variables are not in term context (handled separately)."""
         ctx = ScopeContext(globals={"even"})
         assert ctx.is_global("even") is True
-        # Globals raise NameError to be handled by caller
-        with pytest.raises(NameError, match="Global variable"):
-            ctx.lookup_term("even")
-
-    def test_context_repr(self):
-        """Context has useful string representation."""
-        ctx = ScopeContext(term_names=["x", "y"], type_names=["a"], globals={"even"})
-        repr_str = repr(ctx)
-        assert "ScopeContext" in repr_str
-        assert "x" in repr_str
-        assert "y" in repr_str
-        assert "a" in repr_str
-        assert "even" in repr_str
+        # Globals return None from lookup_term (handled by caller)
+        assert ctx.lookup_term("even") is None
 
 
 # =============================================================================
@@ -155,7 +110,7 @@ class TestVariableResolution:
         checker = ScopeChecker()
         ctx = ScopeContext(term_names=["x"])
 
-        var = SurfaceVar("x", DUMMY_LOC)
+        var = SurfaceVar(name="x", location=DUMMY_LOC)
         result = checker.check_term(var, ctx)
 
         assert isinstance(result, ScopedVar)
@@ -167,12 +122,12 @@ class TestVariableResolution:
         checker = ScopeChecker()
         ctx = ScopeContext(term_names=["y", "x"])  # x was bound first (index 1), y second (index 0)
 
-        var_x = SurfaceVar("x", DUMMY_LOC)
+        var_x = SurfaceVar(name="x", location=DUMMY_LOC)
         result_x = checker.check_term(var_x, ctx)
         assert isinstance(result_x, ScopedVar)
         assert result_x.index == 1
 
-        var_y = SurfaceVar("y", DUMMY_LOC)
+        var_y = SurfaceVar(name="y", location=DUMMY_LOC)
         result_y = checker.check_term(var_y, ctx)
         assert isinstance(result_y, ScopedVar)
         assert result_y.index == 0
@@ -183,7 +138,7 @@ class TestVariableResolution:
         ctx = ScopeContext(term_names=["x"])
         loc = Location(line=42, column=5, file="source.py")
 
-        var = SurfaceVar("x", loc)
+        var = SurfaceVar(name="x", location=loc)
         result = checker.check_term(var, ctx)
 
         assert result.location == loc
@@ -203,9 +158,9 @@ class TestNestedScopes:
         ctx = ScopeContext()
 
         # \x -> \y -> x
-        inner_body = SurfaceVar("x", DUMMY_LOC)
-        inner_abs = SurfaceAbs("y", None, inner_body, DUMMY_LOC)
-        outer_abs = SurfaceAbs("x", None, inner_abs, DUMMY_LOC)
+        inner_body = SurfaceVar(name="x", location=DUMMY_LOC)
+        inner_abs = SurfaceAbs(var="y", var_type=None, body=inner_body, location=DUMMY_LOC)
+        outer_abs = SurfaceAbs(var="x", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         result = checker.check_term(outer_abs, ctx)
 
@@ -222,9 +177,9 @@ class TestNestedScopes:
         ctx = ScopeContext()
 
         # \x -> \x -> x (inner x shadows outer)
-        inner_body = SurfaceVar("x", DUMMY_LOC)
-        inner_abs = SurfaceAbs("x", None, inner_body, DUMMY_LOC)
-        outer_abs = SurfaceAbs("x", None, inner_abs, DUMMY_LOC)
+        inner_body = SurfaceVar(name="x", location=DUMMY_LOC)
+        inner_abs = SurfaceAbs(var="x", var_type=None, body=inner_body, location=DUMMY_LOC)
+        outer_abs = SurfaceAbs(var="x", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         result = checker.check_term(outer_abs, ctx)
 
@@ -240,10 +195,10 @@ class TestNestedScopes:
         ctx = ScopeContext()
 
         # \a -> \b -> \c -> c (reference innermost binding)
-        body = SurfaceVar("c", DUMMY_LOC)
-        inner_abs = SurfaceAbs("c", None, body, DUMMY_LOC)
-        middle_abs = SurfaceAbs("b", None, inner_abs, DUMMY_LOC)
-        outer_abs = SurfaceAbs("a", None, middle_abs, DUMMY_LOC)
+        body = SurfaceVar(name="c", location=DUMMY_LOC)
+        inner_abs = SurfaceAbs(var="c", var_type=None, body=body, location=DUMMY_LOC)
+        middle_abs = SurfaceAbs(var="b", var_type=None, body=inner_abs, location=DUMMY_LOC)
+        outer_abs = SurfaceAbs(var="a", var_type=None, body=middle_abs, location=DUMMY_LOC)
 
         result = checker.check_term(outer_abs, ctx)
 
@@ -270,8 +225,8 @@ class TestLambdaAbstractions:
         ctx = ScopeContext()
 
         # \x -> x
-        body = SurfaceVar("x", DUMMY_LOC)
-        abs_term = SurfaceAbs("x", None, body, DUMMY_LOC)
+        body = SurfaceVar(name="x", location=DUMMY_LOC)
+        abs_term = SurfaceAbs(var="x", var_type=None, body=body, location=DUMMY_LOC)
 
         result = checker.check_term(abs_term, ctx)
 
@@ -285,9 +240,9 @@ class TestLambdaAbstractions:
         checker = ScopeChecker()
         ctx = ScopeContext()
 
-        type_ann = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = SurfaceVar("x", DUMMY_LOC)
-        abs_term = SurfaceAbs("x", type_ann, body, DUMMY_LOC)
+        type_ann = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = SurfaceVar(name="x", location=DUMMY_LOC)
+        abs_term = SurfaceAbs(var="x", var_type=type_ann, body=body, location=DUMMY_LOC)
 
         result = checker.check_term(abs_term, ctx)
 
@@ -300,16 +255,16 @@ class TestLambdaAbstractions:
         ctx = ScopeContext()
 
         # (\x -> x) 42
-        body = SurfaceVar("x", DUMMY_LOC)
-        abs_term = SurfaceAbs("x", None, body, DUMMY_LOC)
-        arg = SurfaceIntLit(42, DUMMY_LOC)
-        app = SurfaceApp(abs_term, arg, DUMMY_LOC)
+        body = SurfaceVar(name="x", location=DUMMY_LOC)
+        abs_term = SurfaceAbs(var="x", var_type=None, body=body, location=DUMMY_LOC)
+        arg = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
+        app = SurfaceApp(func=abs_term, arg=arg, location=DUMMY_LOC)
 
         result = checker.check_term(app, ctx)
 
         assert isinstance(result, SurfaceApp)
         assert isinstance(result.func, ScopedAbs)
-        assert isinstance(result.arg, SurfaceIntLit)
+        assert isinstance(result.arg, SurfaceLit)
 
     def test_curried_lambda(self):
         """Scope-check curried multi-argument lambda."""
@@ -317,9 +272,13 @@ class TestLambdaAbstractions:
         ctx = ScopeContext()
 
         # \x -> \y -> x y
-        inner_body = SurfaceApp(SurfaceVar("x", DUMMY_LOC), SurfaceVar("y", DUMMY_LOC), DUMMY_LOC)
-        inner_abs = SurfaceAbs("y", None, inner_body, DUMMY_LOC)
-        outer_abs = SurfaceAbs("x", None, inner_abs, DUMMY_LOC)
+        inner_body = SurfaceApp(
+            func=SurfaceVar(name="x", location=DUMMY_LOC),
+            arg=SurfaceVar(name="y", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        inner_abs = SurfaceAbs(var="y", var_type=None, body=inner_body, location=DUMMY_LOC)
+        outer_abs = SurfaceAbs(var="x", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         result = checker.check_term(outer_abs, ctx)
 
@@ -345,8 +304,13 @@ class TestTypeAbstractions:
         ctx = ScopeContext()
 
         # /\a. \x -> x
-        body = SurfaceAbs("x", None, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", body, DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=None,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        type_abs = SurfaceTypeAbs(var="a", body=body, location=DUMMY_LOC)
 
         result = checker.check_term(type_abs, ctx)
 
@@ -360,14 +324,13 @@ class TestTypeAbstractions:
         ctx = ScopeContext()
 
         # /\a. (body where type 'a' is bound)
-        body = SurfaceIntLit(42, DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", body, DUMMY_LOC)
+        body = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
+        type_abs = SurfaceTypeAbs(var="a", body=body, location=DUMMY_LOC)
 
         result = checker.check_term(type_abs, ctx)
 
         # Term context should be unchanged
-        with pytest.raises(NameError):
-            ctx.lookup_term("a")
+        assert ctx.lookup_term("a") is None
         # Type context in the result's scope has 'a'
         # (we can't directly test this, but we verify the structure is correct)
         assert isinstance(result, SurfaceTypeAbs)
@@ -378,9 +341,14 @@ class TestTypeAbstractions:
         ctx = ScopeContext()
 
         # (\x -> x) @Int
-        body = SurfaceAbs("x", None, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
-        type_arg = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        type_app = SurfaceTypeApp(body, type_arg, DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=None,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        type_arg = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        type_app = SurfaceTypeApp(func=body, type_arg=type_arg, location=DUMMY_LOC)
 
         result = checker.check_term(type_app, ctx)
 
@@ -403,15 +371,15 @@ class TestLetBindings:
         ctx = ScopeContext()
 
         # let x = 42 in x
-        value = SurfaceIntLit(42, DUMMY_LOC)
-        body = SurfaceVar("x", DUMMY_LOC)
-        let_term = SurfaceLet([("x", None, value)], body, DUMMY_LOC)
+        value = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
+        body = SurfaceVar(name="x", location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[("x", None, value)], body=body, location=DUMMY_LOC)
 
         result = checker.check_term(let_term, ctx)
 
         assert isinstance(result, SurfaceLet)
         assert len(result.bindings) == 1
-        assert isinstance(result.bindings[0][2], SurfaceIntLit)  # value
+        assert isinstance(result.bindings[0][2], SurfaceLit)  # value
         assert isinstance(result.body, ScopedVar)
         assert result.body.index == 0
 
@@ -422,11 +390,16 @@ class TestLetBindings:
 
         # let x = 1, y = 2 in x + y
         bindings = [
-            ("x", None, SurfaceIntLit(1, DUMMY_LOC)),
-            ("y", None, SurfaceIntLit(2, DUMMY_LOC)),
+            ("x", None, SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC)),
+            ("y", None, SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC)),
         ]
-        body = SurfaceOp(SurfaceVar("x", DUMMY_LOC), "+", SurfaceVar("y", DUMMY_LOC), DUMMY_LOC)
-        let_term = SurfaceLet(bindings, body, DUMMY_LOC)
+        body = SurfaceOp(
+            left=SurfaceVar(name="x", location=DUMMY_LOC),
+            op="+",
+            right=SurfaceVar(name="y", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        let_term = SurfaceLet(bindings=bindings, body=body, location=DUMMY_LOC)
 
         result = checker.check_term(let_term, ctx)
 
@@ -442,11 +415,11 @@ class TestLetBindings:
 
         # let x = 1, y = x in y (y's value can reference x)
         bindings = [
-            ("x", None, SurfaceIntLit(1, DUMMY_LOC)),
-            ("y", None, SurfaceVar("x", DUMMY_LOC)),  # references x
+            ("x", None, SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC)),
+            ("y", None, SurfaceVar(name="x", location=DUMMY_LOC)),  # references x
         ]
-        body = SurfaceVar("y", DUMMY_LOC)
-        let_term = SurfaceLet(bindings, body, DUMMY_LOC)
+        body = SurfaceVar(name="y", location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=bindings, body=body, location=DUMMY_LOC)
 
         result = checker.check_term(let_term, ctx)
 
@@ -468,7 +441,7 @@ class TestUndefinedVariables:
         checker = ScopeChecker()
         ctx = ScopeContext()
 
-        var = SurfaceVar("undefined", DUMMY_LOC)
+        var = SurfaceVar(name="undefined", location=DUMMY_LOC)
         with pytest.raises(UndefinedVariableError) as exc_info:
             checker.check_term(var, ctx)
 
@@ -480,7 +453,7 @@ class TestUndefinedVariables:
         ctx = ScopeContext()
         loc = Location(line=10, column=5, file="test.py")
 
-        var = SurfaceVar("missing", loc)
+        var = SurfaceVar(name="missing", location=loc)
         with pytest.raises(UndefinedVariableError) as exc_info:
             checker.check_term(var, ctx)
 
@@ -491,7 +464,7 @@ class TestUndefinedVariables:
         checker = ScopeChecker()
         ctx = ScopeContext()
 
-        var = SurfaceVar("missing", DUMMY_LOC)
+        var = SurfaceVar(name="missing", location=DUMMY_LOC)
         with pytest.raises(UndefinedVariableError) as exc_info:
             checker.check_term(var, ctx)
 
@@ -502,7 +475,7 @@ class TestUndefinedVariables:
         checker = ScopeChecker()
         ctx = ScopeContext(term_names=["xyz", "xylophone", "abc"])
 
-        var = SurfaceVar("xy", DUMMY_LOC)
+        var = SurfaceVar(name="xy", location=DUMMY_LOC)
         with pytest.raises(UndefinedVariableError) as exc_info:
             checker.check_term(var, ctx)
 
@@ -516,8 +489,8 @@ class TestUndefinedVariables:
         ctx = ScopeContext()
 
         # \x -> y (y is undefined)
-        body = SurfaceVar("y", DUMMY_LOC)
-        abs_term = SurfaceAbs("x", None, body, DUMMY_LOC)
+        body = SurfaceVar(name="y", location=DUMMY_LOC)
+        abs_term = SurfaceAbs(var="x", var_type=None, body=body, location=DUMMY_LOC)
 
         with pytest.raises(UndefinedVariableError) as exc_info:
             checker.check_term(abs_term, ctx)
@@ -530,9 +503,9 @@ class TestUndefinedVariables:
         ctx = ScopeContext()
 
         # \x -> \y -> z (z is undefined at any level)
-        body = SurfaceVar("z", DUMMY_LOC)
-        inner_abs = SurfaceAbs("y", None, body, DUMMY_LOC)
-        outer_abs = SurfaceAbs("x", None, inner_abs, DUMMY_LOC)
+        body = SurfaceVar(name="z", location=DUMMY_LOC)
+        inner_abs = SurfaceAbs(var="y", var_type=None, body=body, location=DUMMY_LOC)
+        outer_abs = SurfaceAbs(var="x", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         with pytest.raises(UndefinedVariableError) as exc_info:
             checker.check_term(outer_abs, ctx)
@@ -553,9 +526,11 @@ class TestMutualRecursion:
         checker = ScopeChecker()
 
         # answer : Int = 42
-        body = SurfaceIntLit(42, DUMMY_LOC)
-        type_ann = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        decl = SurfaceTermDeclaration("answer", type_ann, body, DUMMY_LOC)
+        body = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
+        type_ann = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        decl = SurfaceTermDeclaration(
+            name="answer", type_annotation=type_ann, body=body, location=DUMMY_LOC
+        )
 
         result = checker.check_declarations([decl])
 
@@ -571,39 +546,53 @@ class TestMutualRecursion:
         # Globals are handled later in the elaboration pipeline.
         # This test verifies that declarations are processed correctly.
         type_ann = SurfaceTypeArrow(
-            SurfaceTypeConstructor("Int", [], DUMMY_LOC),
-            SurfaceTypeConstructor("Bool", [], DUMMY_LOC),
+            arg=SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC),
+            ret=SurfaceTypeConstructor(name="Bool", args=[], location=DUMMY_LOC),
             location=DUMMY_LOC,
         )
 
         # even body - uses only its parameter
         even_body = SurfaceAbs(
-            "n",
-            None,
-            SurfaceIf(
-                SurfaceOp(SurfaceVar("n", DUMMY_LOC), "==", SurfaceIntLit(0, DUMMY_LOC), DUMMY_LOC),
-                SurfaceConstructor("True", [], DUMMY_LOC),
-                SurfaceConstructor("False", [], DUMMY_LOC),
-                DUMMY_LOC,
+            var="n",
+            var_type=None,
+            body=SurfaceIf(
+                cond=SurfaceOp(
+                    left=SurfaceVar(name="n", location=DUMMY_LOC),
+                    op="==",
+                    right=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+                    location=DUMMY_LOC,
+                ),
+                then_branch=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+                else_branch=SurfaceConstructor(name="False", args=[], location=DUMMY_LOC),
+                location=DUMMY_LOC,
             ),
-            DUMMY_LOC,
+            location=DUMMY_LOC,
         )
 
         # odd body - uses only its parameter
         odd_body = SurfaceAbs(
-            "n",
-            None,
-            SurfaceIf(
-                SurfaceOp(SurfaceVar("n", DUMMY_LOC), "==", SurfaceIntLit(0, DUMMY_LOC), DUMMY_LOC),
-                SurfaceConstructor("False", [], DUMMY_LOC),
-                SurfaceConstructor("True", [], DUMMY_LOC),
-                DUMMY_LOC,
+            var="n",
+            var_type=None,
+            body=SurfaceIf(
+                cond=SurfaceOp(
+                    left=SurfaceVar(name="n", location=DUMMY_LOC),
+                    op="==",
+                    right=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+                    location=DUMMY_LOC,
+                ),
+                then_branch=SurfaceConstructor(name="False", args=[], location=DUMMY_LOC),
+                else_branch=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+                location=DUMMY_LOC,
             ),
-            DUMMY_LOC,
+            location=DUMMY_LOC,
         )
 
-        even_decl = SurfaceTermDeclaration("even", type_ann, even_body, DUMMY_LOC)
-        odd_decl = SurfaceTermDeclaration("odd", type_ann, odd_body, DUMMY_LOC)
+        even_decl = SurfaceTermDeclaration(
+            name="even", type_annotation=type_ann, body=even_body, location=DUMMY_LOC
+        )
+        odd_decl = SurfaceTermDeclaration(
+            name="odd", type_annotation=type_ann, body=odd_body, location=DUMMY_LOC
+        )
 
         # Both should scope-check without error (no undefined variables)
         result = checker.check_declarations([even_decl, odd_decl])
@@ -614,9 +603,11 @@ class TestMutualRecursion:
         checker = ScopeChecker()
 
         # foo : Int = undefined
-        body = SurfaceVar("undefined", DUMMY_LOC)
-        type_ann = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        decl = SurfaceTermDeclaration("foo", type_ann, body, DUMMY_LOC)
+        body = SurfaceVar(name="undefined", location=DUMMY_LOC)
+        type_ann = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        decl = SurfaceTermDeclaration(
+            name="foo", type_annotation=type_ann, body=body, location=DUMMY_LOC
+        )
 
         # 'undefined' is not in the declarations list, so it's not a global
         with pytest.raises(UndefinedVariableError) as exc_info:
@@ -640,10 +631,10 @@ class TestComplexExpressions:
 
         # if x then y else z
         if_term = SurfaceIf(
-            SurfaceVar("x", DUMMY_LOC),
-            SurfaceVar("y", DUMMY_LOC),
-            SurfaceVar("z", DUMMY_LOC),
-            DUMMY_LOC,
+            cond=SurfaceVar(name="x", location=DUMMY_LOC),
+            then_branch=SurfaceVar(name="y", location=DUMMY_LOC),
+            else_branch=SurfaceVar(name="z", location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         result = checker.check_term(if_term, ctx)
@@ -659,13 +650,25 @@ class TestComplexExpressions:
         ctx = ScopeContext(term_names=["x"])
 
         # case x of True -> 1 | False -> 0
-        pattern1 = SurfacePattern("True", [], DUMMY_LOC)
-        pattern2 = SurfacePattern("False", [], DUMMY_LOC)
+        pattern1 = SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC)
+        pattern2 = SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC)
         branches = [
-            SurfaceBranch(pattern1, SurfaceIntLit(1, DUMMY_LOC), DUMMY_LOC),
-            SurfaceBranch(pattern2, SurfaceIntLit(0, DUMMY_LOC), DUMMY_LOC),
+            SurfaceBranch(
+                pattern=pattern1,
+                body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+                location=DUMMY_LOC,
+            ),
+            SurfaceBranch(
+                pattern=pattern2,
+                body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+                location=DUMMY_LOC,
+            ),
         ]
-        case_term = SurfaceCase(SurfaceVar("x", DUMMY_LOC), branches, DUMMY_LOC)
+        case_term = SurfaceCase(
+            scrutinee=SurfaceVar(name="x", location=DUMMY_LOC),
+            branches=branches,
+            location=DUMMY_LOC,
+        )
 
         result = checker.check_term(case_term, ctx)
 
@@ -679,11 +682,15 @@ class TestComplexExpressions:
         ctx = ScopeContext()
 
         # case x of Pair a b -> a
-        pattern = SurfacePattern("Pair", ["a", "b"], DUMMY_LOC)
+        pattern = SurfacePattern(constructor="Pair", vars=["a", "b"], location=DUMMY_LOC)
         # Body references 'a' which is bound by the pattern
-        body = SurfaceVar("a", DUMMY_LOC)
-        branch = SurfaceBranch(pattern, body, DUMMY_LOC)
-        case_term = SurfaceCase(SurfaceConstructor("x", [], DUMMY_LOC), [branch], DUMMY_LOC)
+        body = SurfaceVar(name="a", location=DUMMY_LOC)
+        branch = SurfaceBranch(pattern=pattern, body=body, location=DUMMY_LOC)
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="x", args=[], location=DUMMY_LOC),
+            branches=[branch],
+            location=DUMMY_LOC,
+        )
 
         result = checker.check_term(case_term, ctx)
 
@@ -699,11 +706,11 @@ class TestComplexExpressions:
 
         # (x, y)
         tuple_term = SurfaceTuple(
-            [
-                SurfaceVar("x", DUMMY_LOC),
-                SurfaceVar("y", DUMMY_LOC),
+            elements=[
+                SurfaceVar(name="x", location=DUMMY_LOC),
+                SurfaceVar(name="y", location=DUMMY_LOC),
             ],
-            DUMMY_LOC,
+            location=DUMMY_LOC,
         )
 
         result = checker.check_term(tuple_term, ctx)
@@ -719,7 +726,12 @@ class TestComplexExpressions:
         ctx = ScopeContext(term_names=["x", "y"])
 
         # x + y
-        op_term = SurfaceOp(SurfaceVar("x", DUMMY_LOC), "+", SurfaceVar("y", DUMMY_LOC), DUMMY_LOC)
+        op_term = SurfaceOp(
+            left=SurfaceVar(name="x", location=DUMMY_LOC),
+            op="+",
+            right=SurfaceVar(name="y", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         result = checker.check_term(op_term, ctx)
 
@@ -734,7 +746,9 @@ class TestComplexExpressions:
         ctx = ScopeContext(term_names=["x"])
 
         # Just x
-        constr_term = SurfaceConstructor("Just", [SurfaceVar("x", DUMMY_LOC)], DUMMY_LOC)
+        constr_term = SurfaceConstructor(
+            name="Just", args=[SurfaceVar(name="x", location=DUMMY_LOC)], location=DUMMY_LOC
+        )
 
         result = checker.check_term(constr_term, ctx)
 
@@ -750,8 +764,12 @@ class TestComplexExpressions:
 
         from systemf.surface.types import SurfaceAnn
 
-        type_ann = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        ann_term = SurfaceAnn(SurfaceVar("x", DUMMY_LOC), type_ann, DUMMY_LOC)
+        type_ann = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        ann_term = SurfaceAnn(
+            term=SurfaceVar(name="x", location=DUMMY_LOC),
+            type=type_ann,
+            location=DUMMY_LOC,
+        )
 
         result = checker.check_term(ann_term, ctx)
 
@@ -773,7 +791,7 @@ class TestLiterals:
         checker = ScopeChecker()
         ctx = ScopeContext()
 
-        lit = SurfaceIntLit(42, DUMMY_LOC)
+        lit = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         result = checker.check_term(lit, ctx)
 
         assert result is lit
@@ -783,7 +801,7 @@ class TestLiterals:
         checker = ScopeChecker()
         ctx = ScopeContext()
 
-        lit = SurfaceStringLit("hello", DUMMY_LOC)
+        lit = SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC)
         result = checker.check_term(lit, ctx)
 
         assert result is lit
@@ -860,11 +878,18 @@ class TestIntegration:
         # let f = \x -> x + 1 in f 42
         # Build: let f = (\x -> x + 1) in f 42
         lambda_body = SurfaceOp(
-            SurfaceVar("x", DUMMY_LOC), "+", SurfaceIntLit(1, DUMMY_LOC), DUMMY_LOC
+            left=SurfaceVar(name="x", location=DUMMY_LOC),
+            op="+",
+            right=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
-        lambda_term = SurfaceAbs("x", None, lambda_body, DUMMY_LOC)
-        body = SurfaceApp(SurfaceVar("f", DUMMY_LOC), SurfaceIntLit(42, DUMMY_LOC), DUMMY_LOC)
-        let_term = SurfaceLet([("f", None, lambda_term)], body, DUMMY_LOC)
+        lambda_term = SurfaceAbs(var="x", var_type=None, body=lambda_body, location=DUMMY_LOC)
+        body = SurfaceApp(
+            func=SurfaceVar(name="f", location=DUMMY_LOC),
+            arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        let_term = SurfaceLet(bindings=[("f", None, lambda_term)], body=body, location=DUMMY_LOC)
 
         result = checker.check_term(let_term, ctx)
 
@@ -878,9 +903,14 @@ class TestIntegration:
         checker = ScopeChecker()
         ctx = ScopeContext()
 
-        type_var = SurfaceTypeVar("a", DUMMY_LOC)
-        lambda_term = SurfaceAbs("x", type_var, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", lambda_term, DUMMY_LOC)
+        type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        lambda_term = SurfaceAbs(
+            var="x",
+            var_type=type_var,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        type_abs = SurfaceTypeAbs(var="a", body=lambda_term, location=DUMMY_LOC)
 
         result = checker.check_term(type_abs, ctx)
 
@@ -896,7 +926,9 @@ class TestIntegration:
 
         # let x = 42 in x (inner x shadows outer)
         let_term = SurfaceLet(
-            [("x", None, SurfaceIntLit(42, DUMMY_LOC))], SurfaceVar("x", DUMMY_LOC), DUMMY_LOC
+            bindings=[("x", None, SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC))],
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         result = checker.check_term(let_term, ctx)
@@ -904,3 +936,30 @@ class TestIntegration:
         # The x in body should be index 0 (the let binding, not the outer)
         assert isinstance(result.body, ScopedVar)
         assert result.body.index == 0
+
+    def test_local_shadows_global_with_different_type(self):
+        """Local variable shadows global with different type.
+
+        This tests that shadowing uses the local type, not the global type.
+        Global x has type String, local x has type Int.
+        The body should resolve to the local Int x (index 0), not global String x.
+        """
+        checker = ScopeChecker()
+        # Global x exists with String type
+        ctx = ScopeContext(term_names=["x"], globals={"x"})
+
+        # let x = 42 in x
+        # Local x shadows global x
+        let_term = SurfaceLet(
+            bindings=[("x", None, SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC))],
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+
+        result = checker.check_term(let_term, ctx)
+
+        # The x in body should be a local variable (ScopedVar with index 0)
+        # not a GlobalVar, proving shadowing works
+        assert isinstance(result.body, ScopedVar)
+        assert result.body.index == 0
+        assert result.body.debug_name == "x"

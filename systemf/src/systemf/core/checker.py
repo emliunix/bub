@@ -12,10 +12,9 @@ from systemf.core.ast import (
     DataDeclaration,
     Declaration,
     Global,
-    IntLit,
     Let,
+    Lit,
     PrimOp,
-    StringLit,
     TAbs,
     TApp,
     Term,
@@ -71,20 +70,20 @@ class TypeChecker:
             TypeMismatch: If types don't match
         """
         match term:
-            case Var(index):
+            case Var(index=index):
                 # Var: Look up type in context
                 try:
                     return ctx.lookup_type(index)
                 except IndexError as e:
                     raise UndefinedVariable(index) from e
 
-            case Global(name):
+            case Global(name=name):
                 # Global: Look up type in global environment
                 if name not in self.global_types:
                     raise TypeError(f"Undefined global: {name}")
                 return self.global_types[name]
 
-            case App(func, arg):
+            case App(func=func, arg=arg):
                 # App: Infer function type, check argument against domain
                 func_type = self.infer(ctx, func)
                 match func_type:
@@ -94,7 +93,7 @@ class TypeChecker:
                     case _:
                         raise TypeMismatch(TypeArrow(TypeVar("_"), TypeVar("_")), func_type)
 
-            case TApp(func, type_arg):
+            case TApp(func=func, type_arg=type_arg):
                 # TApp: Infer polymorphic type, instantiate with type arg
                 # Special case: if func is a Constructor, look up its type directly
                 # to avoid premature instantiation
@@ -103,7 +102,7 @@ class TypeChecker:
                         raise UndefinedConstructor(func.name)
                     ctor_type = self.constructors[func.name]
                     match ctor_type:
-                        case TypeForall(var, body):
+                        case TypeForall(var=var, body=body):
                             subst = Substitution.singleton(var, type_arg)
                             return subst.apply(body)
                         case _:
@@ -119,50 +118,44 @@ class TypeChecker:
                         case _:
                             raise TypeMismatch(TypeForall("_", TypeVar("_")), func_type)
 
-            case Constructor(name, args):
+            case Constructor(name=name, args=args):
                 # Constructor: Look up constructor type, instantiate
                 if name not in self.constructors:
                     raise UndefinedConstructor(name)
                 ctor_type = self.constructors[name]
                 return self._infer_constructor(ctx, ctor_type, args)
 
-            case Case(scrutinee, branches):
+            case Case(scrutinee=scrutinee, branches=branches):
                 # Case: Infer scrutinee type, check all branches match
                 scrut_type = self.infer(ctx, scrutinee)
                 return self._check_branches(ctx, scrut_type, branches)
 
-            case Let(name, value, body):
+            case Let(name=name, value=value, body=body):
                 # Let: Infer value, extend context, infer body
                 value_type = self.infer(ctx, value)
                 new_ctx = ctx.extend_term(value_type)
                 return self.infer(new_ctx, body)
 
-            case Abs(var_type, body):
+            case Abs(var_type=var_type, body=body):
                 # Lambda with annotation: we can infer τ → τ' where τ is the annotation
                 # and τ' is inferred from the body in the extended context
                 new_ctx = ctx.extend_term(var_type)
                 body_type = self.infer(new_ctx, body)
                 return TypeArrow(var_type, body_type)
 
-            case TAbs(var, body):
+            case TAbs(var=var, body=body):
                 # Type abstraction: infer ∀α.τ where τ is the body type
                 new_ctx = ctx.extend_type(var)
                 body_type = self.infer(new_ctx, body)
                 return TypeForall(var, body_type)
 
-            case IntLit(_):
-                # Lookup from prelude-populated registry
-                if "Int" not in self.primitive_types:
-                    raise TypeError("Int type not registered in primitive_types")
-                return self.primitive_types["Int"]
+            case Lit(prim_type=prim_type):
+                # Lookup from prelude-populated registry based on prim_type
+                if prim_type not in self.primitive_types:
+                    raise TypeError(f"{prim_type} type not registered in primitive_types")
+                return self.primitive_types[prim_type]
 
-            case StringLit(_):
-                # Lookup from prelude-populated registry
-                if "String" not in self.primitive_types:
-                    raise TypeError("String type not registered in primitive_types")
-                return self.primitive_types["String"]
-
-            case PrimOp(name):
+            case PrimOp(name=name):
                 # Handle LLM primitives (e.g., "llm.xxx")
                 if name.startswith("llm."):
                     # The type annotation should be set by the elaborator
@@ -197,7 +190,7 @@ class TypeChecker:
             TypeMismatch: If term doesn't have the expected type
         """
         match term:
-            case Abs(var_type, body):
+            case Abs(var_type=var_type, body=body):
                 # Abs: Match expected arrow type, extend context, check body
                 match expected:
                     case TypeArrow(arg_type, ret_type):
@@ -210,7 +203,7 @@ class TypeChecker:
                     case _:
                         raise TypeMismatch(expected, TypeArrow(var_type, TypeVar("_")))
 
-            case TAbs(var, body):
+            case TAbs(var=var, body=body):
                 # TAbs: Match expected forall type, extend type context, check body
                 match expected:
                     case TypeForall(exp_var, exp_body):
@@ -226,7 +219,7 @@ class TypeChecker:
                     case _:
                         raise TypeMismatch(expected, TypeForall(var, TypeVar("_")))
 
-            case Constructor(name, args):
+            case Constructor(name=name, args=args):
                 # Con: Check constructor against expected data type
                 if name not in self.constructors:
                     raise UndefinedConstructor(name)

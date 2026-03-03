@@ -13,13 +13,12 @@ import pytest
 
 from systemf.surface import ElaborationPipeline, elaborate_module
 from systemf.surface.types import (
+    SurfaceLit,
     SurfaceTermDeclaration,
     SurfaceAbs,
     SurfaceVar,
     SurfaceApp,
     SurfaceLet,
-    SurfaceIntLit,
-    SurfaceStringLit,
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceIf,
@@ -34,6 +33,7 @@ from systemf.surface.types import (
     SurfaceTypeArrow,
     SurfaceTypeVar,
     SurfaceTypeForall,
+    SurfacePrimOpDecl,
 )
 from systemf.core import ast as core
 from systemf.core.types import TypeConstructor, TypeArrow, TypeForall, TypeVar
@@ -60,10 +60,15 @@ class TestBasicPipeline:
         """Full pipeline with simple identity function."""
         # id : Int -> Int
         # id = \x -> x
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
 
-        body = SurfaceAbs("x", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=int_type,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
         decl = SurfaceTermDeclaration(
             name="id", type_annotation=arrow_type, body=body, location=DUMMY_LOC
         )
@@ -80,15 +85,20 @@ class TestBasicPipeline:
         """Function that ignores its argument."""
         # const : Int -> Int -> Int
         # const = \x -> \y -> x
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
 
         # First lambda: \x -> ...
-        inner_body = SurfaceAbs("y", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
-        outer_body = SurfaceAbs("x", int_type, inner_body, DUMMY_LOC)
+        inner_body = SurfaceAbs(
+            var="y",
+            var_type=int_type,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        outer_body = SurfaceAbs(var="x", var_type=int_type, body=inner_body, location=DUMMY_LOC)
 
         # Type: Int -> Int -> Int
-        arrow1 = SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC)
-        arrow2 = SurfaceTypeArrow(int_type, arrow1, location=DUMMY_LOC)
+        arrow1 = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
+        arrow2 = SurfaceTypeArrow(arg=int_type, ret=arrow1, location=DUMMY_LOC)
 
         decl = SurfaceTermDeclaration(
             name="const", type_annotation=arrow2, body=outer_body, location=DUMMY_LOC
@@ -109,13 +119,18 @@ class TestPolymorphism:
         # id : forall a. a -> a
         # id = /\a. \x:a -> x
 
-        type_var = SurfaceTypeVar("a", DUMMY_LOC)
-        body = SurfaceAbs("x", type_var, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", body, DUMMY_LOC)
+        type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=type_var,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        type_abs = SurfaceTypeAbs(var="a", body=body, location=DUMMY_LOC)
 
         # Type: forall a. a -> a
-        arrow = SurfaceTypeArrow(type_var, type_var, location=DUMMY_LOC)
-        forall_type = SurfaceTypeForall("a", arrow, DUMMY_LOC)
+        arrow = SurfaceTypeArrow(arg=type_var, ret=type_var, location=DUMMY_LOC)
+        forall_type = SurfaceTypeForall(var="a", body=arrow, location=DUMMY_LOC)
 
         decl = SurfaceTermDeclaration(
             name="id", type_annotation=forall_type, body=type_abs, location=DUMMY_LOC
@@ -132,16 +147,25 @@ class TestPolymorphism:
         # id @Int 42
         # where id = /\a. \x:a -> x
 
-        type_var = SurfaceTypeVar("a", DUMMY_LOC)
-        body = SurfaceAbs("x", type_var, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
-        type_abs = SurfaceTypeAbs("a", body, DUMMY_LOC)
+        type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=type_var,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        type_abs = SurfaceTypeAbs(var="a", body=body, location=DUMMY_LOC)
 
         # id @Int
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        type_app = SurfaceTypeApp(type_abs, int_type, DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        type_app = SurfaceTypeApp(func=type_abs, type_arg=int_type, location=DUMMY_LOC)
 
         # id @Int 42
-        app = SurfaceApp(type_app, SurfaceIntLit(42, DUMMY_LOC), DUMMY_LOC)
+        app = SurfaceApp(
+            func=type_app,
+            arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         decl = SurfaceTermDeclaration(
             name="result", type_annotation=int_type, body=app, location=DUMMY_LOC
@@ -159,41 +183,69 @@ class TestLetBindings:
     def test_simple_let(self):
         """Simple let binding through pipeline."""
         # let x = 42 in x + 1
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        int_plus_type = SurfaceTypeArrow(
+            arg=int_type,
+            ret=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
-        bindings = [("x", None, SurfaceIntLit(42, DUMMY_LOC))]
-        body = SurfaceOp(SurfaceVar("x", DUMMY_LOC), "+", SurfaceIntLit(1, DUMMY_LOC), DUMMY_LOC)
-        let_term = SurfaceLet(bindings, body, DUMMY_LOC)
+        # Declare int_plus primitive
+        prim_decl = SurfacePrimOpDecl(
+            name="int_plus", type_annotation=int_plus_type, location=DUMMY_LOC
+        )
+
+        bindings = [("x", None, SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC))]
+        body = SurfaceOp(
+            left=SurfaceVar(name="x", location=DUMMY_LOC),
+            op="+",
+            right=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        let_term = SurfaceLet(bindings=bindings, body=body, location=DUMMY_LOC)
 
         decl = SurfaceTermDeclaration(
             name="result", type_annotation=int_type, body=let_term, location=DUMMY_LOC
         )
 
         pipeline = ElaborationPipeline(module_name="test")
-        result = pipeline.run([decl])
+        result = pipeline.run([prim_decl, decl])
 
         assert result.success is True
 
     def test_nested_let(self):
         """Nested let bindings."""
         # let x = 1 in let y = 2 in x + y
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-
-        inner_bindings = [("y", None, SurfaceIntLit(2, DUMMY_LOC))]
-        inner_body = SurfaceOp(
-            SurfaceVar("x", DUMMY_LOC), "+", SurfaceVar("y", DUMMY_LOC), DUMMY_LOC
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        int_plus_type = SurfaceTypeArrow(
+            arg=int_type,
+            ret=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
-        inner_let = SurfaceLet(inner_bindings, inner_body, DUMMY_LOC)
 
-        outer_bindings = [("x", None, SurfaceIntLit(1, DUMMY_LOC))]
-        outer_let = SurfaceLet(outer_bindings, inner_let, DUMMY_LOC)
+        # Declare int_plus primitive
+        prim_decl = SurfacePrimOpDecl(
+            name="int_plus", type_annotation=int_plus_type, location=DUMMY_LOC
+        )
+
+        inner_bindings = [("y", None, SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC))]
+        inner_body = SurfaceOp(
+            left=SurfaceVar(name="x", location=DUMMY_LOC),
+            op="+",
+            right=SurfaceVar(name="y", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        inner_let = SurfaceLet(bindings=inner_bindings, body=inner_body, location=DUMMY_LOC)
+
+        outer_bindings = [("x", None, SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC))]
+        outer_let = SurfaceLet(bindings=outer_bindings, body=inner_let, location=DUMMY_LOC)
 
         decl = SurfaceTermDeclaration(
             name="result", type_annotation=int_type, body=outer_let, location=DUMMY_LOC
         )
 
         pipeline = ElaborationPipeline(module_name="test")
-        result = pipeline.run([decl])
+        result = pipeline.run([prim_decl, decl])
 
         assert result.success is True
 
@@ -209,19 +261,29 @@ class TestMutualRecursion:
         # odd : Int -> Bool
         # odd n = if n == 0 then False else even (n - 1)
 
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        bool_type = SurfaceTypeConstructor("Bool", [], DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(int_type, bool_type, location=DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        bool_type = SurfaceTypeConstructor(name="Bool", args=[], location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=bool_type, location=DUMMY_LOC)
 
         # Simplified: just test that both functions are visible
         # even = \n -> True (simplified)
-        even_body = SurfaceAbs("n", int_type, SurfaceConstructor("True", [], DUMMY_LOC), DUMMY_LOC)
+        even_body = SurfaceAbs(
+            var="n",
+            var_type=int_type,
+            body=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
         even_decl = SurfaceTermDeclaration(
             name="even", type_annotation=arrow_type, body=even_body, location=DUMMY_LOC
         )
 
         # odd = \n -> False (simplified)
-        odd_body = SurfaceAbs("n", int_type, SurfaceConstructor("False", [], DUMMY_LOC), DUMMY_LOC)
+        odd_body = SurfaceAbs(
+            var="n",
+            var_type=int_type,
+            body=SurfaceConstructor(name="False", args=[], location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
         odd_decl = SurfaceTermDeclaration(
             name="odd", type_annotation=arrow_type, body=odd_body, location=DUMMY_LOC
         )
@@ -244,11 +306,17 @@ class TestMutualRecursion:
         # g : Int -> Int
         # g y = y
 
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
         arrow_type = SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC)
 
         # g = \y -> y
-        g_body = SurfaceAbs("y", int_type, SurfaceVar("y", DUMMY_LOC), DUMMY_LOC)
+        g_body = SurfaceAbs(
+            var="y",
+            var_type=int_type,
+            body=SurfaceVar(name="y", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
         g_decl = SurfaceTermDeclaration(
             name="g", type_annotation=arrow_type, body=g_body, location=DUMMY_LOC
         )
@@ -258,7 +326,11 @@ class TestMutualRecursion:
         f_body = SurfaceAbs(
             "x",
             int_type,
-            SurfaceApp(SurfaceVar("g", DUMMY_LOC), SurfaceVar("x", DUMMY_LOC), DUMMY_LOC),
+            SurfaceApp(
+                SurfaceVar(name="g", location=DUMMY_LOC),
+                SurfaceVar(name="x", location=DUMMY_LOC),
+                DUMMY_LOC,
+            ),
             DUMMY_LOC,
         )
         f_decl = SurfaceTermDeclaration(
@@ -282,10 +354,15 @@ class TestLLMPragmaProcessing:
         # translate : String -> String
         # translate = \text -> @llm text
 
-        str_type = SurfaceTypeConstructor("String", [], DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(str_type, str_type, location=DUMMY_LOC)
+        str_type = SurfaceTypeConstructor(name="String", args=[], location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=str_type, ret=str_type, location=DUMMY_LOC)
 
-        body = SurfaceAbs("text", str_type, SurfaceVar("text", DUMMY_LOC), DUMMY_LOC)
+        body = SurfaceAbs(
+            var="text",
+            var_type=str_type,
+            body=SurfaceVar(name="text", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
         decl = SurfaceTermDeclaration(
             name="translate",
             type_annotation=arrow_type,
@@ -304,10 +381,15 @@ class TestLLMPragmaProcessing:
 
     def test_non_llm_function(self):
         """Function without LLM pragma should pass through unchanged."""
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
 
-        body = SurfaceAbs("x", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=int_type,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
         decl = SurfaceTermDeclaration(
             name="id", type_annotation=arrow_type, body=body, location=DUMMY_LOC
         )
@@ -326,24 +408,37 @@ class TestComplexExpressions:
     def test_nested_lambda_application(self):
         """Nested lambda with application."""
         # (\f -> \x -> f x) (\y -> y) 42
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
 
         # \y -> y
-        id_body = SurfaceAbs("y", int_type, SurfaceVar("y", DUMMY_LOC), DUMMY_LOC)
+        id_body = SurfaceAbs(
+            var="y",
+            var_type=int_type,
+            body=SurfaceVar(name="y", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         # \x -> f x
-        inner_app = SurfaceApp(SurfaceVar("f", DUMMY_LOC), SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
-        inner_abs = SurfaceAbs("x", int_type, inner_app, DUMMY_LOC)
+        inner_app = SurfaceApp(
+            func=SurfaceVar(name="f", location=DUMMY_LOC),
+            arg=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        inner_abs = SurfaceAbs(var="x", var_type=int_type, body=inner_app, location=DUMMY_LOC)
 
         # \f -> \x -> f x
         # f should be a function (Int -> Int), not Int
-        outer_abs = SurfaceAbs("f", None, inner_abs, DUMMY_LOC)
+        outer_abs = SurfaceAbs(var="f", var_type=None, body=inner_abs, location=DUMMY_LOC)
 
         # (\f -> ...) (\y -> y)
-        app1 = SurfaceApp(outer_abs, id_body, DUMMY_LOC)
+        app1 = SurfaceApp(func=outer_abs, arg=id_body, location=DUMMY_LOC)
 
         # ... 42
-        app2 = SurfaceApp(app1, SurfaceIntLit(42, DUMMY_LOC), DUMMY_LOC)
+        app2 = SurfaceApp(
+            func=app1,
+            arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         decl = SurfaceTermDeclaration(
             name="result", type_annotation=int_type, body=app2, location=DUMMY_LOC
@@ -357,13 +452,13 @@ class TestComplexExpressions:
     def test_conditional_expression(self):
         """If-then-else expression."""
         # if True then 1 else 0
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
 
         if_term = SurfaceIf(
-            SurfaceConstructor("True", [], DUMMY_LOC),
-            SurfaceIntLit(1, DUMMY_LOC),
-            SurfaceIntLit(0, DUMMY_LOC),
-            DUMMY_LOC,
+            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            then_branch=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+            else_branch=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         decl = SurfaceTermDeclaration(
@@ -377,17 +472,23 @@ class TestComplexExpressions:
 
     def test_tuple_expression(self):
         """Tuple expression through pipeline."""
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        str_type = SurfaceTypeConstructor("String", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        str_type = SurfaceTypeConstructor(name="String", args=[], location=DUMMY_LOC)
 
         # (42, "hello")
         tuple_term = SurfaceTuple(
-            [SurfaceIntLit(42, DUMMY_LOC), SurfaceStringLit("hello", DUMMY_LOC)], DUMMY_LOC
+            elements=[
+                SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+                SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
+            ],
+            location=DUMMY_LOC,
         )
 
         decl = SurfaceTermDeclaration(
             name="result",
-            type_annotation=SurfaceTypeConstructor("Tuple", [int_type, str_type], DUMMY_LOC),
+            type_annotation=SurfaceTypeConstructor(
+                name="Tuple", args=[int_type, str_type], location=DUMMY_LOC
+            ),
             body=tuple_term,
             location=DUMMY_LOC,
         )
@@ -404,9 +505,9 @@ class TestErrorPropagation:
     def test_undefined_variable_error(self):
         """Undefined variable should be caught in scope checking phase."""
         # x is not defined
-        body = SurfaceVar("undefined_var", DUMMY_LOC)
+        body = SurfaceVar(name="undefined_var", location=DUMMY_LOC)
 
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
         decl = SurfaceTermDeclaration(
             name="bad", type_annotation=int_type, body=body, location=DUMMY_LOC
         )
@@ -421,11 +522,15 @@ class TestErrorPropagation:
     def test_type_mismatch_error(self):
         """Type mismatch should be caught in type elaboration phase."""
         # (42 : String) - Int with String annotation
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        str_type = SurfaceTypeConstructor("String", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        str_type = SurfaceTypeConstructor(name="String", args=[], location=DUMMY_LOC)
 
         # 42 annotated as String
-        ann_term = SurfaceAnn(SurfaceIntLit(42, DUMMY_LOC), str_type, DUMMY_LOC)
+        ann_term = SurfaceAnn(
+            term=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
+            type=str_type,
+            location=DUMMY_LOC,
+        )
 
         decl = SurfaceTermDeclaration(
             name="bad", type_annotation=str_type, body=ann_term, location=DUMMY_LOC
@@ -443,12 +548,17 @@ class TestModuleAssembly:
 
     def test_module_metadata(self):
         """Module should contain correct metadata."""
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = SurfaceAbs("x", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=int_type,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
             body=body,
             location=DUMMY_LOC,
             docstring="Identity function",
@@ -463,20 +573,30 @@ class TestModuleAssembly:
 
     def test_global_types_collection(self):
         """Module should collect all global type signatures."""
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        bool_type = SurfaceTypeConstructor("Bool", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        bool_type = SurfaceTypeConstructor(name="Bool", args=[], location=DUMMY_LOC)
 
         decl1 = SurfaceTermDeclaration(
             name="f1",
-            type_annotation=SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC),
-            body=SurfaceAbs("x", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            body=SurfaceAbs(
+                var="x",
+                var_type=int_type,
+                body=SurfaceVar(name="x", location=DUMMY_LOC),
+                location=DUMMY_LOC,
+            ),
             location=DUMMY_LOC,
         )
 
         decl2 = SurfaceTermDeclaration(
             name="f2",
-            type_annotation=SurfaceTypeArrow(bool_type, bool_type, location=DUMMY_LOC),
-            body=SurfaceAbs("x", bool_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=bool_type, ret=bool_type, location=DUMMY_LOC),
+            body=SurfaceAbs(
+                var="x",
+                var_type=bool_type,
+                body=SurfaceVar(name="x", location=DUMMY_LOC),
+                location=DUMMY_LOC,
+            ),
             location=DUMMY_LOC,
         )
 
@@ -492,12 +612,17 @@ class TestConvenienceFunction:
 
     def test_elaborate_module_function(self):
         """Convenience function should work correctly."""
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = SurfaceAbs("x", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=int_type,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
             body=body,
             location=DUMMY_LOC,
         )
@@ -517,34 +642,42 @@ class TestRealPrograms:
         # compose : (b -> c) -> (a -> b) -> a -> c
         # compose = \f -> \g -> \x -> f (g x)
 
-        type_a = SurfaceTypeVar("a", DUMMY_LOC)
-        type_b = SurfaceTypeVar("b", DUMMY_LOC)
-        type_c = SurfaceTypeVar("c", DUMMY_LOC)
+        type_a = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        type_b = SurfaceTypeVar(name="b", location=DUMMY_LOC)
+        type_c = SurfaceTypeVar(name="c", location=DUMMY_LOC)
 
         # f : b -> c
         # g : a -> b
         # x : a
         # result: f (g x) : c
 
-        arrow_bc = SurfaceTypeArrow(type_b, type_c, location=DUMMY_LOC)
-        arrow_ab = SurfaceTypeArrow(type_a, type_b, location=DUMMY_LOC)
-        arrow_ac = SurfaceTypeArrow(type_a, type_c, location=DUMMY_LOC)
+        arrow_bc = SurfaceTypeArrow(arg=type_b, ret=type_c, location=DUMMY_LOC)
+        arrow_ab = SurfaceTypeArrow(arg=type_a, ret=type_b, location=DUMMY_LOC)
+        arrow_ac = SurfaceTypeArrow(arg=type_a, ret=type_c, location=DUMMY_LOC)
 
         # g x
-        g_app = SurfaceApp(SurfaceVar("g", DUMMY_LOC), SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        g_app = SurfaceApp(
+            func=SurfaceVar(name="g", location=DUMMY_LOC),
+            arg=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
         # f (g x)
-        f_app = SurfaceApp(SurfaceVar("f", DUMMY_LOC), g_app, DUMMY_LOC)
+        f_app = SurfaceApp(
+            func=SurfaceVar(name="f", location=DUMMY_LOC), arg=g_app, location=DUMMY_LOC
+        )
 
         # \x -> f (g x)
-        x_abs = SurfaceAbs("x", type_a, f_app, DUMMY_LOC)
+        x_abs = SurfaceAbs(var="x", var_type=type_a, body=f_app, location=DUMMY_LOC)
         # \g -> \x -> f (g x)
-        g_abs = SurfaceAbs("g", arrow_ab, x_abs, DUMMY_LOC)
+        g_abs = SurfaceAbs(var="g", var_type=arrow_ab, body=x_abs, location=DUMMY_LOC)
         # \f -> \g -> \x -> f (g x)
-        f_abs = SurfaceAbs("f", arrow_bc, g_abs, DUMMY_LOC)
+        f_abs = SurfaceAbs(var="f", var_type=arrow_bc, body=g_abs, location=DUMMY_LOC)
 
         # Type: (b -> c) -> (a -> b) -> (a -> c)
         compose_type = SurfaceTypeArrow(
-            arrow_bc, SurfaceTypeArrow(arrow_ab, arrow_ac, location=DUMMY_LOC), location=DUMMY_LOC
+            arg=arrow_bc,
+            ret=SurfaceTypeArrow(arg=arrow_ab, ret=arrow_ac, location=DUMMY_LOC),
+            location=DUMMY_LOC,
         )
 
         decl = SurfaceTermDeclaration(
@@ -560,28 +693,34 @@ class TestRealPrograms:
     def test_flip_function(self):
         """flip f x y = f y x"""
         # flip : (a -> b -> c) -> b -> a -> c
-        type_a = SurfaceTypeVar("a", DUMMY_LOC)
-        type_b = SurfaceTypeVar("b", DUMMY_LOC)
-        type_c = SurfaceTypeVar("c", DUMMY_LOC)
+        type_a = SurfaceTypeVar(name="a", location=DUMMY_LOC)
+        type_b = SurfaceTypeVar(name="b", location=DUMMY_LOC)
+        type_c = SurfaceTypeVar(name="c", location=DUMMY_LOC)
 
-        arrow_bc = SurfaceTypeArrow(type_b, type_c, location=DUMMY_LOC)
-        arrow_abc = SurfaceTypeArrow(type_a, arrow_bc, location=DUMMY_LOC)
-        arrow_ac = SurfaceTypeArrow(type_a, type_c, location=DUMMY_LOC)
-        arrow_bac = SurfaceTypeArrow(type_b, arrow_ac, location=DUMMY_LOC)
+        arrow_bc = SurfaceTypeArrow(arg=type_b, ret=type_c, location=DUMMY_LOC)
+        arrow_abc = SurfaceTypeArrow(arg=type_a, ret=arrow_bc, location=DUMMY_LOC)
+        arrow_ac = SurfaceTypeArrow(arg=type_a, ret=type_c, location=DUMMY_LOC)
+        arrow_bac = SurfaceTypeArrow(arg=type_b, ret=arrow_ac, location=DUMMY_LOC)
 
         # f y x
-        f_y = SurfaceApp(SurfaceVar("f", DUMMY_LOC), SurfaceVar("y", DUMMY_LOC), DUMMY_LOC)
-        f_y_x = SurfaceApp(f_y, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        f_y = SurfaceApp(
+            func=SurfaceVar(name="f", location=DUMMY_LOC),
+            arg=SurfaceVar(name="y", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
+        f_y_x = SurfaceApp(
+            func=f_y, arg=SurfaceVar(name="x", location=DUMMY_LOC), location=DUMMY_LOC
+        )
 
         # \x -> f y x
-        x_abs = SurfaceAbs("x", type_a, f_y_x, DUMMY_LOC)
+        x_abs = SurfaceAbs(var="x", var_type=type_a, body=f_y_x, location=DUMMY_LOC)
         # \y -> \x -> f y x
-        y_abs = SurfaceAbs("y", type_b, x_abs, DUMMY_LOC)
+        y_abs = SurfaceAbs(var="y", var_type=type_b, body=x_abs, location=DUMMY_LOC)
         # \f -> \y -> \x -> f y x
-        f_abs = SurfaceAbs("f", arrow_abc, y_abs, DUMMY_LOC)
+        f_abs = SurfaceAbs(var="f", var_type=arrow_abc, body=y_abs, location=DUMMY_LOC)
 
         # Type: (a -> b -> c) -> (b -> a -> c)
-        flip_type = SurfaceTypeArrow(arrow_abc, arrow_bac, location=DUMMY_LOC)
+        flip_type = SurfaceTypeArrow(arg=arrow_abc, ret=arrow_bac, location=DUMMY_LOC)
 
         decl = SurfaceTermDeclaration(
             name="flip", type_annotation=flip_type, body=f_abs, location=DUMMY_LOC
@@ -599,12 +738,17 @@ class TestPipelineResult:
 
     def test_successful_result(self):
         """Successful elaboration should have success=True."""
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = SurfaceAbs("x", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=int_type,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
             body=body,
             location=DUMMY_LOC,
         )
@@ -619,9 +763,9 @@ class TestPipelineResult:
     def test_error_result(self):
         """Failed elaboration should have success=False and errors."""
         # Undefined variable
-        body = SurfaceVar("not_defined", DUMMY_LOC)
+        body = SurfaceVar(name="not_defined", location=DUMMY_LOC)
 
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
         decl = SurfaceTermDeclaration(
             name="bad", type_annotation=int_type, body=body, location=DUMMY_LOC
         )
@@ -635,12 +779,17 @@ class TestPipelineResult:
     def test_warning_collection(self):
         """Warnings should be collected in result."""
         # For now, warnings are empty but structure should exist
-        int_type = SurfaceTypeConstructor("Int", [], DUMMY_LOC)
-        body = SurfaceAbs("x", int_type, SurfaceVar("x", DUMMY_LOC), DUMMY_LOC)
+        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
+        body = SurfaceAbs(
+            var="x",
+            var_type=int_type,
+            body=SurfaceVar(name="x", location=DUMMY_LOC),
+            location=DUMMY_LOC,
+        )
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
             body=body,
             location=DUMMY_LOC,
         )

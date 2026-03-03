@@ -12,10 +12,9 @@ from systemf.core.ast import (
     DataDeclaration,
     Declaration,
     Global,
-    IntLit,
     Let,
+    Lit,
     PrimOp,
-    StringLit,
     TAbs,
     TApp,
     Term,
@@ -28,15 +27,15 @@ from systemf.eval.value import (
     Environment,
     VClosure,
     VConstructor,
-    VInt,
+    VPrim,
     VPrimOp,
     VPrimOpPartial,
-    VString,
     VTypeClosure,
     Value,
 )
 from systemf.eval.pattern import PatternMatcher
 from systemf.eval.tools import get_tool_registry
+from systemf.eval.primitives import PRIMITIVE_IMPLEMENTATIONS
 
 
 class Evaluator:
@@ -45,90 +44,11 @@ class Evaluator:
     def __init__(self, global_env: dict[str, Value] | None = None) -> None:
         self.pattern_matcher = PatternMatcher()
         self.global_env = global_env if global_env is not None else {}
-        self.primitive_impls: dict[str, Callable[[Value, Value], Value]] = {
-            "$prim.int_plus": self._int_plus,
-            "$prim.int_minus": self._int_minus,
-            "$prim.int_multiply": self._int_multiply,
-            "$prim.int_divide": self._int_divide,
-            "$prim.int_negate": self._int_negate,
-            "$prim.int_eq": self._int_eq,
-            "$prim.int_lt": self._int_lt,
-            "$prim.int_gt": self._int_gt,
-            "$prim.string_concat": self._string_concat,
-            "$prim.string_length": self._string_length,
-        }
+        self.primitive_impls: dict[str, Callable[[Value, Value], Value]] = (
+            PRIMITIVE_IMPLEMENTATIONS.copy()
+        )
         # Registry for LLM function closures: name -> (metadata, closure)
         self.llm_closures: dict[str, tuple[LLMMetadata, Callable[[Value], Value]]] = {}
-
-    def _int_plus(self, x: Value, y: Value) -> Value:
-        """Integer addition."""
-        if not isinstance(x, VInt) or not isinstance(y, VInt):
-            raise RuntimeError("int_plus expects Int arguments")
-        return VInt(x.value + y.value)
-
-    def _int_minus(self, x: Value, y: Value) -> Value:
-        """Integer subtraction."""
-        if not isinstance(x, VInt) or not isinstance(y, VInt):
-            raise RuntimeError("int_minus expects Int arguments")
-        return VInt(x.value - y.value)
-
-    def _int_multiply(self, x: Value, y: Value) -> Value:
-        """Integer multiplication."""
-        if not isinstance(x, VInt) or not isinstance(y, VInt):
-            raise RuntimeError("int_multiply expects Int arguments")
-        return VInt(x.value * y.value)
-
-    def _int_divide(self, x: Value, y: Value) -> Value:
-        """Integer division."""
-        if not isinstance(x, VInt) or not isinstance(y, VInt):
-            raise RuntimeError("int_divide expects Int arguments")
-        if y.value == 0:
-            raise RuntimeError("Division by zero")
-        return VInt(x.value // y.value)
-
-    def _int_negate(self, x: Value, _y: Value) -> Value:
-        """Integer negation (unary minus).
-
-        Note: This is a unary operation (Int -> Int) but the primitive
-        infrastructure expects binary operations. The second argument is ignored.
-        """
-        if not isinstance(x, VInt):
-            raise RuntimeError("int_negate expects Int argument")
-        return VInt(-x.value)
-
-    def _int_eq(self, x: Value, y: Value) -> Value:
-        """Integer equality."""
-        if not isinstance(x, VInt) or not isinstance(y, VInt):
-            raise RuntimeError("int_eq expects Int arguments")
-        return VConstructor("True" if x.value == y.value else "False", [])
-
-    def _int_lt(self, x: Value, y: Value) -> Value:
-        """Integer less than."""
-        if not isinstance(x, VInt) or not isinstance(y, VInt):
-            raise RuntimeError("int_lt expects Int arguments")
-        return VConstructor("True" if x.value < y.value else "False", [])
-
-    def _int_gt(self, x: Value, y: Value) -> Value:
-        """Integer greater than."""
-        if not isinstance(x, VInt) or not isinstance(y, VInt):
-            raise RuntimeError("int_gt expects Int arguments")
-        return VConstructor("True" if x.value > y.value else "False", [])
-
-    def _string_concat(self, x: Value, y: Value) -> Value:
-        """String concatenation."""
-        if not isinstance(x, VString) or not isinstance(y, VString):
-            raise RuntimeError("string_concat expects String arguments")
-        return VString(x.value + y.value)
-
-    def _string_length(self, x: Value, y: Value) -> Value:
-        """String length.
-
-        Note: This is a unary operation (String -> Int) but the primitive
-        infrastructure expects binary operations. The second argument is ignored.
-        """
-        if not isinstance(x, VString):
-            raise RuntimeError("string_length expects String argument")
-        return VInt(len(x.value))
 
     def register_llm_closure(self, name: str, metadata: LLMMetadata) -> None:
         """Register an LLM function closure.
@@ -198,9 +118,9 @@ class Evaluator:
     def _value_to_string(self, value: Value) -> str:
         """Convert a Value to string representation."""
         match value:
-            case VInt(n):
+            case VPrim("Int", n):
                 return str(n)
-            case VString(s):
+            case VPrim("String", s):
                 return s
             case VConstructor(name, args):
                 if not args:
@@ -256,8 +176,8 @@ class Evaluator:
 
         For now, assumes String return type. Future: parse based on type annotation.
         """
-        # Strip whitespace and return as VString
-        return VString(response.strip())
+        # Strip whitespace and return as VPrim String
+        return VPrim("String", response.strip())
 
     def evaluate(self, term: Term, env: Environment | None = None) -> Value:
         """Evaluate term to a value.
@@ -269,44 +189,42 @@ class Evaluator:
             env = Environment.empty()
 
         match term:
-            case Var(index):
+            case Var(index=index):
                 # Variable lookup
                 return env.lookup(index)
 
-            case Global(name):
+            case Global(name=name):
                 # Global variable lookup
                 if name not in self.global_env:
                     raise RuntimeError(f"Undefined global: {name}")
                 return self.global_env[name]
 
-            case Abs(var_type, body):
+            case Abs(var_type=var_type, body=body):
                 # Create closure capturing current environment
                 return VClosure(env, body)
 
-            case App(func, arg):
-                # Evaluate function
+            case App(func=func, arg=arg):
+                # Evaluate function and argument
                 func_val = self.evaluate(func, env)
-                # Evaluate argument (call-by-value)
                 arg_val = self.evaluate(arg, env)
-                # Apply
                 return self.apply(func_val, arg_val)
 
-            case TAbs(var, body):
+            case TAbs(var=var, body=body):
                 # Type abstraction - create closure
                 return VTypeClosure(env, body)
 
-            case TApp(func, type_arg):
+            case TApp(func=func, type_arg=type_arg):
                 # Type application - just evaluate function
                 # Type argument is erased
                 func_val = self.evaluate(func, env)
                 return self.type_apply(func_val)
 
-            case Constructor(name, args):
+            case Constructor(name=name, args=args):
                 # Evaluate all arguments
                 arg_vals = [self.evaluate(arg, env) for arg in args]
                 return VConstructor(name, arg_vals)
 
-            case Case(scrutinee, branches):
+            case Case(scrutinee=scrutinee, branches=branches):
                 # Evaluate scrutinee
                 scrut_val = self.evaluate(scrutinee, env)
                 # Select matching branch
@@ -319,7 +237,7 @@ class Evaluator:
                 # Evaluate branch body
                 return self.evaluate(branch.body, new_env)
 
-            case Let(name, value, body):
+            case Let(name=name, value=value, body=body):
                 # Evaluate value first (call-by-value)
                 val = self.evaluate(value, env)
                 # Extend environment
@@ -327,20 +245,16 @@ class Evaluator:
                 # Evaluate body
                 return self.evaluate(body, new_env)
 
-            case IntLit(value):
-                # Integer literal evaluates to VInt
-                return VInt(value)
+            case Lit(prim_type=prim_type, value=value):
+                # Literal evaluates to VPrim
+                return VPrim(prim_type, value)
 
-            case StringLit(value):
-                # String literal evaluates to VString
-                return VString(value)
-
-            case PrimOp(name):
+            case PrimOp(name=name):
                 # Primitive operation creates a function that can be applied
                 # Return a closure that wraps the primitive implementation
                 return self._make_primop_closure(name)
 
-            case ToolCall(tool_name, args):
+            case ToolCall(tool_name=tool_name, args=args):
                 # Evaluate all arguments (call-by-value)
                 arg_vals = [self.evaluate(arg, env) for arg in args]
                 # Execute tool through registry
@@ -353,19 +267,19 @@ class Evaluator:
     def apply(self, func: Value, arg: Value) -> Value:
         """Apply function value to argument."""
         match func:
-            case VClosure(closure_env, body):
+            case VClosure(env=closure_env, body=body):
                 # Extend closure environment with argument
                 new_env = closure_env.extend(arg)
                 # Evaluate body in extended environment
                 return self.evaluate(body, new_env)
-            case VPrimOp(name, impl):
+            case VPrimOp(name=name, impl=impl):
                 # Check if this is an LLM primitive (unary)
                 if name.startswith("llm."):
                     # LLM primitives are unary - execute immediately
                     return impl(arg, arg)  # Pass arg as both args for compatibility
                 # Regular primitive operations are binary - first application creates partial
                 return VPrimOpPartial(name, impl, arg)
-            case VPrimOpPartial(name, impl, first_arg):
+            case VPrimOpPartial(name=name, impl=impl, first_arg=first_arg):
                 # Second application - execute the primitive
                 return impl(first_arg, arg)
             case _:
@@ -374,7 +288,7 @@ class Evaluator:
     def type_apply(self, func: Value) -> Value:
         """Apply type abstraction (types are erased)."""
         match func:
-            case VTypeClosure(closure_env, body):
+            case VTypeClosure(env=closure_env, body=body):
                 # Just evaluate the body
                 # Type variable is not needed at runtime
                 return self.evaluate(body, closure_env)
@@ -396,10 +310,12 @@ class Evaluator:
                 return self._make_llm_wrapper(llm_name, closure)
             raise RuntimeError(f"Unknown LLM primitive: {llm_name}")
 
-        if name not in self.primitive_impls:
+        # PrimOp stores name without $prim. prefix, registry uses full names
+        full_name = f"$prim.{name}"
+        if full_name not in self.primitive_impls:
             raise RuntimeError(f"Unknown primitive: {name}")
 
-        impl = self.primitive_impls[name]
+        impl = self.primitive_impls[full_name]
 
         # Create a closure that expects two arguments
         # We use a special representation that the apply method will recognize

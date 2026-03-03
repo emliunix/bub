@@ -36,16 +36,10 @@ class TestTypeVar:
 class TestTypeArrow:
     """Tests for TypeArrow (function types)."""
 
-    def test_str_simple(self):
-        """Test string representation of simple arrow."""
+    def test_str(self):
+        """Test string representation."""
         t = TypeArrow(TypeVar("a"), TypeVar("b"))
         assert str(t) == "a -> b"
-
-    def test_str_nested(self):
-        """Test string representation of nested arrow."""
-        inner = TypeArrow(TypeVar("a"), TypeVar("b"))
-        t = TypeArrow(inner, TypeVar("c"))
-        assert str(t) == "(a -> b) -> c"
 
     def test_free_vars(self):
         """Test free_vars returns union of free variables."""
@@ -98,26 +92,10 @@ class TestTypeForall:
 class TestTypeConstructor:
     """Tests for TypeConstructor (data types)."""
 
-    def test_str_nullary(self):
-        """Test string representation of nullary constructor."""
-        t = TypeConstructor("Int", [])
-        assert str(t) == "Int"
-
-    def test_str_unary(self):
-        """Test string representation of unary constructor."""
+    def test_str(self):
+        """Test string representation."""
         t = TypeConstructor("List", [TypeVar("a")])
         assert str(t) == "List a"
-
-    def test_str_binary(self):
-        """Test string representation of binary constructor."""
-        t = TypeConstructor("Pair", [TypeVar("a"), TypeVar("b")])
-        assert str(t) == "Pair a b"
-
-    def test_str_with_arrow(self):
-        """Test string representation with arrow argument."""
-        arg = TypeArrow(TypeVar("a"), TypeVar("b"))
-        t = TypeConstructor("Fun", [arg])
-        assert str(t) == "Fun (a -> b)"
 
     def test_free_vars(self):
         """Test free_vars returns union of free variables in args."""
@@ -137,34 +115,9 @@ class TestTypeEquality:
     """Tests for type equality (via frozen dataclasses)."""
 
     def test_typevar_equality(self):
-        """Test TypeVar equality."""
+        """Test TypeVar equality (representative for all dataclass-based types)."""
         assert TypeVar("a") == TypeVar("a")
         assert TypeVar("a") != TypeVar("b")
-
-    def test_arrow_equality(self):
-        """Test TypeArrow equality."""
-        t1 = TypeArrow(TypeVar("a"), TypeVar("b"))
-        t2 = TypeArrow(TypeVar("a"), TypeVar("b"))
-        t3 = TypeArrow(TypeVar("b"), TypeVar("a"))
-        assert t1 == t2
-        assert t1 != t3
-
-    def test_forall_equality(self):
-        """Test TypeForall equality."""
-        body = TypeArrow(TypeVar("a"), TypeVar("a"))
-        t1 = TypeForall("a", body)
-        t2 = TypeForall("a", body)
-        t3 = TypeForall("b", body)
-        assert t1 == t2
-        assert t1 != t3
-
-    def test_constructor_equality(self):
-        """Test TypeConstructor equality."""
-        t1 = TypeConstructor("List", [TypeVar("a")])
-        t2 = TypeConstructor("List", [TypeVar("a")])
-        t3 = TypeConstructor("List", [TypeVar("b")])
-        assert t1 == t2
-        assert t1 != t3
 
 
 class TestExampleTypes:

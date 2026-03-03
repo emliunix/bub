@@ -13,28 +13,39 @@ from systemf.utils.location import Location
 
 
 # =============================================================================
+# Surface Node Base Class
+# =============================================================================
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurfaceNode:
+    """Base class for all surface AST nodes."""
+
+    location: Optional[Location] = field(default=None)
+
+
+# =============================================================================
 # Surface Types
 # =============================================================================
 
 
-class SurfaceType:
+class SurfaceType(SurfaceNode):
     """Base class for surface types."""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTypeVar(SurfaceType):
     """Type variable: a."""
 
-    name: str
-    location: Location
+    name: str = ""
 
     def __str__(self) -> str:
         return self.name
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTypeArrow(SurfaceType):
     """Function type: arg -> ret with optional parameter docstring.
 
@@ -43,17 +54,16 @@ class SurfaceTypeArrow(SurfaceType):
 
     Representation:
         SurfaceTypeArrow(
-            arg=SurfaceTypeConstructor("String"),
-            ret=SurfaceTypeConstructor("String"),
+            arg=SurfaceTypeConstructor(name="String"),
+            ret=SurfaceTypeConstructor(name="String"),
             param_doc="Input text",
             location=loc
         )
     """
 
-    arg: SurfaceType
-    ret: SurfaceType
+    arg: Optional[SurfaceType] = None
+    ret: Optional[SurfaceType] = None
     param_doc: Optional[str] = None  # Populated when parser sees -- ^ after type
-    location: Location = None  # type: ignore[assignment]  # noqa: RUF009
 
     def __str__(self) -> str:
         match self.arg:
@@ -65,25 +75,23 @@ class SurfaceTypeArrow(SurfaceType):
         return f"{arg_str}{doc_suffix} -> {self.ret}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTypeForall(SurfaceType):
     """Polymorphic type: forall a. body."""
 
-    var: str
-    body: SurfaceType
-    location: Location
+    var: str = ""
+    body: Optional[SurfaceType] = None
 
     def __str__(self) -> str:
         return f"forall {self.var}. {self.body}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTypeConstructor(SurfaceType):
     """Data type constructor: T t1 ... tn."""
 
-    name: str
-    args: list[SurfaceType]
-    location: Location
+    name: str = ""
+    args: list[SurfaceType] = field(default_factory=list)
 
     def __str__(self) -> str:
         if not self.args:
@@ -99,15 +107,14 @@ class SurfaceTypeConstructor(SurfaceType):
         return f"{self.name} {args_str}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTypeTuple(SurfaceType):
     """Tuple type: (t1, t2, ..., tn) - desugars to nested Pairs.
 
     Sugar for: Pair t1 (Pair t2 (... tn))
     """
 
-    elements: list[SurfaceType]
-    location: Location
+    elements: list[SurfaceType] = field(default_factory=list)
 
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
@@ -124,34 +131,32 @@ SurfaceTypeRepr = Union[
 # =============================================================================
 
 
-class SurfaceTerm:
+class SurfaceTerm(SurfaceNode):
     """Base class for surface terms."""
 
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceVar(SurfaceTerm):
     """Variable reference by name: x."""
 
-    name: str
-    location: Location
+    name: str = ""
 
     def __str__(self) -> str:
         return self.name
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceAbs(SurfaceTerm):
     """Lambda abstraction: \\x -> body or \\x:T -> body.
 
     Supports Haddock-style parameter docstrings: \\x -- ^ docstring -> body
     """
 
-    var: str
-    var_type: Optional[SurfaceType]
-    body: SurfaceTerm
-    location: Location
+    var: str = ""
+    var_type: Optional[SurfaceType] = None
+    body: Optional[SurfaceTerm] = None
     param_docstrings: list[str | None] = field(
         default_factory=list
     )  # Docstrings for each parameter
@@ -162,7 +167,7 @@ class SurfaceAbs(SurfaceTerm):
         return f"\\{self.var} -> {self.body}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ScopedVar(SurfaceTerm):
     """Variable reference by de Bruijn index (after scope checking).
 
@@ -175,15 +180,14 @@ class ScopedVar(SurfaceTerm):
         location: Source location
     """
 
-    index: int
-    debug_name: str
-    location: Location
+    index: int = 0
+    debug_name: str = ""
 
     def __str__(self) -> str:
         return f"#{self.index}({self.debug_name})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ScopedAbs(SurfaceTerm):
     """Lambda with parameter name preserved (after scope checking).
 
@@ -197,10 +201,9 @@ class ScopedAbs(SurfaceTerm):
         location: Source location
     """
 
-    var_name: str
-    var_type: Optional[SurfaceType]
-    body: SurfaceTerm
-    location: Location
+    var_name: str = ""
+    var_type: Optional[SurfaceType] = None
+    body: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         if self.var_type:
@@ -208,43 +211,40 @@ class ScopedAbs(SurfaceTerm):
         return f"\\{self.var_name} -> {self.body}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceApp(SurfaceTerm):
     """Function application: f arg."""
 
-    func: SurfaceTerm
-    arg: SurfaceTerm
-    location: Location
+    func: Optional[SurfaceTerm] = None
+    arg: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         return f"({self.func} {self.arg})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTypeAbs(SurfaceTerm):
     """Type abstraction: /\\a. body (written as /\\a. or Λa.)."""
 
-    var: str
-    body: SurfaceTerm
-    location: Location
+    var: str = ""
+    body: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         return f"/\\{self.var}. {self.body}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTypeApp(SurfaceTerm):
     """Type application: func @type or func [type]."""
 
-    func: SurfaceTerm
-    type_arg: SurfaceType
-    location: Location
+    func: Optional[SurfaceTerm] = None
+    type_arg: Optional[SurfaceType] = None
 
     def __str__(self) -> str:
         return f"({self.func} @{self.type_arg})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceLet(SurfaceTerm):
     """Local let binding within an expression.
 
@@ -258,9 +258,10 @@ class SurfaceLet(SurfaceTerm):
     Note: type annotation is optional for locals since they can be inferred.
     """
 
-    bindings: list[tuple[str, Optional[SurfaceType], SurfaceTerm]]  # (var_name, var_type, value)
-    body: SurfaceTerm
-    location: Location
+    bindings: list[tuple[str, Optional[SurfaceType], SurfaceTerm]] = field(
+        default_factory=list
+    )  # (var_name, var_type, value)
+    body: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         if len(self.bindings) == 1:
@@ -274,41 +275,38 @@ class SurfaceLet(SurfaceTerm):
             return f"let\n{bindings_str}\nin {self.body}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceAnn(SurfaceTerm):
     """Type annotation: term : type."""
 
-    term: SurfaceTerm
-    type: SurfaceType
-    location: Location
+    term: Optional[SurfaceTerm] = None
+    type: Optional[SurfaceType] = None
 
     def __str__(self) -> str:
         return f"({self.term} : {self.type})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceIf(SurfaceTerm):
     """Conditional expression: if cond then t else f.
 
     Syntactic sugar for: case cond of True -> t | False -> f
     """
 
-    cond: SurfaceTerm
-    then_branch: SurfaceTerm
-    else_branch: SurfaceTerm
-    location: Location
+    cond: Optional[SurfaceTerm] = None
+    then_branch: Optional[SurfaceTerm] = None
+    else_branch: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         return f"if {self.cond} then {self.then_branch} else {self.else_branch}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceConstructor(SurfaceTerm):
     """Data constructor application: Con args."""
 
-    name: str
-    args: list[SurfaceTerm]
-    location: Location
+    name: str = ""
+    args: list[SurfaceTerm] = field(default_factory=list)
 
     def __str__(self) -> str:
         if not self.args:
@@ -317,29 +315,46 @@ class SurfaceConstructor(SurfaceTerm):
         return f"({self.name} {args_str})"
 
 
-@dataclass(frozen=True)
-class SurfaceIntLit(SurfaceTerm):
-    """Integer literal: 42, -7, etc."""
+@dataclass(frozen=True, kw_only=True)
+class SurfaceLit(SurfaceTerm):
+    """Primitive literal: Int, String, Float, etc.
 
-    value: int
-    location: Location
+    Unified representation for all primitive literals.
+    The prim_type field indicates the primitive type ("Int", "String", etc.).
+
+    Attributes:
+        prim_type: The primitive type name (e.g., "Int", "String")
+        value: The literal value (int, str, float, etc.)
+    """
+
+    prim_type: str = ""
+    value: object = None
 
     def __str__(self) -> str:
+        if self.prim_type == "String":
+            return f'"{self.value}"'
         return str(self.value)
 
 
-@dataclass(frozen=True)
-class SurfaceStringLit(SurfaceTerm):
-    """String literal: "hello", "world", etc."""
+@dataclass(frozen=True, kw_only=True)
+class GlobalVar(SurfaceTerm):
+    """Global variable reference by name (after scope checking).
 
-    value: str
-    location: Location
+    Replaces SurfaceVar for global variables during scope checking.
+    Unlike ScopedVar which uses de Bruijn indices for local variables,
+    GlobalVar keeps the name and is resolved from TypeContext.globals.
+
+    Attributes:
+        name: Global variable name
+    """
+
+    name: str = ""
 
     def __str__(self) -> str:
-        return f'"{self.value}"'
+        return f"@{self.name}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceOp(SurfaceTerm):
     """Infix operator expression: left op right.
 
@@ -347,37 +362,34 @@ class SurfaceOp(SurfaceTerm):
     operation application. Operators include +, -, *, /, ==, <, >, <=, >=.
     """
 
-    left: SurfaceTerm
-    op: str  # The operator symbol: '+', '-', '*', '/', '==', '<', '>', '<=', '>='
-    right: SurfaceTerm
-    location: Location
+    left: Optional[SurfaceTerm] = None
+    op: str = ""  # The operator symbol: '+', '-', '*', '/', '==', '<', '>', '<=', '>='
+    right: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         return f"({self.left} {self.op} {self.right})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTuple(SurfaceTerm):
     """Tuple expression: (e1, e2, ..., en) - desugars to nested Pairs.
 
     Sugar for: Pair e1 (Pair e2 (... en))
     """
 
-    elements: list[SurfaceTerm]
-    location: Location
+    elements: list[SurfaceTerm] = field(default_factory=list)
 
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
         return f"({elems_str})"
 
 
-@dataclass(frozen=True)
-class SurfacePattern:
+@dataclass(frozen=True, kw_only=True)
+class SurfacePattern(SurfaceNode):
     """Pattern in a case branch: Con vars."""
 
-    constructor: str
-    vars: list[str]
-    location: Location
+    constructor: str = ""
+    vars: list[str] = field(default_factory=list)
 
     def __str__(self) -> str:
         if self.vars:
@@ -385,47 +397,44 @@ class SurfacePattern:
         return self.constructor
 
 
-@dataclass(frozen=True)
-class SurfacePatternTuple:
+@dataclass(frozen=True, kw_only=True)
+class SurfacePatternTuple(SurfaceNode):
     """Tuple pattern: (p1, p2, ..., pn) - desugars to nested Pairs.
 
     Sugar for: Pair p1 (Pair p2 (... pn))
     """
 
-    elements: list[SurfacePattern]
-    location: Location
+    elements: list[SurfacePattern] = field(default_factory=list)
 
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
         return f"({elems_str})"
 
 
-@dataclass(frozen=True)
-class SurfaceBranch:
+@dataclass(frozen=True, kw_only=True)
+class SurfaceBranch(SurfaceNode):
     """Case branch: pattern -> body."""
 
-    pattern: SurfacePattern
-    body: SurfaceTerm
-    location: Location
+    pattern: Optional[SurfacePattern] = None
+    body: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         return f"{self.pattern} -> {self.body}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceCase(SurfaceTerm):
     """Pattern matching: case scrutinee of branches."""
 
-    scrutinee: SurfaceTerm
-    branches: list[SurfaceBranch]
-    location: Location
+    scrutinee: Optional[SurfaceTerm] = None
+    branches: list[SurfaceBranch] = field(default_factory=list)
 
     def __str__(self) -> str:
         branches_str = " | ".join(str(branch) for branch in self.branches)
         return f"case {self.scrutinee} of {{ {branches_str} }}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceToolCall(SurfaceTerm):
     """Tool invocation: @tool_name arg1 arg2 ...
 
@@ -433,9 +442,8 @@ class SurfaceToolCall(SurfaceTerm):
     The tool name is resolved at runtime from the tool registry.
     """
 
-    tool_name: str
-    args: list[SurfaceTerm]
-    location: Location
+    tool_name: str = ""
+    args: list[SurfaceTerm] = field(default_factory=list)
 
     def __str__(self) -> str:
         if not self.args:
@@ -455,8 +463,8 @@ SurfaceTermRepr = Union[
     SurfaceConstructor,
     SurfaceCase,
     SurfaceToolCall,
-    SurfaceIntLit,
-    SurfaceStringLit,
+    SurfaceLit,
+    GlobalVar,
     SurfaceOp,
 ]
 
@@ -466,17 +474,18 @@ SurfaceTermRepr = Union[
 # =============================================================================
 
 
-@dataclass(frozen=True)
-class SurfacePragma:
+@dataclass(frozen=True, kw_only=True)
+class SurfacePragma(SurfaceNode):
     """Pragma annotation: {-# LLM raw_content #-}.
 
     Simplified storage - just keeps the raw string after the directive.
     Key=value parsing happens in later passes if needed.
     """
 
-    directive: str  # e.g., "LLM"
-    raw_content: str  # Raw string content after directive (e.g., "model=gpt-4 temperature=0.7")
-    location: Location
+    directive: str = ""  # e.g., "LLM"
+    raw_content: str = (
+        ""  # Raw string content after directive (e.g., "model=gpt-4 temperature=0.7")
+    )
 
     def __str__(self) -> str:
         return "{-# " + self.directive + " " + self.raw_content + " #-}"
@@ -487,30 +496,28 @@ class SurfacePragma:
 # =============================================================================
 
 
-class SurfaceDeclaration:
+class SurfaceDeclaration(SurfaceNode):
     """Base class for surface declarations."""
 
     pass
 
 
-@dataclass(frozen=True)
-class SurfaceConstructorInfo:
+@dataclass(frozen=True, kw_only=True)
+class SurfaceConstructorInfo(SurfaceNode):
     """Data constructor with optional docstring."""
 
-    name: str
-    args: list[SurfaceType]
+    name: str = ""
+    args: list[SurfaceType] = field(default_factory=list)
     docstring: str | None = None
-    location: Location = None  # type: ignore[assignment]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceDataDeclaration(SurfaceDeclaration):
     """Data type declaration: data Name params = Con1 args1 | Con2 args2 | ..."""
 
-    name: str
-    params: list[str]
-    constructors: list[SurfaceConstructorInfo]
-    location: Location
+    name: str = ""
+    params: list[str] = field(default_factory=list)
+    constructors: list[SurfaceConstructorInfo] = field(default_factory=list)
     docstring: str | None = None
     pragma: dict[str, str] | None = None
 
@@ -522,7 +529,7 @@ class SurfaceDataDeclaration(SurfaceDeclaration):
         return f"data {self.name} {params_str} = {constrs_str}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceTermDeclaration(SurfaceDeclaration):
     """Named term declaration at module level.
 
@@ -537,10 +544,9 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
         prim_op func : Type -- ^ param -> Type
     """
 
-    name: str
-    type_annotation: SurfaceType  # REQUIRED - changed from Optional
-    body: SurfaceTerm
-    location: Location = None  # type: ignore[assignment]  # noqa: RUF009
+    name: str = ""
+    type_annotation: SurfaceType | None = None  # REQUIRED - changed from Optional
+    body: Optional[SurfaceTerm] = None
     docstring: str | None = None  # -- | style, attaches to this declaration
     pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
 
@@ -548,7 +554,7 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
         return f"{self.name} : {self.type_annotation} = {self.body}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfacePrimTypeDecl(SurfaceDeclaration):
     """Primitive type declaration: prim_type Name.
 
@@ -558,8 +564,7 @@ class SurfacePrimTypeDecl(SurfaceDeclaration):
     Example: prim_type Int
     """
 
-    name: str
-    location: Location
+    name: str = ""
     docstring: str | None = None
     pragma: dict[str, str] | None = None
 
@@ -567,7 +572,7 @@ class SurfacePrimTypeDecl(SurfaceDeclaration):
         return f"prim_type {self.name}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfacePrimOpDecl(SurfaceDeclaration):
     """Primitive operation declaration: prim_op name : type.
 
@@ -581,9 +586,8 @@ class SurfacePrimOpDecl(SurfaceDeclaration):
         prim_op translate : String -> String
     """
 
-    name: str
-    type_annotation: SurfaceType
-    location: Location
+    name: str = ""
+    type_annotation: Optional[SurfaceType] = None
     docstring: str | None = None
     pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
 
@@ -596,68 +600,5 @@ SurfaceDeclarationRepr = Union[
 ]
 
 
-# =============================================================================
-# AST Comparison Helpers (for testing)
-# =============================================================================
-
-
-def equals_ignore_location(a: object, b: object) -> bool:
-    """Compare two AST nodes ignoring location fields.
-
-    This is useful for testing that different syntax produces equivalent AST.
-    Locations are ignored since they depend on source formatting.
-
-    Examples:
-        >>> from systemf.surface.types import SurfaceIntLit
-        >>> loc1 = Location("file1", 1, 1)
-        >>> loc2 = Location("file2", 5, 10)
-        >>> a = SurfaceIntLit(42, loc1)
-        >>> b = SurfaceIntLit(42, loc2)
-        >>> equals_ignore_location(a, b)
-        True
-
-        >>> c = SurfaceIntLit(43, loc1)
-        >>> equals_ignore_location(a, c)
-        False
-
-    Args:
-        a: First AST node
-        b: Second AST node
-
-    Returns:
-        True if nodes are structurally equal (ignoring location), False otherwise
-    """
-    # Different types are not equal
-    if type(a) != type(b):
-        return False
-
-    # Both None or both same non-dataclass object
-    if not hasattr(a, "__dataclass_fields__"):
-        return a == b
-
-    # Compare dataclass fields, ignoring 'location'
-    for field_name in a.__dataclass_fields__:
-        if field_name == "location":
-            continue
-
-        val_a = getattr(a, field_name)
-        val_b = getattr(b, field_name)
-
-        # Recursively compare nested structures
-        if isinstance(val_a, (list, tuple)):
-            if len(val_a) != len(val_b):
-                return False
-            for item_a, item_b in zip(val_a, val_b):
-                if not equals_ignore_location(item_a, item_b):
-                    return False
-        elif isinstance(val_a, dict):
-            if val_a != val_b:
-                return False
-        elif hasattr(val_a, "__dataclass_fields__"):
-            if not equals_ignore_location(val_a, val_b):
-                return False
-        else:
-            if val_a != val_b:
-                return False
-
-    return True
+# Note: equals_ignore_location has been moved to systemf.utils.ast_utils
+# It is re-exported here for backward compatibility.

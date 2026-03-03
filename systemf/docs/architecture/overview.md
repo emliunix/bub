@@ -6,11 +6,11 @@ This document provides a comprehensive overview of the SystemF compiler architec
 
 - [Overview](#overview)
 - [High-Level Architecture](#high-level-architecture)
+- [Multi-Pass Pipeline](#multi-pass-pipeline)
 - [Indentation-Based Syntax](#indentation-based-syntax)
 - [Pluggable Primitives System](#pluggable-primitives-system)
-- [REPL (TODO)](#repl-todo)
-- [Module System (TODO)](#module-system-todo)
-- [LLM and Tool Integration (TODO)](#llm-and-tool-integration-todo)
+- [Interactive REPL](#interactive-repl)
+- [LLM and Tool Integration](#llm-and-tool-integration-todo)
 
 ---
 
@@ -128,6 +128,88 @@ systemf/
     - Surface AST → canonical core language (name resolution)
     - Core terms → verified well-typed terms (type checking)
     - Well-typed terms → runtime values (evaluation)
+
+---
+
+## Multi-Pass Pipeline
+
+The elaboration process uses a three-phase pipeline following Idris 2's architecture:
+
+```mermaid
+graph LR
+    SD[Surface Declarations] --> P1[Phase 1: Scope Check]
+    P1 --> P2[Phase 2: Type Elaboration]
+    P2 --> P3[Phase 3: LLM Pragma Pass]
+    P3 --> CD[Core Declarations]
+```
+
+### Phase 1: Scope Checking
+
+**Input:** Surface AST (name-based)
+**Output:** Scoped AST (de Bruijn indices)
+
+The scope checker resolves names to de Bruijn indices and performs basic validation:
+- Variable binding and lookup
+- Constructor resolution
+- Scope error detection
+
+**Key Files:**
+- `src/systemf/surface/scoped/checker.py`
+- `src/systemf/surface/scoped/context.py`
+
+### Phase 2: Type Elaboration
+
+**Input:** Scoped AST
+**Output:** Core AST with types
+
+The type elaborator performs bidirectional type inference (Pierce & Turner style):
+- **Inference mode:** Synthesize types from terms
+- **Checking mode:** Verify terms against expected types
+- **Implicit instantiation:** Automatically instantiate polymorphic types
+- **Unification:** Solve type constraints
+
+**Key Files:**
+- `src/systemf/surface/inference/elaborator.py`
+- `src/systemf/surface/inference/context.py`
+- `src/systemf/surface/inference/unification.py`
+
+### Phase 3: LLM Pragma Pass
+
+**Input:** Core declarations
+**Output:** Final core declarations + LLM metadata
+
+Processes `{-# LLM ... #-}` pragmas:
+- Extracts LLM function metadata
+- Replaces bodies with `PrimOp` references
+- Registers functions with evaluator
+
+**Key Files:**
+- `src/systemf/surface/llm/pragma_pass.py`
+
+### Pipeline Orchestration
+
+```python
+# From src/systemf/surface/pipeline.py
+class ElaborationPipeline:
+    def run(self, declarations, constructors=None):
+        # Phase 1 & 2: Scope check and type elaborate
+        core_decls, ctx, global_types, new_constructors = \
+            self._elaborate_declarations(declarations, constructors)
+
+        # Phase 3: Process LLM pragmas
+        final_decls, llm_functions = \
+            self._process_llm_pragmas(declarations, core_decls, global_types)
+
+        # Build module
+        return Module(...)
+```
+
+### Benefits
+
+- **Clear separation of concerns:** Each phase has one responsibility
+- **Better error messages:** Errors can be attributed to specific phases
+- **Easier testing:** Each phase can be tested independently
+- **Extensibility:** New phases can be added without modifying existing code
 
 ---
 
@@ -555,52 +637,76 @@ prim_op int_plus : Int -> Int -> Int
 
 ---
 
-## REPL (TODO)
+## Interactive REPL
 
-!!! warning "Under Design"
-    This section is under design. The module system was cancelled in favor of a file-based REPL approach.
+The REPL (`systemf/src/systemf/eval/repl.py`) provides an interactive environment for System F.
 
-### Planned Features
+### Features
 
-- Interactive evaluation of SystemF expressions
-- Persistent definitions across sessions
-- File loading with `load "filename.sf"`
-- Type inspection with `:type expr`
-- Help system with `:help`
+- **Expression Evaluation**: Type-check and evaluate expressions
+- **Definition Loading**: Load definitions from files with `:load`
+- **Prelude Support**: Automatically loads `prelude.sf` with `-p` flag
+- **Multiline Input**: Support for multiline declarations with `:{` and `:}`
+- **Environment Inspection**: View current bindings with `:env`
 
-### Current Status
+### Commands
 
-- Basic REPL exists in `systemf/src/systemf/eval/repl.py`
-- Supports term definitions and type inspection
-- Module loading needs redesign
+| Command | Description |
+|---------|-------------|
+| `:quit` `:q` | Exit REPL |
+| `:help` `:h` | Show help |
+| `:env` | Show current environment |
+| `:load <file>` | Load definitions from file |
+| `:{` | Start multiline input |
+| `:}` | End multiline input |
 
-### Open Questions
+### Example Session
 
-- Should modules be first-class values or just file loading?
-- How to handle namespacing in REPL vs. file mode?
-- Interactive debugging features?
+```systemf
+$ uv run python -m systemf.eval.repl -p prelude.sf
 
----
+System F REPL v0.1.0
+Loading prelude... (59 definitions)
 
-## Module System (TODO)
+> 42
+it : __ = 42
 
-!!! warning "Design Cancelled"
-    This section was under design but Task 32 was cancelled. A new approach is needed.
+> id : ∀a. a → a = Λa. λx:a. x
+id : ∀a. a → a = <function>
 
-### Current Direction
+> id [Int] 42
+it : Int = 42
 
-Instead of a traditional module system, consider:
+> :{
+| not : Bool → Bool = λb.
+|   case b of
+|     True → False
+|     False → True
+| :}
+not : Bool → Bool = <function>
+```
 
-- **File-based loading**: `load "path/to/file.sf"` loads and evaluates
-- **Implicit modules**: Each file is a module; definitions become available
-- **Simple namespacing**: Files can shadow or be shadowed
+### Architecture
 
-### Open Questions
+```mermaid
+graph TD
+    Input[User Input] --> Parse[Parse Declaration or Expression]
+    Parse --> Pipeline[Elaboration Pipeline]
+    Pipeline --> Success{Success?}
+    Success -->|Yes| Eval[Evaluate]
+    Success -->|No| Error[Display Error]
+    Eval --> Display[Display Result]
+    Display --> Accumulate[Accumulate Definitions]
+```
 
-- How to handle name conflicts between files?
-- Should there be explicit export/import lists?
-- How to support library distribution?
-- Cyclic dependencies?
+### Implementation Details
+
+- **Persistent Environments**: `global_values`, `global_types`, `global_terms` persist across inputs
+- **Prelude Loading**: Loads `prelude.sf` on startup (59 definitions including primitives)
+- **Expression Mode**: Falls back to expression parsing if declaration parsing fails
+- **Type Display**: Shows inferred types using meta-variable notation (`__`)
+
+
 
 ---
 

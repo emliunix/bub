@@ -6,32 +6,28 @@ This is Phase 1 of the elaboration pipeline.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from systemf.surface.scoped.context import ScopeContext
 from systemf.surface.scoped.errors import UndefinedVariableError
-
-if TYPE_CHECKING:
-    from systemf.surface.types import (
-        SurfaceAbs,
-        SurfaceAnn,
-        SurfaceApp,
-        SurfaceCase,
-        SurfaceConstructor,
-        SurfaceDeclaration,
-        SurfaceIf,
-        SurfaceIntLit,
-        SurfaceLet,
-        SurfaceOp,
-        SurfaceStringLit,
-        SurfaceTerm,
-        SurfaceTermDeclaration,
-        SurfaceToolCall,
-        SurfaceTuple,
-        SurfaceTypeAbs,
-        SurfaceTypeApp,
-        SurfaceVar,
-    )
+from systemf.surface.types import (
+    GlobalVar,
+    SurfaceAbs,
+    SurfaceAnn,
+    SurfaceApp,
+    SurfaceCase,
+    SurfaceConstructor,
+    SurfaceDeclaration,
+    SurfaceIf,
+    SurfaceLet,
+    SurfaceLit,
+    SurfaceOp,
+    SurfaceTerm,
+    SurfaceTermDeclaration,
+    SurfaceToolCall,
+    SurfaceTuple,
+    SurfaceTypeAbs,
+    SurfaceTypeApp,
+    SurfaceVar,
+)
 
 
 class ScopeChecker:
@@ -72,67 +68,57 @@ class ScopeChecker:
         Raises:
             UndefinedVariableError: If a variable is not in scope
         """
-        # Import here to avoid circular imports
         from systemf.surface.types import (
             ScopedAbs,
             ScopedVar,
-            SurfaceAbs,
-            SurfaceAnn,
-            SurfaceApp,
-            SurfaceCase,
-            SurfaceConstructor,
-            SurfaceIf,
-            SurfaceIntLit,
-            SurfaceLet,
-            SurfaceOp,
-            SurfaceStringLit,
-            SurfaceToolCall,
-            SurfaceTuple,
-            SurfaceTypeAbs,
-            SurfaceTypeApp,
-            SurfaceVar,
         )
 
         match term:
-            case SurfaceVar(name, location):
+            case SurfaceVar(location=location, name=name):
                 # Convert name-based variable to index-based
-                try:
-                    index = ctx.lookup_term(name)
-                    return ScopedVar(index, name, location)
-                except NameError:
-                    # Variable not found - report with available suggestions
-                    available = self._suggest_similar_names(name, ctx)
-                    raise UndefinedVariableError(
-                        name=name,
-                        location=location,
-                        available=available,
-                        term=term,
-                    )
+                # Check locals first (shadowing: local > global)
+                index = ctx.lookup_term(name)
+                if index is not None:
+                    return ScopedVar(index=index, debug_name=name, location=location)
+                # Not a local - check if it's a global variable
+                if ctx.is_global(name):
+                    # Global variables keep their name (not DBI)
+                    return GlobalVar(name=name, location=location)
+                # Variable not found - report with available suggestions
+                available = self._suggest_similar_names(name, ctx)
+                raise UndefinedVariableError(
+                    name=name,
+                    location=location,
+                    available=available,
+                    term=term,
+                )
 
-            case SurfaceAbs(var, var_type, body, location, _):
+            case SurfaceAbs(location=location, var=var, var_type=var_type, body=body):
                 # Extend context with parameter and check body
                 new_ctx = ctx.extend_term(var)
                 scoped_body = self.check_term(body, new_ctx)
-                return ScopedAbs(var, var_type, scoped_body, location)
+                return ScopedAbs(
+                    var_name=var, var_type=var_type, body=scoped_body, location=location
+                )
 
-            case SurfaceApp(func, arg, location):
+            case SurfaceApp(location=location, func=func, arg=arg):
                 # Recursively check function and argument
                 scoped_func = self.check_term(func, ctx)
                 scoped_arg = self.check_term(arg, ctx)
-                return SurfaceApp(scoped_func, scoped_arg, location)
+                return SurfaceApp(func=scoped_func, arg=scoped_arg, location=location)
 
-            case SurfaceTypeAbs(var, body, location):
+            case SurfaceTypeAbs(location=location, var=var, body=body):
                 # Extend type context and check body
                 new_ctx = ctx.extend_type(var)
                 scoped_body = self.check_term(body, new_ctx)
-                return SurfaceTypeAbs(var, scoped_body, location)
+                return SurfaceTypeAbs(var=var, body=scoped_body, location=location)
 
-            case SurfaceTypeApp(func, type_arg, location):
+            case SurfaceTypeApp(location=location, func=func, type_arg=type_arg):
                 # Check function term, type args are handled separately
                 scoped_func = self.check_term(func, ctx)
-                return SurfaceTypeApp(scoped_func, type_arg, location)
+                return SurfaceTypeApp(func=scoped_func, type_arg=type_arg, location=location)
 
-            case SurfaceLet(bindings, body, location):
+            case SurfaceLet(location=location, bindings=bindings, body=body):
                 # Process bindings sequentially (each can refer to previous)
                 new_ctx = ctx
                 scoped_bindings = []
@@ -144,21 +130,28 @@ class ScopeChecker:
                     new_ctx = new_ctx.extend_term(var_name)
                 # Check body with all bindings in scope
                 scoped_body = self.check_term(body, new_ctx)
-                return SurfaceLet(scoped_bindings, scoped_body, location)
+                return SurfaceLet(bindings=scoped_bindings, body=scoped_body, location=location)
 
-            case SurfaceAnn(term_inner, type_, location):
+            case SurfaceAnn(location=location, term=term_inner, type=type_):
                 # Check inner term, preserve annotation
                 scoped_term = self.check_term(term_inner, ctx)
-                return SurfaceAnn(scoped_term, type_, location)
+                return SurfaceAnn(term=scoped_term, type=type_, location=location)
 
-            case SurfaceIf(cond, then_branch, else_branch, location):
+            case SurfaceIf(
+                location=location, cond=cond, then_branch=then_branch, else_branch=else_branch
+            ):
                 # Check all branches
                 scoped_cond = self.check_term(cond, ctx)
                 scoped_then = self.check_term(then_branch, ctx)
                 scoped_else = self.check_term(else_branch, ctx)
-                return SurfaceIf(scoped_cond, scoped_then, scoped_else, location)
+                return SurfaceIf(
+                    cond=scoped_cond,
+                    then_branch=scoped_then,
+                    else_branch=scoped_else,
+                    location=location,
+                )
 
-            case SurfaceCase(scrutinee, branches, location):
+            case SurfaceCase(location=location, scrutinee=scrutinee, branches=branches):
                 # Check scrutinee and each branch
                 from systemf.surface.types import SurfaceBranch
 
@@ -171,34 +164,36 @@ class ScopeChecker:
                         branch_ctx = branch_ctx.extend_term(var_name)
                     scoped_body = self.check_term(branch.body, branch_ctx)
                     scoped_branches.append(
-                        SurfaceBranch(branch.pattern, scoped_body, branch.location)
+                        SurfaceBranch(
+                            pattern=branch.pattern, body=scoped_body, location=branch.location
+                        )
                     )
                 return SurfaceCase(
                     scrutinee=scoped_scrutinee, branches=scoped_branches, location=location
                 )
 
-            case SurfaceConstructor(name, args, location):
+            case SurfaceConstructor(location=location, name=name, args=args):
                 # Recursively check constructor arguments
                 scoped_args = [self.check_term(arg, ctx) for arg in args]
-                return SurfaceConstructor(name, scoped_args, location)
+                return SurfaceConstructor(name=name, args=scoped_args, location=location)
 
-            case SurfaceTuple(elements, location):
+            case SurfaceTuple(location=location, elements=elements):
                 # Recursively check tuple elements
                 scoped_elements = [self.check_term(elem, ctx) for elem in elements]
-                return SurfaceTuple(scoped_elements, location)
+                return SurfaceTuple(elements=scoped_elements, location=location)
 
-            case SurfaceOp(left, op, right, location):
+            case SurfaceOp(location=location, left=left, op=op, right=right):
                 # Check both operands
                 scoped_left = self.check_term(left, ctx)
                 scoped_right = self.check_term(right, ctx)
-                return SurfaceOp(scoped_left, op, scoped_right, location)
+                return SurfaceOp(left=scoped_left, op=op, right=scoped_right, location=location)
 
-            case SurfaceToolCall(tool_name, args, location):
+            case SurfaceToolCall(location=location, tool_name=tool_name, args=args):
                 # Recursively check tool call arguments
                 scoped_args = [self.check_term(arg, ctx) for arg in args]
-                return SurfaceToolCall(tool_name, scoped_args, location)
+                return SurfaceToolCall(tool_name=tool_name, args=scoped_args, location=location)
 
-            case SurfaceIntLit(_, _) | SurfaceStringLit(_, _):
+            case SurfaceLit():
                 # Literals don't contain variables, return unchanged
                 return term
 
@@ -284,7 +279,14 @@ class ScopeChecker:
         )
 
         match decl:
-            case SurfaceTermDeclaration(name, type_annotation, body, location, docstring, pragma):
+            case SurfaceTermDeclaration(
+                location=location,
+                name=name,
+                type_annotation=type_annotation,
+                body=body,
+                docstring=docstring,
+                pragma=pragma,
+            ):
                 # Scope-check the body with current context (globals are already in ctx)
                 scoped_body = self.check_term(body, ctx)
                 return SurfaceTermDeclaration(
@@ -296,11 +298,7 @@ class ScopeChecker:
                     pragma=pragma,
                 )
 
-            case (
-                SurfaceDataDeclaration(_, _, _, _, _, _)
-                | SurfacePrimTypeDecl(_, _, _, _)
-                | SurfacePrimOpDecl(_, _, _, _, _)
-            ):
+            case SurfaceDataDeclaration() | SurfacePrimTypeDecl() | SurfacePrimOpDecl():
                 # These don't contain term-level variable references
                 return decl
 
