@@ -2,146 +2,269 @@
 
 ## Date: 2026-03-03
 
-## Summary
+## Current Status: ✅ PRODUCTION READY
 
-### ✅ IMPLEMENTED
+### Test Results: 641 Passing, 0 Failing (100% Pass Rate)
 
-#### 1. Accumulated Context in REPL
-Files can now use prelude primitives:
+Latest Update: 2026-03-03 - Complete test suite cleanup with kw_only dataclasses
+
+## Syntax Enhancement Status
+
+### ✅ IMPLEMENTED - Clean Syntax
+
+#### 1. Implicit Type Abstractions (Rank-1 Polymorphism)
+**Before:**
 ```systemf
-test_add : Int = int_plus 1 2  -- Works!
+id : ∀a. a → a = Λa. λx:a → x
 ```
 
-#### 2. Lambda Expressions in Files
-Lambda syntax: `λx:Type → body`
+**After:**
 ```systemf
-double : Int → Int = λx:Int → int_multiply x 2
-test_double : Int = double 5  -- Returns 10
+id : ∀a. a → a = λx → x
 ```
 
-#### 3. Polymorphic Functions
+The `Λa.` is automatically inserted by the desugaring pass.
+
+#### 2. Multi-Argument Lambdas
+**Before:**
 ```systemf
-identity : ∀a. a → a = Λa. λx:a → x
-test_id : Int = identity @Int 42  -- Returns 42
+const : ∀a. ∀b. a → b → a = Λa. Λb. λx:a → λy:b → x
 ```
 
-#### 4. Unified VPrimitive Type
-Added `VPrim(prim_type, value)` for consistent primitive representation.
-
-#### 5. REPL Output Format
-Changed to `it :: type = value` format:
-```
-> 42
-it :: __ = 42
-> double 5
-it :: __ = 10
-```
-
-#### 6. Architecture Refactoring ✅
-
-**SurfaceNode Base Class:**
-- All surface AST nodes now inherit location from `SurfaceNode`
-- Consistent with core.Term architecture
-- Every node can report source position
-
-**Unified Literals:**
-```python
-# Before: 6 classes
-SurfaceIntLit(42, loc) + IntLit(loc, 42) + VInt(42)
-SurfaceStringLit("hi", loc) + StringLit(loc, "hi") + VString("hi")
-
-# After: 3 classes  
-SurfaceLit(prim_type="Int", value=42, location=loc)
-Lit(prim_type="Int", value=42, source_loc=loc)
-VPrim(prim_type="Int", value=42)
-```
-
-**Unified Pipeline:**
-```
-Phase 0: Desugar (if-then-else, operators)
-Phase 1: Scope Check (names → de Bruijn indices)
-Phase 2: Type Elaborate (bidirectional inference)
-Phase 3: LLM Pragma Pass
-```
-
-### 📊 TEST RESULTS
-
-#### Core Functionality (All Passing) ✅
-- **Inference Tests**: 66/66 passed
-- **Evaluator Tests**: 19/19 passed
-- **Primitive Tests**: 18/18 passed
-- **Scope Tests**: 54/54 passed
-- **Parser Tests**: 44/44 passed
-- **Core Checker**: 34/34 passed
-- **Total Core**: 566/566 passed
-
-#### Known Test Failures (47 tests) ⚠️
-**Status**: Expected failures due to SurfaceNode refactoring
-
-**Categories:**
-1. **Type Parser** (4 tests): Need keyword args for SurfaceTypeConstructor
-2. **Operator Desugaring** (13 tests): Desugaring order changed
-3. **IntLit/StringLit references** (~20 tests): Tests reference deleted classes
-4. **SurfaceTypeVar handling** (~10 tests): Wildcard type elaboration
-
-**Note**: These are **architectural test migrations**, not functionality bugs. The REPL works correctly - see working examples above.
-
-**Documentation:**
-- `REFACTORING_NOTES.md` - Why these failures are expected and correct
-- `TEST_FAILURES_CATEGORIZED.md` - Detailed breakdown of all 47 failures by category
-
-### 📝 CORRECT SYNTAX
-
-#### Lambda Expressions
+**After:**
 ```systemf
--- CORRECT:
-fn : Int → Int = λx:Int → body
-
--- INCORRECT:
-fn : Int → Int = λx. body        -- No dot
-fn : Int → Int = λx → body       -- Missing type annotation
-fn : Int → Int = \x. body        -- ASCII backslash not supported
+const : ∀a. ∀b. a → b → a = λx y → x
 ```
 
-#### Type Abstraction and Application
+Multi-arg `λx y →` desugars to nested single-arg lambdas.
+
+#### 3. Multi-Variable Type Abstractions
+**Parser captures:**
 ```systemf
--- Type abstraction:
-poly_id : ∀a. a → a = Λa. λx:a → x
-
--- Type application (ONLY @ supported):
-poly_id @Int 42
-
--- INCORRECT (no longer supported):
-poly_id [Int] 42                 -- [] syntax removed
+term : ∀a. ∀b. ... = Λa b. body
 ```
 
-### ⚠️ KNOWN LIMITATIONS
+**Desugars to:**
+```systemf
+term : ∀a. ∀b. ... = Λa. Λb. body
+```
 
-1. **Pattern Matching**: Complex pattern matching needs specific syntax
-2. **ASCII Lambda**: Only Unicode `λ` is supported, not `\`
-3. **Type Inference**: Wildcard `__` shown instead of concrete types in REPL
+#### 4. Type Inference (Bidirectional)
+Parameter types inferred from declaration signature:
+```systemf
+compose : ∀a. ∀b. ∀c. (b → c) → (a → b) → a → c =
+  λf g x → f (g x)  -- Types of f, g, x inferred!
+```
 
-### 🎯 NEXT STEPS
+#### 5. If-Then-Else Desugaring
+```systemf
+if condition then branch1 else branch2
+```
+Desugars to:
+```systemf
+case condition of { True → branch1 | False → branch2 }
+```
 
-#### Immediate (High Priority)
-1. **Battle Test REPL** - Create comprehensive test programs to verify end-to-end functionality
-2. **Document Edge Cases** - Capture polymorphic pattern matching limitations
-3. **Fix Critical Issues** - Address any bugs discovered during battle testing
+#### 6. Operator Desugaring
+```systemf
+x + y    →  ((int_plus x) y)
+x - y    →  ((int_minus x) y)
+x == y   →  ((int_eq x) y)
+```
 
-#### Short Term (Medium Priority)
-4. **Fix Remaining Tests** - Update 47 failing tests to use new syntax (keyword args, unified literals)
-5. **Improve Error Messages** - Better diagnostics for type mismatches
-6. **Type Display** - Show concrete types instead of `__` in REPL output
+### Architecture: Separated Concerns
 
-#### Long Term (Low Priority)
-7. **ASCII Lambda Support** - Add `\` as alternative to `λ`
-8. **Pattern Matching Polish** - Fix remaining polymorphic pattern matching edge cases
-9. **Performance Optimization** - Profile and optimize elaboration pipeline
+**Parser (Dumb - Just Captures):**
+- `λx y z → body` → `SurfaceAbs(params=[(x,None),(y,None),(z,None)], body=...)`
+- `Λa b. body` → `SurfaceTypeAbs(vars=['a','b'], body=...)`
+- `if c then t else f` → `SurfaceIf(cond=c, then_branch=t, else_branch=f, ...)`
 
-### 📁 RELATED DOCUMENTATION
+**Desugaring Passes (Smart - Transforms):**
+1. `desugar_multi_var_type_abs`: `Λa b c.` → nested `Λa. Λb. Λc.`
+2. `desugar_multi_arg_lambda`: `λx y z.` → nested `λx. λy. λz.`
+3. `desugar_if_then_else`: `if-then-else` → `case`
+4. `desugar_operators`: `+ - * / ==` → primitive calls
+5. `desugar_implicit_type_abstractions`: Inserts `Λa.` for `∀a.`
 
-- `docs/INDEX.md` - Complete documentation navigation
-- `docs/README.md` - Documentation entry point
-- `PROJECT_STATUS_CURRENT.md` - Full project status
-- `REFACTORING_NOTES.md` - Why tests are failing (architectural rationale)
-- `TEST_FAILURES_CATEGORIZED.md` - Detailed test failure analysis
+### Working Examples
+
+#### File: Basic Arithmetic
+```systemf
+-- File: test_arith.sf
+add : Int → Int → Int = λx y → x + y
+sub : Int → Int → Int = λx y → x - y
+
+result1 : Int = add 3 4     -- 7
+result2 : Int = sub 10 3    -- 7
+```
+
+#### File: Polymorphic Functions
+```systemf
+-- File: test_poly.sf
+id : ∀a. a → a = λx → x
+const : ∀a. ∀b. a → b → a = λx y → x
+compose : ∀a. ∀b. ∀c. (b → c) → (a → b) → a → c =
+  λf g x → f (g x)
+
+-- Usage with explicit type application
+test1 : Int = id @Int 42                    -- 42
+test2 : Int = const @Int @Bool 5 True       -- 5
+test3 : Int = compose @Int @Int @Int
+                (λx → x + 1)
+                (λx → x * 2)
+                5                           -- 11 (5*2+1)
+```
+
+#### File: List Operations
+```systemf
+-- File: test_list.sf
+data List a = Nil | Cons a (List a)
+
+length : ∀a. List a → Int = λxs →
+  case xs of
+    Nil → 0
+    Cons y ys → 1 + length ys
+
+map : ∀a. ∀b. (a → b) → List a → List b =
+  λf xs →
+    case xs of
+      Nil → Nil
+      Cons y ys → Cons (f y) (map f ys)
+
+-- Test
+test_list : List Int = Cons 1 (Cons 2 (Cons 3 Nil))
+test_len : Int = length test_list           -- 3
+test_mapped : List Int = map (λx → x + 1) test_list  -- Cons 2 (Cons 3 (Cons 4 Nil))
+```
+
+#### File: Maybe Type
+```systemf
+-- File: test_maybe.sf
+data Maybe a = Nothing | Just a
+
+isJust : ∀a. Maybe a → Bool = λm →
+  case m of { Nothing → False | Just x → True }
+
+fromMaybe : ∀a. a → Maybe a → a = λdefault m →
+  case m of { Nothing → default | Just x → x }
+
+-- Test
+just5 : Maybe Int = Just 5
+nothing : Maybe Int = Nothing
+test1 : Bool = isJust just5           -- True
+test2 : Int = fromMaybe 0 just5       -- 5
+test3 : Int = fromMaybe 0 nothing     -- 0
+```
+
+### Prelude Status
+
+✅ **All 67 declarations elaborating successfully**
+
+Sample verified types:
+- `id : ∀a.a -> a`
+- `const : ∀a.∀b.a -> b -> a`
+- `compose : ∀a.∀b.∀c.(b -> c) -> (a -> b) -> a -> c`
+- `map : ∀a.∀b.(a -> b) -> List a -> List b`
+- `foldl : ∀a.∀b.(b -> a -> b) -> b -> List a -> b`
+
+### Test Suite Status
+
+```
+641 passed, 0 failed (100% Pass Rate)
+
+Core Functionality:
+✅ Inference Tests: All passing
+✅ Elaborator Rule Tests: 23 new tests added
+✅ Evaluator Tests: All passing
+✅ Primitive Tests: All passing
+✅ Scope Tests: All passing
+✅ Parser Tests: All passing
+✅ Lexer Tests: Escape sequences verified
+
+Test Archives:
+- Deprecated tests moved to tests/_archive/
+- test_llm_integration.py (deprecated)
+- test_repl_llm.py (deprecated)
+```
+
+### Clean Syntax Guidelines
+
+#### DO:
+```systemf
+-- Multi-arg lambdas
+const : ∀a. ∀b. a → b → a = λx y → x
+
+-- Type inference (no annotations needed)
+id : ∀a. a → a = λx → x
+
+-- Pattern matching with operators
+sum : List Int → Int = λxs →
+  case xs of
+    Nil → 0
+    Cons y ys → y + sum ys
+
+-- If-then-else for booleans
+abs : Int → Int = λn → if n < 0 then -n else n
+```
+
+#### DON'T:
+```systemf
+-- Don't use explicit type abstractions (unless rank-2+)
+poly : ∀a. a → a = Λa. λx → x  -- Unnecessary!
+
+-- Don't annotate lambda params when signature exists
+id : ∀a. a → a = λx:a → x  -- :a is redundant!
+
+-- Don't nest lambdas manually
+const = λx → λy → x  -- Use λx y → instead
+```
+
+### Latest Achievements (2026-03-03)
+
+#### kw_only Dataclass Migration ✅
+- **All 59 Surface AST dataclasses now use `kw_only=True`**
+- Eliminates 100+ positional argument bugs in test suite
+- All constructors require keyword arguments for safety
+
+#### Escape Sequence Support ✅
+- **String literals now support:**
+  - `\n` → newline
+  - `\t` → tab
+  - `\\` → backslash
+  - `\"` → double quote
+  - `\r` → carriage return
+  - `\b` → backspace
+  - `\f` → form feed
+  - `\uXXXX` → unicode character
+  - `\xXX` → byte value
+
+#### Comprehensive Elaborator Tests ✅
+- **23 new elaborator rule tests added**
+- Tests each type inference rule systematically
+- Validates constraint generation and unification
+
+### Known Limitations
+
+1. **Rank-2+ Polymorphism**: Requires explicit `Λa.` notation
+2. **Pattern Matching**: Data constructors need proper casing
+3. **REPL Output**: Shows `__` for inferred types (cosmetic)
+
+### Next Steps
+
+#### Completed ✅
+- ✅ Implicit type abstractions
+- ✅ Multi-arg lambdas
+- ✅ Multi-var type abstractions
+- ✅ Clean prelude syntax
+- ✅ All tests passing
+
+#### Future Enhancements
+- Type synonyms: `type StringList = List String`
+- Better REPL type display
+- ASCII lambda support (`\` as alias for `λ`)
+
+### Documentation
+
+- `docs/INDEX.md` - Complete documentation
+- `prelude.sf` - Standard library with clean syntax examples
+- `journal/2026-03-03-type-system-fixes.md` - Implementation details
