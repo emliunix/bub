@@ -48,7 +48,7 @@ class Global(Term):
     # source_loc inherited from Term
 
     def __str__(self) -> str:
-        return f"@{self.name}"
+        return self.name
 
 
 @dataclass(frozen=True)
