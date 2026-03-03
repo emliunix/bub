@@ -249,6 +249,22 @@ const = λx → λy → x  -- Use λx y → instead
 2. **Pattern Matching**: Data constructors need proper casing
 3. **REPL Output**: Shows `__` for inferred types (cosmetic)
 
+### Unsolved Architectural Questions
+
+#### 1. Binding Semantics: Early vs Late
+**Current**: Late binding (Global terms store names, resolved at evaluation time)
+- Pros: Simple implementation, allows redefinition to affect all code
+- Cons: Different from GHCi semantics, closures don't capture values
+
+**Alternative**: Early binding (capture values at elaboration time)
+- Pros: Matches GHCi, intuitive for users
+- Cons: Requires explicit handling of recursive definitions
+
+**Research Direction**: Isorecursive types with pack/unpack
+- Other languages use isorecursive type encoding for recursion
+- Could provide cleaner semantics than current placeholder trick
+- Need to investigate: `μX.T` with `fold`/`unfold` operations
+
 ### Next Steps
 
 #### Completed ✅
