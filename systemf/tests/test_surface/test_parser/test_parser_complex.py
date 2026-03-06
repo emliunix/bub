@@ -144,7 +144,7 @@ class TestMixedExplicitAndLayout:
 }"""
         tokens = lex(source)
 
-        types = [t.type if hasattr(t, "type") else str(type(t).__name__) for t in tokens]
+        types = [str(t) for t in tokens]
 
         # Check braces are present
         assert any("LBRACE" in str(t) or "{" in str(t) for t in types)

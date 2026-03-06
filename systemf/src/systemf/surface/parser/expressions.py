@@ -4,7 +4,7 @@ Implements expression parsers using the new helper combinators with explicit
 constraint passing (Idris2-style layout-aware parsing).
 
 Parsers implemented:
-- Token matching helpers (match_token, match_keyword, match_symbol)
+- Token matching helper (typed match_token)
 - Atom parsers (variable, constructor, literal, paren)
 - Lambda and type abstraction parsers
 - Application parser (left-associative)
@@ -13,11 +13,10 @@ Parsers implemented:
 
 from __future__ import annotations
 
-from typing import Optional, TypeVar
-import parsy
-from parsy import Parser as P, Result, generate, alt, fail, seq
+from typing import TypeVar, cast
 
-from systemf.surface.parser.type_parser import type_app_parser, type_atom_parser, type_parser
+from parsy import Parser as P
+from parsy import Result, alt, fail, generate
 from systemf.surface.parser.helpers import (
     AfterPos,
     AnyIndent,
@@ -27,109 +26,118 @@ from systemf.surface.parser.helpers import (
     block_entries,
     check_valid,
     column,
+    match_token,
     must_continue,
 )
+from systemf.surface.parser.type_parser import type_app_parser, type_parser
 from systemf.surface.parser.types import (
-    TokenBase,
-    KeywordToken,
-    OperatorToken,
+    AndToken,
+    AppendToken,
+    ArrowToken,
+    CaseToken,
+    ColonToken,
+    CommaToken,
     DelimiterToken,
-    DocstringType,
+    DotToken,
+    ElseToken,
+    EqToken,
+    GeToken,
+    GtToken,
+    IdentifierToken,
+    IfToken,
+    InToken,
+    KeywordToken,
+    LambdaToken,
+    LeftParenToken,
+    LeToken,
+    LetToken,
+    LtToken,
+    MinusToken,
+    NeToken,
+    NumberToken,
+    OfToken,
+    OperatorToken,
+    OrToken,
+    PlusToken,
+    RightParenToken,
+    SlashToken,
+    StarToken,
+    StringToken,
+    ThenToken,
+    TokenBase,
+    TypeLambdaToken,
 )
 from systemf.surface.types import (
-    SurfaceTerm,
-    SurfaceVar,
     SurfaceAbs,
+    SurfaceAnn,
     SurfaceApp,
+    SurfaceBranch,
+    SurfaceCase,
+    SurfaceIf,
+    SurfaceLet,
+    SurfaceLit,
+    SurfaceOp,
+    SurfacePattern,
+    SurfacePatternTuple,
+    SurfaceTerm,
+    SurfaceTuple,
+    SurfaceType,
     SurfaceTypeAbs,
     SurfaceTypeApp,
-    SurfaceLit,
-    SurfaceAnn,
-    SurfaceType,
-    SurfaceCase,
-    SurfaceBranch,
-    SurfacePattern,
-    SurfaceLet,
-    SurfaceIf,
-    SurfaceOp,
-    SurfaceTuple,
-    SurfacePatternTuple,
+    SurfaceVar,
 )
 
-# Type variable for generic parsers
-T = TypeVar("T")
+# Type variable for generic token parsers
+T = TypeVar("T", bound=TokenBase)
+
 
 # =============================================================================
-# Token Matching Helpers
+# Keyword and Symbol Matchers
 # =============================================================================
 
 
-def match_token(token_type: str) -> P[TokenBase]:
-    """Match a token of the given type.
+def match_keyword_value(value: str) -> P[KeywordToken]:
+    """Match a generic KeywordToken with an exact keyword value."""
 
-    Args:
-        token_type: The token type to match (e.g., "IDENT", "NUMBER")
-
-    Returns:
-        Parser that returns the matched token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, f"expected {token_type}")
-        token = tokens[index]
-        if token.type == token_type:
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected {token_type}, got {token.type}")
+    @generate
+    def parser():
+        token = yield match_token(KeywordToken)
+        if token.keyword != value:
+            yield fail(f"expected keyword '{value}', got '{token.keyword}'")
+        return token
 
     return parser
 
 
-def match_keyword(value: str) -> P[KeywordToken]:
-    """Match a keyword token with the given value.
+def match_operator(value: str) -> P[OperatorToken]:
+    """Match an operator token with an exact operator string."""
 
-    Args:
-        value: The keyword to match (e.g., "let", "case")
+    @generate
+    def parser():
+        token = yield match_token(OperatorToken)
+        if token.operator != value:
+            yield fail(f"expected operator '{value}', got '{token.operator}'")
+        return token
 
-    Returns:
-        Parser that returns the matched keyword token
-    """
+    return parser
 
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, f"expected keyword '{value}'")
-        token = tokens[index]
-        if isinstance(token, KeywordToken) and token.keyword == value:
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected keyword '{value}', got {token.type}")
+
+def match_delimiter(value: str) -> P[DelimiterToken]:
+    """Match a delimiter token with an exact delimiter string."""
+
+    @generate
+    def parser():
+        token = yield match_token(DelimiterToken)
+        if token.delimiter != value:
+            yield fail(f"expected delimiter '{value}', got '{token.delimiter}'")
+        return token
 
     return parser
 
 
 def match_symbol(value: str) -> P[OperatorToken | DelimiterToken]:
-    """Match an operator or delimiter token with the given value.
-
-    Args:
-        value: The symbol to match (e.g., "→", "(", ")")
-
-    Returns:
-        Parser that returns the matched operator/delimiter token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, f"expected symbol '{value}'")
-        token = tokens[index]
-        if isinstance(token, OperatorToken) and token.operator == value:
-            return Result.success(index + 1, token)
-        if isinstance(token, DelimiterToken) and token.delimiter == value:
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected symbol '{value}'")
-
-    return parser
+    """Match an operator or delimiter token with the given value."""
+    return cast(P[OperatorToken | DelimiterToken], match_operator(value) | match_delimiter(value))
 
 
 # =============================================================================
@@ -137,28 +145,27 @@ def match_symbol(value: str) -> P[OperatorToken | DelimiterToken]:
 # =============================================================================
 
 # Arithmetic operators
-PLUS = match_token("PLUS")
-MINUS = match_token("MINUS")
-STAR = match_token("STAR")
-SLASH = match_token("SLASH")
+PLUS = match_token(PlusToken)
+MINUS = match_token(MinusToken)
+STAR = match_token(StarToken)
+SLASH = match_token(SlashToken)
 
 # Comparison operators
-EQ = match_token("EQ")  # ==
-NE = match_token("NE")  # /=
-LT = match_token("LT")  # <
-GT = match_token("GT")  # >
-LE = match_token("LE")  # <=
-GE = match_token("GE")  # >=
+EQ = match_token(EqToken)  # ==
+NE = match_token(NeToken)  # /=
+LT = match_token(LtToken)  # <
+GT = match_token(GtToken)  # >
+LE = match_token(LeToken)  # <=
+GE = match_token(GeToken)  # >=
 
 # Logical operators
-AND = match_token("AND")  # &&
-OR = match_token("OR")  # ||
+AND = match_token(AndToken)  # &&
+OR = match_token(OrToken)  # ||
 
 # String concatenation
-APPEND = match_token("APPEND")  # ++
+APPEND = match_token(AppendToken)  # ++
 
 
-# =============================================================================
 # =============================================================================
 # Atom Parsers (no constraint needed)
 # =============================================================================
@@ -173,7 +180,7 @@ def variable_parser() -> P[SurfaceVar]:
 
     @generate
     def parser():
-        token = yield match_token("IDENT")
+        token = yield match_token(IdentifierToken)
         return SurfaceVar(name=token.value, location=token.location)
 
     return parser
@@ -189,14 +196,14 @@ def literal_parser() -> P[SurfaceLit]:
     @generate
     def parser():
         # Try integer literal first
-        num_token = yield match_token("NUMBER").optional()
+        num_token = yield match_token(NumberToken).optional()
         if num_token is not None:
             return SurfaceLit(
                 prim_type="Int", value=int(num_token.value), location=num_token.location
             )
 
         # Try string literal
-        str_token = yield match_token("STRING").optional()
+        str_token = yield match_token(StringToken).optional()
         if str_token is not None:
             return SurfaceLit(
                 prim_type="String", value=str_token.value, location=str_token.location
@@ -221,7 +228,7 @@ def tuple_parser() -> P[SurfaceTerm]:
     def parser():
         from systemf.surface.types import SurfaceTuple
 
-        open_paren = yield match_symbol("(")
+        open_paren = yield match_token(LeftParenToken)
         loc = open_paren.location
 
         # Parse first element
@@ -230,12 +237,12 @@ def tuple_parser() -> P[SurfaceTerm]:
 
         # Parse comma-separated elements
         while True:
-            yield match_symbol(",")
+            yield match_token(CommaToken)
             elem = yield expr_parser(AnyIndent())
             elements.append(elem)
 
             # Check if we're at the closing paren
-            close_paren = yield match_symbol(")").optional()
+            close_paren = yield match_token(RightParenToken).optional()
             if close_paren is not None:
                 break
 
@@ -261,10 +268,10 @@ def paren_parser() -> P[SurfaceTerm]:
             return tuple_result
 
         # Regular parenthesized expression
-        yield match_symbol("(")
+        yield match_token(LeftParenToken)
         # Parse expression with AnyIndent constraint inside parens
         expr = yield expr_parser(AnyIndent())
-        yield match_symbol(")")
+        yield match_token(RightParenToken)
         return expr
 
     return parser
@@ -326,13 +333,19 @@ def atom_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
         # Apply post-fix operators greedily
         while True:
             # Type application with @ (only syntax supported)
-            type_app = yield (match_symbol("@") >> type_parser()).optional()
+            type_app = yield (
+                match_token(OperatorToken).bind(
+                    lambda tok: (
+                        type_parser() if tok.operator == "@" else fail("expected operator '@'")
+                    )
+                )
+            ).optional()
             if type_app is not None:
                 atom = SurfaceTypeApp(func=atom, type_arg=type_app, location=atom.location)
                 continue
 
             # Type annotation
-            type_ann = yield (match_symbol(":") >> type_parser()).optional()
+            type_ann = yield (match_token(ColonToken) >> type_parser()).optional()
             if type_ann is not None:
                 atom = SurfaceAnn(term=atom, type=type_ann, location=atom.location)
                 continue
@@ -639,11 +652,11 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
     @generate
     def parser():
         # Match lambda symbol (LAMBDA token represents \\ or λ)
-        lam_token = yield match_token("LAMBDA")
+        lam_token = yield match_token(LambdaToken)
         loc = lam_token.location
 
         # Parse one or more parameter names
-        var_tokens = yield match_token("IDENT").at_least(1)
+        var_tokens = yield match_token(IdentifierToken).at_least(1)
 
         # For each parameter, try to parse optional type annotation
         # Build annotated_params: [(name, type_annotation), ...]
@@ -652,11 +665,11 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
             var_name = var_token.value
             # Optional type annotation for this parameter
             # Use type_app_parser to handle type applications like "Maybe a"
-            var_type = yield (match_symbol(":") >> type_app_parser).optional()
+            var_type = yield (match_token(ColonToken) >> type_app_parser).optional()
             annotated_params.append((var_name, var_type))
 
         # Parse arrow
-        yield match_token("ARROW")
+        yield match_token(ArrowToken)
 
         # Parse body (respecting layout constraint)
         body = yield expr_parser(constraint)
@@ -685,15 +698,15 @@ def type_abs_parser(constraint: ValidIndent) -> P[SurfaceTypeAbs]:
     @generate
     def parser():
         # Match type lambda symbol (TYPELAMBDA token represents Λ or /\)
-        lam_token = yield match_token("TYPELAMBDA")
+        lam_token = yield match_token(TypeLambdaToken)
         loc = lam_token.location
 
         # Parse type variable name(s)
-        var_tokens = yield match_token("IDENT").at_least(1)
+        var_tokens = yield match_token(IdentifierToken).at_least(1)
         type_vars = [t.value for t in var_tokens]
 
         # Parse dot
-        yield match_token("DOT")
+        yield match_token(DotToken)
 
         # Parse body (respecting layout constraint)
         body = yield expr_parser(constraint)
@@ -724,7 +737,7 @@ def pattern_base_parser() -> P[SurfacePattern]:
     def parser():
         # Parse pattern name (constructor or variable)
         # All names use IDENT token - elaborator determines if it's a constructor
-        name_token = yield match_token("IDENT").optional()
+        name_token = yield match_token(IdentifierToken).optional()
         if name_token is None:
             yield fail("expected pattern")
 
@@ -734,7 +747,7 @@ def pattern_base_parser() -> P[SurfacePattern]:
         # Parse variable bindings (identifiers)
         vars = []
         while True:
-            var_result = yield match_token("IDENT").optional()
+            var_result = yield match_token(IdentifierToken).optional()
             if var_result is None:
                 break
             vars.append(var_result.value)
@@ -757,7 +770,7 @@ def pattern_tuple_parser() -> P[SurfacePattern]:
     def parser():
         from systemf.surface.types import SurfacePatternTuple
 
-        open_paren = yield match_symbol("(")
+        open_paren = yield match_token(LeftParenToken)
         loc = open_paren.location
 
         # Parse first element using pattern_parser (handles nested tuples, constructors, vars)
@@ -766,12 +779,12 @@ def pattern_tuple_parser() -> P[SurfacePattern]:
 
         # Parse comma-separated elements
         while True:
-            yield match_symbol(",")
+            yield match_token(CommaToken)
             elem = yield pattern_parser()
             elements.append(elem)
 
             # Check if we're at the closing paren
-            close_paren = yield match_symbol(")").optional()
+            close_paren = yield match_token(RightParenToken).optional()
             if close_paren is not None:
                 break
 
@@ -819,7 +832,7 @@ def case_alt(constraint: ValidIndent) -> P[SurfaceBranch]:
     def parser():
         pat = yield pattern_parser()
         loc = pat.location
-        yield match_token("ARROW")
+        yield match_token(ArrowToken)
 
         # Transform constraint for the expression body (similar to let_binding)
         # This prevents the expression from consuming subsequent branches
@@ -851,10 +864,12 @@ def case_parser(constraint: ValidIndent) -> P[SurfaceCase]:
 
     @generate
     def parser():
-        case_token = yield match_keyword("case")
+        case_token = yield match_token(CaseToken)
         loc = case_token.location
         scrutinee = yield expr_parser(constraint)
-        yield match_keyword("of")
+        yield match_token_value_of(
+            OfToken, "of", fallback=match_token(KeywordToken) >> match_keyword_value("of")
+        )
 
         # Parse branches (supports both explicit braces { ... } and layout indentation)
         branches = yield block(case_alt)
@@ -864,12 +879,34 @@ def case_parser(constraint: ValidIndent) -> P[SurfaceCase]:
     return parser
 
 
+def match_token_value_of(
+    token_cls: type[T], expected: str, fallback: P[KeywordToken] | None = None
+) -> P[T | KeywordToken]:
+    """Match a token class and also validate its textual value.
+
+    Used as a compatibility bridge where keyword subclasses may or may not exist.
+    """
+
+    @generate
+    def parser():
+        token = yield match_token(token_cls).optional()
+        if token is not None:
+            text = getattr(token, "keyword", None) or getattr(token, "value", None)
+            if text == expected:
+                return token
+        if fallback is not None:
+            return (yield fallback)
+        yield fail(f"expected {expected}")
+
+    return parser
+
+
 # =============================================================================
 # Let Expression Parser (layout-sensitive)
 # =============================================================================
 
 
-def let_binding(constraint: ValidIndent) -> P[tuple[str, Optional[SurfaceType], SurfaceTerm]]:
+def let_binding(constraint: ValidIndent) -> P[tuple[str, SurfaceType | None, SurfaceTerm]]:
     """Parse a single let binding: ident [params] [: type] = expr.
 
     Supports:
@@ -886,22 +923,22 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, Optional[SurfaceType], 
 
     @generate
     def parser():
-        var_token = yield match_token("IDENT")
+        var_token = yield match_token(IdentifierToken)
         var_name = var_token.value
         loc = var_token.location
 
         # Parse optional parameters (for function definitions like "f x y = ...")
         params = []
         while True:
-            param_token = yield match_token("IDENT").optional()
+            param_token = yield match_token(IdentifierToken).optional()
             if param_token is None:
                 break
             params.append(param_token.value)
 
         # Optional type annotation (applies to the whole function if params present)
-        var_type = yield (match_symbol(":") >> type_parser()).optional()
+        var_type = yield (match_token(ColonToken) >> type_parser()).optional()
 
-        yield match_symbol("=")
+        yield match_operator("=")
 
         # For expression value, use AfterPos to allow spanning multiple columns
         # If constraint is AtPos(col), expression can use columns > col (not >=)
@@ -942,7 +979,7 @@ def let_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 
     @generate
     def parser():
-        let_token = yield match_keyword("let")
+        let_token = yield match_token(LetToken)
         loc = let_token.location
 
         # Enter layout mode: capture column of first binding token
@@ -951,7 +988,7 @@ def let_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 
         # Validate 'in' keyword is at >= parent's column
         yield must_continue(constraint, "in")
-        yield match_keyword("in")
+        yield match_token(InToken)
         body = yield expr_parser(constraint)
 
         return SurfaceLet(bindings=bindings, body=body, location=loc)
@@ -976,12 +1013,12 @@ def if_parser(constraint: ValidIndent) -> P[SurfaceIf]:
 
     @generate
     def parser():
-        if_token = yield match_keyword("if")
+        if_token = yield match_token(IfToken)
         loc = if_token.location
         cond = yield expr_parser(constraint)
-        yield match_keyword("then")
+        yield match_token(ThenToken)
         then_branch = yield expr_parser(constraint)
-        yield match_keyword("else")
+        yield match_token(ElseToken)
         else_branch = yield expr_parser(constraint)
         return SurfaceIf(cond=cond, then_branch=then_branch, else_branch=else_branch, location=loc)
 
@@ -1028,8 +1065,6 @@ def expr_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 __all__ = [
     # Token matching
     "match_token",
-    "match_keyword",
-    "match_symbol",
     # Atom parsers
     "variable_parser",
     "literal_parser",

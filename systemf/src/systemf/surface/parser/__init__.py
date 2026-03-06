@@ -44,13 +44,40 @@ from systemf.surface.parser.types import (
     PrimTypeToken,
     PrimOpToken,
     OperatorToken,
-    OperatorType,
     DelimiterToken,
-    DelimiterType,
     PragmaToken,
     DocstringToken,
     EOFToken,
     LexerError,
+    # Concrete operator tokens
+    ArrowToken,
+    DarrowToken,
+    EqToken,
+    NeToken,
+    LtToken,
+    GtToken,
+    LeToken,
+    GeToken,
+    PlusToken,
+    MinusToken,
+    StarToken,
+    SlashToken,
+    AndToken,
+    OrToken,
+    AppendToken,
+    EqualsToken,
+    ColonToken,
+    BarToken,
+    AtToken,
+    DotToken,
+    # Concrete delimiter tokens
+    LeftParenToken,
+    RightParenToken,
+    LeftBracketToken,
+    RightBracketToken,
+    LeftBraceToken,
+    RightBraceToken,
+    CommaToken,
 )
 
 # Re-export lexer
@@ -83,7 +110,6 @@ from systemf.surface.parser.expressions import (
     case_alt,
     let_binding,
     match_token,
-    match_keyword,
     match_symbol,
     variable_parser,
     literal_parser,
@@ -120,6 +146,8 @@ def parse_expression(source: str):
     Raises:
         ParseError: If parsing fails
     """
+    from parsy import eof
+
     tokens = list(lex(source))
     return (expressions.expr_parser(AnyIndent()) << eof).parse(tokens)
 
@@ -136,6 +164,8 @@ def parse_declaration(source: str):
     Raises:
         ParseError: If parsing fails
     """
+    from parsy import eof
+
     tokens = list(lex(source))
     return (declarations.decl_parser() << eof).parse(tokens)
 

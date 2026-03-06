@@ -13,7 +13,6 @@ from typing import Protocol
 
 from systemf.utils.location import Location
 
-
 # =============================================================================
 # Layout Constraint Types
 # =============================================================================
@@ -83,16 +82,6 @@ class Token(Protocol):
     """
 
     @property
-    def type(self) -> str:
-        """Get the token type identifier."""
-        ...
-
-    @property
-    def value(self) -> str:
-        """Get the token value as a string."""
-        ...
-
-    @property
     def location(self) -> Location:
         """Get the source location of this token."""
         ...
@@ -100,23 +89,20 @@ class Token(Protocol):
 
 @dataclass(frozen=True, kw_only=True)
 class TokenBase:
-    """Base class for all tokens with location information.
-
-    All concrete token types should inherit from this class to ensure
-    consistent location tracking.
-    """
+    """Base class for all tokens with location information."""
 
     location: Location
 
     @property
     def column(self) -> int:
-        """Get the column number of this token."""
         return self.location.column
 
     @property
     def line(self) -> int:
-        """Get the line number of this token."""
         return self.location.line
+
+    def __str__(self) -> str:
+        raise NotImplementedError("TokenBase is abstract, use concrete token types")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -129,15 +115,8 @@ class IdentifierToken(TokenBase):
     def value(self) -> str:
         return self.name
 
-    @property
-    def type(self) -> str:
-        return "IDENT"
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"IdentifierToken({self.value!r}, {self.location})"
+        return self.name
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -150,15 +129,8 @@ class NumberToken(TokenBase):
     def value(self) -> str:
         return self.number
 
-    @property
-    def type(self) -> str:
-        return "NUMBER"
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"NumberToken({self.value!r}, {self.location})"
+        return self.number
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -171,15 +143,8 @@ class StringToken(TokenBase):
     def value(self) -> str:
         return self.string
 
-    @property
-    def type(self) -> str:
-        return "STRING"
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"StringToken({self.value!r}, {self.location})"
+        return self.string
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -195,16 +160,8 @@ class KeywordToken(TokenBase):
     def value(self) -> str:
         return self.keyword
 
-    @property
-    def type(self) -> str:
-        """Default implementation returns uppercase keyword."""
-        return self.keyword.upper()
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.value!r}, {self.location})"
+        return self.keyword
 
 
 # Specific keyword token classes
@@ -217,11 +174,10 @@ class LambdaToken(TokenBase):
     symbol: str
 
     @property
-    def type(self) -> str:
-        return "LAMBDA"
-
-    @property
     def value(self) -> str:
+        return self.symbol
+
+    def __str__(self) -> str:
         return self.symbol
 
 
@@ -232,11 +188,10 @@ class TypeLambdaToken(TokenBase):
     symbol: str
 
     @property
-    def type(self) -> str:
-        return "TYPELAMBDA"
-
-    @property
     def value(self) -> str:
+        return self.symbol
+
+    def __str__(self) -> str:
         return self.symbol
 
 
@@ -279,9 +234,7 @@ class OfToken(KeywordToken):
 class ForallToken(KeywordToken):
     """Forall keyword (universal quantifier)."""
 
-    @property
-    def type(self) -> str:
-        return "FORALL"
+    pass
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -326,64 +279,6 @@ class PrimOpToken(KeywordToken):
     pass
 
 
-class OperatorType:
-    """Operator types for OperatorToken.
-
-    This class uses class attributes to define operator type constants
-    for type safety and IDE support.
-    """
-
-    ARROW = "ARROW"  # ->
-    DARROW = "DARROW"  # =>
-    EQ = "EQ"  # ==
-    NEQ = "NEQ"  # /=
-    LT = "LT"  # <
-    GT = "GT"  # >
-    LE = "LE"  # <=
-    GE = "GE"  # >=
-    PLUS = "PLUS"  # +
-    MINUS = "MINUS"  # -
-    STAR = "STAR"  # *
-    SLASH = "SLASH"  # /
-    AND = "AND"  # &&
-    OR = "OR"  # ||
-    APPEND = "APPEND"  # ++
-    EQUALS = "EQUALS"  # =
-    COLON = "COLON"  # :
-    BAR = "BAR"  # |
-    AT = "AT"  # @
-    DOT = "DOT"  # .
-    LAMBDA = "LAMBDA"  # \ or λ
-    TYPELAMBDA = "TYPELAMBDA"  # /\ or Λ
-
-    ALL = frozenset(
-        [
-            ARROW,
-            DARROW,
-            EQ,
-            NEQ,
-            LT,
-            GT,
-            LE,
-            GE,
-            PLUS,
-            MINUS,
-            STAR,
-            SLASH,
-            AND,
-            OR,
-            APPEND,
-            EQUALS,
-            COLON,
-            BAR,
-            AT,
-            DOT,
-            LAMBDA,
-            TYPELAMBDA,
-        ]
-    )
-
-
 class DocstringType:
     """Docstring type constants."""
 
@@ -399,70 +294,177 @@ class TokenType:
     TYPELAMBDA = "TYPELAMBDA"
 
 
-@dataclass(frozen=True, kw_only=True)
 class OperatorToken(TokenBase):
-    """Operator token."""
+    """Base class for operator tokens."""
 
     operator: str
-    op_type: str  # One of OperatorType constants
 
     @property
     def value(self) -> str:
         return self.operator
 
-    @property
-    def type(self) -> str:
-        return self.op_type
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"OperatorToken({self.value!r}, {self.location})"
+        return self.operator
 
 
-class DelimiterType:
-    """Delimiter types for DelimiterToken.
-
-    This class uses class attributes to define delimiter type constants
-    for type safety and IDE support.
-    """
-
-    LPAREN = "LPAREN"  # (
-    RPAREN = "RPAREN"  # )
-    LBRACKET = "LBRACKET"  # [
-    RBRACKET = "RBRACKET"  # ]
-    LBRACE = "LBRACE"  # {
-    RBRACE = "RBRACE"  # }
-    COMMA = "COMMA"  # ,
-
-    ALL = frozenset([LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE, COMMA])
+# Concrete operator token classes (one-liner style)
+@dataclass(frozen=True, kw_only=True)
+class ArrowToken(OperatorToken):
+    operator: str = "->"
 
 
 @dataclass(frozen=True, kw_only=True)
+class DarrowToken(OperatorToken):
+    operator: str = "=>"
+
+
+@dataclass(frozen=True, kw_only=True)
+class EqToken(OperatorToken):
+    operator: str = "=="
+
+
+@dataclass(frozen=True, kw_only=True)
+class NeToken(OperatorToken):
+    operator: str = "/="
+
+
+@dataclass(frozen=True, kw_only=True)
+class LtToken(OperatorToken):
+    operator: str = "<"
+
+
+@dataclass(frozen=True, kw_only=True)
+class GtToken(OperatorToken):
+    operator: str = ">"
+
+
+@dataclass(frozen=True, kw_only=True)
+class LeToken(OperatorToken):
+    operator: str = "<="
+
+
+@dataclass(frozen=True, kw_only=True)
+class GeToken(OperatorToken):
+    operator: str = ">="
+
+
+@dataclass(frozen=True, kw_only=True)
+class PlusToken(OperatorToken):
+    operator: str = "+"
+
+
+@dataclass(frozen=True, kw_only=True)
+class MinusToken(OperatorToken):
+    operator: str = "-"
+
+
+@dataclass(frozen=True, kw_only=True)
+class StarToken(OperatorToken):
+    operator: str = "*"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SlashToken(OperatorToken):
+    operator: str = "/"
+
+
+@dataclass(frozen=True, kw_only=True)
+class AndToken(OperatorToken):
+    operator: str = "&&"
+
+
+@dataclass(frozen=True, kw_only=True)
+class OrToken(OperatorToken):
+    operator: str = "||"
+
+
+@dataclass(frozen=True, kw_only=True)
+class AppendToken(OperatorToken):
+    operator: str = "++"
+
+
+@dataclass(frozen=True, kw_only=True)
+class EqualsToken(OperatorToken):
+    operator: str = "="
+
+
+@dataclass(frozen=True, kw_only=True)
+class ColonToken(OperatorToken):
+    operator: str = ":"
+
+
+@dataclass(frozen=True, kw_only=True)
+class BarToken(OperatorToken):
+    operator: str = "|"
+
+
+@dataclass(frozen=True, kw_only=True)
+class AtToken(OperatorToken):
+    operator: str = "@"
+
+
+@dataclass(frozen=True, kw_only=True)
+class DotToken(OperatorToken):
+    operator: str = "."
+
+
+@dataclass(frozen=True, kw_only=True)
+class SemicolonToken(OperatorToken):
+    operator: str = ";"
+
+
+# Delimiter token base class and concrete classes
+@dataclass(frozen=True, kw_only=True)
 class DelimiterToken(TokenBase):
-    """Delimiter token (parentheses, brackets, braces, comma)."""
+    """Base class for delimiter tokens."""
 
     delimiter: str
-    delim_type: str  # One of DelimiterType constants
 
     @property
     def value(self) -> str:
         return self.delimiter
 
-    @property
-    def type(self) -> str:
-        return self.delim_type
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"DelimiterToken({self.value!r}, {self.location})"
+        return self.delimiter
 
 
 @dataclass(frozen=True, kw_only=True)
-class PragmaToken:
+class LeftParenToken(DelimiterToken):
+    delimiter: str = "("
+
+
+@dataclass(frozen=True, kw_only=True)
+class RightParenToken(DelimiterToken):
+    delimiter: str = ")"
+
+
+@dataclass(frozen=True, kw_only=True)
+class LeftBracketToken(DelimiterToken):
+    delimiter: str = "["
+
+
+@dataclass(frozen=True, kw_only=True)
+class RightBracketToken(DelimiterToken):
+    delimiter: str = "]"
+
+
+@dataclass(frozen=True, kw_only=True)
+class LeftBraceToken(DelimiterToken):
+    delimiter: str = "{"
+
+
+@dataclass(frozen=True, kw_only=True)
+class RightBraceToken(DelimiterToken):
+    delimiter: str = "}"
+
+
+@dataclass(frozen=True, kw_only=True)
+class CommaToken(DelimiterToken):
+    delimiter: str = ","
+
+
+@dataclass(frozen=True, kw_only=True)
+class PragmaToken(TokenBase):
     """Pragma token capturing parsed content between {-# and #-}.
 
     The pragma content is parsed into a key-value pair:
@@ -474,45 +476,29 @@ class PragmaToken:
     key: str
     value: str
     raw_content: str
-    location: Location
 
     @property
     def content(self) -> str:
         """Return raw content for backwards compatibility."""
         return self.raw_content
 
-    @property
-    def type(self) -> str:
-        return "PRAGMA"
-
     def __str__(self) -> str:
-        return f"{self.type}({self.key}={self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"PragmaToken({self.key!r}, {self.value!r}, {self.location})"
+        return self.raw_content
 
 
 @dataclass(frozen=True, kw_only=True)
-class DocstringToken:
+class DocstringToken(TokenBase):
     """Docstring token (-- | or -- ^)."""
 
     docstring_type: str  # "DOCSTRING_PRECEDING" or "DOCSTRING_INLINE"
     content: str
-    location: Location
 
     @property
     def value(self) -> str:
         return self.content
 
-    @property
-    def type(self) -> str:
-        return self.docstring_type
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"DocstringToken({self.value!r}, {self.location})"
+        return self.content
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -525,15 +511,8 @@ class CommentToken(TokenBase):
     def value(self) -> str:
         return self.content
 
-    @property
-    def type(self) -> str:
-        return "COMMENT"
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"CommentToken({self.value!r}, {self.location})"
+        return self.content
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -544,15 +523,8 @@ class EOFToken(TokenBase):
     def value(self) -> str:
         return ""
 
-    @property
-    def type(self) -> str:
-        return "EOF"
-
     def __str__(self) -> str:
-        return f"{self.type}({self.value!r})"
-
-    def __repr__(self) -> str:
-        return f"EOFToken({self.location})"
+        return ""
 
 
 class LexerError(Exception):
@@ -578,21 +550,70 @@ __all__ = [
     "AfterPos",
     "EndOfBlock",
     "ValidIndent",
-    # Token types
+    # Token protocol and base
     "Token",
     "TokenBase",
+    # Literal tokens
     "IdentifierToken",
     "NumberToken",
     "StringToken",
+    # Keyword tokens
     "KeywordToken",
+    "LambdaToken",
+    "TypeLambdaToken",
+    "DataToken",
+    "LetToken",
+    "InToken",
+    "CaseToken",
+    "OfToken",
+    "ForallToken",
+    "TypeToken",
+    "IfToken",
+    "ThenToken",
+    "ElseToken",
+    "PrimTypeToken",
+    "PrimOpToken",
+    # Operator tokens
     "OperatorToken",
-    "OperatorType",
+    "ArrowToken",
+    "DarrowToken",
+    "EqToken",
+    "NeToken",
+    "LtToken",
+    "GtToken",
+    "LeToken",
+    "GeToken",
+    "PlusToken",
+    "MinusToken",
+    "StarToken",
+    "SlashToken",
+    "AndToken",
+    "OrToken",
+    "AppendToken",
+    "EqualsToken",
+    "ColonToken",
+    "BarToken",
+    "AtToken",
+    "DotToken",
+    "SemicolonToken",
+    # Delimiter tokens
     "DelimiterToken",
-    "DelimiterType",
+    "LeftParenToken",
+    "RightParenToken",
+    "LeftBracketToken",
+    "RightBracketToken",
+    "LeftBraceToken",
+    "RightBraceToken",
+    "CommaToken",
+    # Misc tokens
     "PragmaToken",
     "DocstringToken",
     "CommentToken",
     "EOFToken",
+    # Constants
+    "DocstringType",
+    "TokenType",
+    # Errors and aliases
     "LexerError",
     "TokenTypeStr",
 ]

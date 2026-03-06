@@ -15,6 +15,7 @@ from systemf.eval.value import VPrim
 from systemf.surface.pipeline import elaborate_module
 from systemf.surface.parser import lex
 from systemf.surface.parser import Parser, parse_expression
+from systemf.surface.parser.types import StringToken
 
 
 class TestStringParsing:
@@ -26,8 +27,7 @@ class TestStringParsing:
         tokens = lex(source)
 
         # Should have STRING token and EOF
-        token_types = [t.type for t in tokens]
-        assert "STRING" in token_types
+        assert any(isinstance(t, StringToken) for t in tokens)
 
         # Parse as term
         term = parse_expression(source)
@@ -54,7 +54,7 @@ class TestStringParsing:
         # Find the STRING token
         string_token = None
         for t in tokens:
-            if t.type == "STRING":
+            if isinstance(t, StringToken):
                 string_token = t
                 break
 

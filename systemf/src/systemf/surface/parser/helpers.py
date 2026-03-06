@@ -11,22 +11,53 @@ Key design:
 
 from __future__ import annotations
 
-from typing import TypeVar, Callable, List, Tuple, Optional
-from parsy import Parser as P, Result, generate, eof, peek, success, fail
+from typing import Any, Callable, List, Optional, Tuple, TypeVar, cast
+
+from parsy import Parser, Result, fail, generate, peek, success
 
 from .types import (
-    TokenBase,
-    ValidIndent,
+    AfterPos,
     AnyIndent,
     AtPos,
-    AfterPos,
-    EndOfBlock,
+    BarToken,
     DelimiterToken,
+    EndOfBlock,
     OperatorToken,
+    TokenBase,
+    ValidIndent,
 )
 
 # Type variable for parsed items
-T = TypeVar("T")
+T = TypeVar("T", bound=TokenBase)
+
+type P[T] = Parser[List[TokenBase], T]
+
+
+# =============================================================================
+# Token Matching
+# =============================================================================
+
+
+def match_token(token_cls: type[T]) -> P[T]:
+    """Match a token using Python match syntax.
+
+    Args:
+        token_cls: Token class to match (e.g., IdentifierToken, PlusToken)
+
+    Returns:
+        Parser that returns the matched token
+    """
+
+    @Parser
+    def parser(tokens: List[TokenBase], index: int) -> Result[T]:
+        if index >= len(tokens):
+            return Result.failure(index, f"expected {token_cls.__name__}")
+        token = tokens[index]
+        if isinstance(token, token_cls):
+            return Result.success(index + 1, token)
+        return Result.failure(index, f"expected {token_cls.__name__}, got {str(token)}")
+
+    return parser
 
 
 # =============================================================================
@@ -45,8 +76,8 @@ def column() -> P[int]:
         of the first branch token.
     """
 
-    @P
-    def parser(tokens: list, index: int) -> Result:
+    @Parser
+    def parser(tokens: List[TokenBase], index: int) -> Result[int]:
         if index >= len(tokens):
             return Result.failure(index, "expected token")
         token = tokens[index]
@@ -83,7 +114,8 @@ def check_valid(constraint: ValidIndent, col: int) -> bool:
             return col >= apos.col
         case EndOfBlock():
             return False
-    return False
+        case _:
+            raise Exception("impossible")
 
 
 def is_at_constraint(constraint: ValidIndent, col: int) -> bool:
@@ -164,8 +196,8 @@ def block(item: Callable[[ValidIndent], P[T]]) -> P[List[T]]:
         [Branch(...), Branch(...)]
     """
 
-    @P
-    def parser(tokens: list, index: int) -> Result:
+    @Parser
+    def parser(tokens: List[TokenBase], index: int) -> Result[List[T]]:
         # Check for explicit braces first
         if index < len(tokens):
             tok = tokens[index]
@@ -225,8 +257,8 @@ def block_entries(constraint: ValidIndent, item: Callable[[ValidIndent], P[T]]) 
         [Binding(...), Binding(...)]  # Both at column 4
     """
 
-    @P
-    def parser(tokens: list, index: int) -> Result:
+    @Parser
+    def parser(tokens: List[TokenBase], index: int) -> Result[List[T]]:
         results: List[T] = []
         current_index = index
         current_constraint = constraint
@@ -275,8 +307,8 @@ def block_entry(
         (Ident('x'), AtPos(4))
     """
 
-    @P
-    def parser(tokens: list, index: int) -> Result:
+    @Parser
+    def parser(tokens: List[TokenBase], index: int) -> Result[Tuple[T, ValidIndent]]:
         if index >= len(tokens):
             return Result.failure(index, "expected block entry")
 
@@ -291,7 +323,7 @@ def block_entry(
         item_result = item(constraint)(tokens, index)
 
         if not item_result.status:
-            return item_result
+            return cast(Result[Tuple[T, ValidIndent]], item_result)
 
         # Get the next index after parsing the item
         next_index = item_result.index
@@ -300,7 +332,7 @@ def block_entry(
         term_result = terminator(constraint, col)(tokens, next_index)
 
         if not term_result.status:
-            return term_result
+            return cast(Result[Tuple[T, ValidIndent]], term_result)
 
         updated_constraint = term_result.value
 
@@ -340,8 +372,8 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
         EndOfBlock()
     """
 
-    @P
-    def parser(tokens: list, index: int) -> Result:
+    @Parser
+    def parser(tokens: List[TokenBase], index: int) -> Result[ValidIndent]:
         # At EOF, block ends - consume nothing (at end)
         if index >= len(tokens):
             return Result.success(index, EndOfBlock())
@@ -361,17 +393,18 @@ def terminator(constraint: ValidIndent, start_col: int) -> P[ValidIndent]:
                     return Result.success(index + 1, EndOfBlock())
 
         # Check for bar (|) - case branch separator in braces mode
-        if token.type == "BAR":
-            # Consume the bar and continue with same constraint
-            match constraint:
-                case AnyIndent():
-                    return Result.success(index + 1, AnyIndent())
-                case AtPos() as ap:
-                    return Result.success(index + 1, AtPos(col=ap.col))
-                case AfterPos() as apos:
-                    return Result.success(index + 1, AfterPos(col=apos.col))
-                case EndOfBlock():
-                    return Result.success(index + 1, EndOfBlock())
+        match token:
+            case BarToken():
+                # Consume the bar and continue with same constraint
+                match constraint:
+                    case AnyIndent():
+                        return Result.success(index + 1, AnyIndent())
+                    case AtPos() as ap:
+                        return Result.success(index + 1, AtPos(col=ap.col))
+                    case AfterPos() as apos:
+                        return Result.success(index + 1, AfterPos(col=apos.col))
+                    case EndOfBlock():
+                        return Result.success(index + 1, EndOfBlock())
 
         # Check for close brace - don't consume, just return EndOfBlock
         # (the caller will consume the brace if needed)
@@ -434,7 +467,7 @@ def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> P[
         None  # Success, we're still in block
     """
 
-    @P
+    @Parser
     def parser(tokens: list, index: int) -> Result:
         match constraint:
             case EndOfBlock():
@@ -451,6 +484,8 @@ def must_continue(constraint: ValidIndent, expected: Optional[str] = None) -> P[
 
 
 __all__ = [
+    # Token matching
+    "match_token",
     # Core infrastructure
     "column",
     "check_valid",

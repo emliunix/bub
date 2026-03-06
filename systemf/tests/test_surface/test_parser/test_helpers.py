@@ -12,6 +12,7 @@ from systemf.surface.parser import (
     TokenBase,
     IdentifierToken,
     KeywordToken,
+    CaseToken,
     OperatorToken,
     DelimiterToken,
     ValidIndent,
@@ -366,11 +367,11 @@ class TestTerminator:
 
     def test_terminator_braces_semicolon_continues_with_afterpos(self):
         """Braces: semicolon switches AtPos to AfterPos."""
-        from systemf.surface.parser.types import OperatorToken
+        from systemf.surface.parser.types import SemicolonToken
 
         # Semicolon after AtPos(4) should become AfterPos(4)
         tokens = [
-            OperatorToken(operator=";", op_type="SEMICOLON", location=Location(line=1, column=10)),
+            SemicolonToken(location=Location(line=1, column=10)),
         ]
 
         result = terminator(AtPos(col=4), 4).parse(tokens)
@@ -381,9 +382,7 @@ class TestTerminator:
         from systemf.surface.parser.types import DelimiterToken
 
         tokens = [
-            DelimiterToken(
-                delimiter="}", delim_type="RBRACE", location=Location(line=1, column=10)
-            ),
+            DelimiterToken(delimiter="}", location=Location(line=1, column=10)),
         ]
 
         # Use parse_partial since terminator() is a peek parser (doesn't consume brace)
@@ -461,10 +460,10 @@ class TestWithRealLexer:
         tokens = lex(source)
 
         # Check some columns
-        case_tok = next(t for t in tokens if t.type == "CASE")
+        case_tok = next(t for t in tokens if isinstance(t, CaseToken))
         assert case_tok.column == 1
 
-        a_tok = next(t for t in tokens if t.type == "IDENT" and t.value == "A")
+        a_tok = next(t for t in tokens if isinstance(t, IdentifierToken) and t.value == "A")
         assert a_tok.column == 3  # Indented
 
     def test_no_virtual_tokens(self):
@@ -472,7 +471,7 @@ class TestWithRealLexer:
         source = """case x of
   A -> 1"""
         tokens = lex(source)
-        types = [t.type for t in tokens]
+        types = [str(t) for t in tokens]
 
         assert "INDENT" not in types
         assert "DEDENT" not in types

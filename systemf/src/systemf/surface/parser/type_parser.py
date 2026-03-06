@@ -13,19 +13,26 @@ Parsers implemented:
 
 from __future__ import annotations
 
-from typing import TypeVar
-import parsy
-from parsy import Parser as P, Result, generate, alt, fail
+from typing import List, TypeVar
 
+import parsy
+from parsy import Parser, Result, alt, fail, generate
+
+from systemf.surface.parser.helpers import match_token
 from systemf.surface.parser.types import (
-    TokenBase,
-    KeywordToken,
-    OperatorToken,
+    ArrowToken,
+    CommaToken,
     DelimiterToken,
-    IdentifierToken,
-    ForallToken,
     DocstringToken,
     DocstringType,
+    DotToken,
+    ForallToken,
+    IdentifierToken,
+    KeywordToken,
+    LeftParenToken,
+    OperatorToken,
+    RightParenToken,
+    TokenBase,
 )
 from systemf.surface.types import (
     SurfaceType,
@@ -35,51 +42,11 @@ from systemf.surface.types import (
 
 # Type variable for generic parsers
 T = TypeVar("T")
+type P[T] = Parser[List[TokenBase], T]
 
 # =============================================================================
 # Token Matching Helpers
 # =============================================================================
-
-
-def match_token(token_type: str) -> P[TokenBase]:
-    """Match a token of the given type by string (deprecated, use typed version).
-
-    Args:
-        token_type: The token type to match (e.g., "IDENT", "NUMBER")
-
-    Returns:
-        Parser that returns the matched token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, f"expected {token_type}")
-        token = tokens[index]
-        if token.type == token_type:
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected {token_type}, got {token.type}")
-
-    return parser
-
-
-def match_arrow() -> P[OperatorToken]:
-    """Match an arrow token (-> or →).
-
-    Returns:
-        Parser that returns the matched arrow operator token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, "expected arrow")
-        token = tokens[index]
-        if isinstance(token, OperatorToken) and token.op_type == "ARROW":
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected arrow, got {token.type}")
-
-    return parser
 
 
 def match_forall() -> P[ForallToken]:
@@ -89,14 +56,14 @@ def match_forall() -> P[ForallToken]:
         Parser that returns the matched forall token
     """
 
-    @P
+    @Parser
     def parser(tokens: list, index: int) -> Result:
         if index >= len(tokens):
             return Result.failure(index, "expected forall")
         token = tokens[index]
         if isinstance(token, ForallToken):
             return Result.success(index + 1, token)
-        return Result.failure(index, f"expected forall, got {token.type}")
+        return Result.failure(index, f"expected forall, got {str(token)}")
 
     return parser
 
@@ -108,7 +75,7 @@ def match_inline_docstring() -> P[str | None]:
         Parser that returns the docstring content or None
     """
 
-    @P
+    @Parser
     def parser(tokens: list, index: int) -> Result:
         if index >= len(tokens):
             return Result.success(index, None)
@@ -120,55 +87,10 @@ def match_inline_docstring() -> P[str | None]:
     return parser
 
 
-def match_keyword(value: str) -> P[KeywordToken]:
-    """Match a keyword token with the given value.
-
-    Args:
-        value: The keyword to match (e.g., "data", "let")
-
-    Returns:
-        Parser that returns the matched keyword token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, f"expected keyword '{value}'")
-        token = tokens[index]
-        if isinstance(token, KeywordToken) and token.keyword == value:
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected keyword '{value}', got {token.type}")
-
-    return parser
-
-
-def match_symbol(value: str) -> P[OperatorToken | DelimiterToken]:
-    """Match an operator or delimiter token with the given value.
-
-    Args:
-        value: The symbol to match (e.g., "=", "|", ":")
-
-    Returns:
-        Parser that returns the matched operator/delimiter token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, f"expected symbol '{value}'")
-        token = tokens[index]
-        if isinstance(token, OperatorToken) and token.operator == value:
-            return Result.success(index + 1, token)
-        if isinstance(token, DelimiterToken) and token.delimiter == value:
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected symbol '{value}'")
-
-    return parser
-
-
 # =============================================================================
 # Forward Declaration for Recursive Type Parser
 # =============================================================================
+
 
 _type_parser: P[SurfaceType] = parsy.forward_declaration()
 
@@ -189,7 +111,7 @@ def type_tuple_parser() -> P[SurfaceType]:
     """
     from systemf.surface.types import SurfaceTypeTuple
 
-    open_paren = yield match_symbol("(")
+    open_paren = yield match_token(LeftParenToken)
     loc = open_paren.location
 
     # Parse first element
@@ -198,12 +120,12 @@ def type_tuple_parser() -> P[SurfaceType]:
 
     # Parse comma-separated elements
     while True:
-        yield match_symbol(",")
+        yield match_token(CommaToken)
         elem = yield _type_parser
         elements.append(elem)
 
         # Check if we're at the closing paren
-        close_paren = yield match_symbol(")").optional()
+        close_paren = yield match_token(RightParenToken).optional()
         if close_paren is not None:
             break
 
@@ -225,14 +147,14 @@ def type_atom_parser() -> P[SurfaceType]:
     @generate
     def parser():
         # Try parenthesized type first
-        open_paren = yield match_symbol("(").optional()
+        open_paren = yield match_token(LeftParenToken).optional()
         if open_paren is not None:
             inner = yield _type_parser
-            yield match_symbol(")")
+            yield match_token(RightParenToken)
             return inner
 
         # Try identifier (type constructor or type variable based on naming convention)
-        ident_token = yield match_token("IDENT").optional()
+        ident_token = yield match_token(IdentifierToken).optional()
         if ident_token is not None:
             from systemf.surface.types import SurfaceTypeConstructor, SurfaceTypeVar
 
@@ -336,7 +258,7 @@ def type_arrow_parser() -> P[SurfaceType]:
     param_doc = yield match_inline_docstring().optional()
 
     # Check for arrow (accepts both ASCII -> and Unicode →)
-    arrow = yield match_arrow().optional()
+    arrow = yield match_token(ArrowToken).optional()
     if arrow is None:
         return left
 
@@ -362,10 +284,10 @@ def type_forall_parser() -> P[SurfaceType]:
     loc = forall_token.location
 
     # Parse one or more type variable names
-    var_tokens = yield match_token("IDENT").at_least(1)
+    var_tokens = yield match_token(IdentifierToken).at_least(1)
 
     # Match dot
-    yield match_symbol(".")
+    yield match_token(DotToken)
 
     # Parse body type (use _type_parser to allow nested foralls)
     body = yield _type_parser
@@ -376,30 +298,6 @@ def type_forall_parser() -> P[SurfaceType]:
         result = SurfaceTypeForall(var=var_token.value, body=result, location=loc)
 
     return result
-
-
-def _ensure_consumed(inner: P[T]) -> P[T]:
-    """Wrap a parser to ensure all tokens are consumed.
-
-    Returns an index pointing past the last token to satisfy parsy's eof check.
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        result = inner(tokens, index)
-
-        if not result.status:
-            return result
-
-        # Check that we've consumed all tokens
-        if result.index != len(tokens):
-            # There are unconsumed tokens - this is a parse error
-            return Result.failure(result.index, "expected EOF")
-
-        # Success - return index pointing to end of stream
-        return Result.success(len(tokens), result.value)
-
-    return parser
 
 
 def type_parser() -> P[SurfaceType]:
@@ -425,8 +323,6 @@ _type_parser.become(type_parser())
 __all__ = [
     # Token matching helpers
     "match_token",
-    "match_keyword",
-    "match_symbol",
     # Type parsers
     "type_atom_parser",
     "type_app_parser",

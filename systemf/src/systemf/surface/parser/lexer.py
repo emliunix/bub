@@ -12,8 +12,6 @@ from systemf.surface.parser.types import (
     CaseToken,
     CommentToken,
     DataToken,
-    DelimiterToken,
-    DelimiterType,
     DocstringToken,
     DocstringType,
     ElseToken,
@@ -26,16 +24,43 @@ from systemf.surface.parser.types import (
     LexerError,
     NumberToken,
     OfToken,
-    OperatorToken,
-    OperatorType,
     PragmaToken,
     PrimOpToken,
     PrimTypeToken,
     StringToken,
     ThenToken,
-    Token,
+    TokenBase,
     TypeLambdaToken,
     TypeToken,
+    # Concrete operator tokens
+    ArrowToken,
+    DarrowToken,
+    EqToken,
+    NeToken,
+    LtToken,
+    GtToken,
+    LeToken,
+    GeToken,
+    PlusToken,
+    MinusToken,
+    StarToken,
+    SlashToken,
+    AndToken,
+    OrToken,
+    AppendToken,
+    EqualsToken,
+    ColonToken,
+    BarToken,
+    AtToken,
+    DotToken,
+    # Concrete delimiter tokens
+    LeftParenToken,
+    RightParenToken,
+    LeftBracketToken,
+    RightBracketToken,
+    LeftBraceToken,
+    RightBraceToken,
+    CommaToken,
 )
 from systemf.utils.location import Location
 
@@ -76,7 +101,7 @@ class Lexer:
         # Multi-character operators
         ("ARROW", r"->|→"),
         ("DARROW", r"=>"),
-        ("NEQ", r"/="),
+        ("NE", r"/="),
         ("LE", r"<="),
         ("GE", r">="),
         ("AND", r"&&"),
@@ -124,7 +149,7 @@ class Lexer:
         self.pos = 0
         self.line = 1
         self.column = 1
-        self.tokens: list[Token] = []
+        self.tokens: list[TokenBase] = []
 
         # Compile regex for efficiency
         self._pattern = re.compile(
@@ -132,7 +157,7 @@ class Lexer:
             re.DOTALL,  # Allow . to match newlines for pragma multiline matching
         )
 
-    def tokenize(self) -> list[Token]:
+    def tokenize(self) -> list[TokenBase]:
         """Convert source code to token stream.
 
         Returns:
@@ -242,7 +267,7 @@ class Lexer:
                 i += 1
         return "".join(result)
 
-    def _create_token(self, match: re.Match) -> Token | None:
+    def _create_token(self, match: re.Match) -> TokenBase | None:
         """Create appropriate token from regex match."""
         token_type = match.lastgroup
         value = match.group()
@@ -312,16 +337,66 @@ class Lexer:
             return LambdaToken(symbol=value, location=loc)
         elif token_type == "TYPELAMBDA":
             return TypeLambdaToken(symbol=value, location=loc)
-        elif token_type in OperatorType.ALL:
-            return OperatorToken(operator=value, op_type=token_type, location=loc)
-        elif token_type in DelimiterType.ALL:
-            return DelimiterToken(delimiter=value, delim_type=token_type, location=loc)
+        elif token_type == "ARROW":
+            return ArrowToken(operator=value, location=loc)
+        elif token_type == "DARROW":
+            return DarrowToken(operator=value, location=loc)
+        elif token_type == "EQ":
+            return EqToken(operator=value, location=loc)
+        elif token_type == "NE":
+            return NeToken(operator=value, location=loc)
+        elif token_type == "LT":
+            return LtToken(operator=value, location=loc)
+        elif token_type == "GT":
+            return GtToken(operator=value, location=loc)
+        elif token_type == "LE":
+            return LeToken(operator=value, location=loc)
+        elif token_type == "GE":
+            return GeToken(operator=value, location=loc)
+        elif token_type == "PLUS":
+            return PlusToken(operator=value, location=loc)
+        elif token_type == "MINUS":
+            return MinusToken(operator=value, location=loc)
+        elif token_type == "STAR":
+            return StarToken(operator=value, location=loc)
+        elif token_type == "SLASH":
+            return SlashToken(operator=value, location=loc)
+        elif token_type == "AND":
+            return AndToken(operator=value, location=loc)
+        elif token_type == "OR":
+            return OrToken(operator=value, location=loc)
+        elif token_type == "APPEND":
+            return AppendToken(operator=value, location=loc)
+        elif token_type == "EQUALS":
+            return EqualsToken(operator=value, location=loc)
+        elif token_type == "COLON":
+            return ColonToken(operator=value, location=loc)
+        elif token_type == "BAR":
+            return BarToken(operator=value, location=loc)
+        elif token_type == "AT":
+            return AtToken(operator=value, location=loc)
+        elif token_type == "DOT":
+            return DotToken(operator=value, location=loc)
+        elif token_type == "LPAREN":
+            return LeftParenToken(delimiter=value, location=loc)
+        elif token_type == "RPAREN":
+            return RightParenToken(delimiter=value, location=loc)
+        elif token_type == "LBRACKET":
+            return LeftBracketToken(delimiter=value, location=loc)
+        elif token_type == "RBRACKET":
+            return RightBracketToken(delimiter=value, location=loc)
+        elif token_type == "LBRACE":
+            return LeftBraceToken(delimiter=value, location=loc)
+        elif token_type == "RBRACE":
+            return RightBraceToken(delimiter=value, location=loc)
+        elif token_type == "COMMA":
+            return CommaToken(delimiter=value, location=loc)
         else:
             # Unknown token type - skip
             return None
 
 
-def lex(source: str, filename: str | None = None) -> list[Token]:
+def lex(source: str, filename: str | None = None) -> list[TokenBase]:
     """Tokenize source code.
 
     Convenience function that creates a Lexer and tokenizes the source.
@@ -341,7 +416,7 @@ def lex(source: str, filename: str | None = None) -> list[Token]:
     return tokens
 
 
-def process_comments(tokens: list[Token]) -> list[Token]:
+def process_comments(tokens: list[TokenBase]) -> list[TokenBase]:
     """Process comments: join consecutive lines and classify docstrings.
 
     This is a post-lexer pass with nested while loop style:
@@ -376,7 +451,7 @@ def process_comments(tokens: list[Token]) -> list[Token]:
             return True, "^"
         return False, ""
 
-    result: list[Token] = []
+    result: list[TokenBase] = []
     i = 0
 
     while i < len(tokens):
@@ -448,7 +523,7 @@ def process_comments(tokens: list[Token]) -> list[Token]:
     return result
 
 
-def strip_comments_and_whitespace(tokens: list[Token]) -> list[Token]:
+def strip_comments_and_whitespace(tokens: list[TokenBase]) -> list[TokenBase]:
     """Filter out remaining comments and whitespace tokens.
 
     After processing docstrings, remove any leftover comment tokens

@@ -121,28 +121,6 @@ def skip_inline_docstrings() -> P[None]:
 # =============================================================================
 
 
-def match_token(token_type: str) -> P[TokenBase]:
-    """Match a token of the given type.
-
-    Args:
-        token_type: The token type to match (e.g., "IDENT", "NUMBER")
-
-    Returns:
-        Parser that returns the matched token
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.failure(index, f"expected {token_type}")
-        token = tokens[index]
-        if token.type == token_type:
-            return Result.success(index + 1, token)
-        return Result.failure(index, f"expected {token_type}, got {token.type}")
-
-    return parser
-
-
 def match_keyword(value: str) -> P[KeywordToken]:
     """Match a keyword token with the given value.
 
@@ -160,7 +138,7 @@ def match_keyword(value: str) -> P[KeywordToken]:
         token = tokens[index]
         if isinstance(token, KeywordToken) and token.keyword == value:
             return Result.success(index + 1, token)
-        return Result.failure(index, f"expected keyword '{value}', got {token.type}")
+        return Result.failure(index, f"expected keyword '{value}', got {str(token)}")
 
     return parser
 
@@ -203,7 +181,7 @@ def match_ident() -> P[IdentifierToken]:
         token = tokens[index]
         if isinstance(token, IdentifierToken):
             return Result.success(index + 1, token)
-        return Result.failure(index, f"expected identifier, got {token.type}")
+        return Result.failure(index, f"expected identifier, got {str(token)}")
 
     return parser
 
@@ -643,7 +621,7 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
             elif can_start_decl:
                 # Token looked like it could start a declaration but parsing failed
                 # This is an error - we expected a declaration but couldn't parse it
-                return Result.failure(i, f"expected valid declaration starting with {token.type}")
+                return Result.failure(i, f"expected valid declaration starting with {str(token)}")
             else:
                 # Unknown token that doesn't start a declaration, skip it
                 i += 1
