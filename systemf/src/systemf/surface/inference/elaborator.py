@@ -80,6 +80,12 @@ from systemf.surface.inference.unification import (
 from systemf.surface.scoped.checker import ScopeChecker
 from systemf.surface.scoped.context import ScopeContext
 from systemf.utils.location import Location
+from systemf.elaborator.scc import SCCAnalyzer, SCCNode, analyze_type_dependencies
+from systemf.elaborator.coercion_axioms import (
+    CoercionAxiomGenerator,
+    generate_axioms_for_declarations,
+    ADTAxiom,
+)
 
 
 class TypeElaborator:
@@ -484,11 +490,25 @@ class TypeElaborator:
                 result_type = self._apply_subst(remaining_type)
 
                 core_term = core.Constructor(location, name, core_args)
+
+                # Check for coercion axiom to convert from representation to abstract type
+                # This handles ADT representation coercions in System FC
+                core_term, result_type = self._maybe_add_coercion(
+                    core_term, result_type, location, ctx
+                )
+
                 return (core_term, result_type)
 
             case SurfaceCase(location=location, scrutinee=scrutinee, branches=branches):
                 # Pattern matching: infer scrutinee type, check branches
                 core_scrut, scrut_type = self.infer(scrutinee, ctx)
+
+                # Check for inverse coercion - if scrutinee type is abstract ADT,
+                # we need to convert it to representation type for pattern matching
+                scrut_type = self._apply_subst(scrut_type)
+                core_scrut, scrut_type = self._maybe_add_inverse_coercion(
+                    core_scrut, scrut_type, location, ctx
+                )
 
                 # Collect all branch results first
                 branch_results: list[tuple[core.Branch, Type]] = []
@@ -1078,6 +1098,99 @@ class TypeElaborator:
         """
         return self._subst_type_var(ty, old_var, TypeVar(new_var))
 
+    def _maybe_add_coercion(
+        self,
+        term: core.Term,
+        result_type: Type,
+        location: Optional[Location],
+        ctx: TypeContext,
+    ) -> tuple[core.Term, Type]:
+        """Add coercion cast to constructor if ADT axiom exists.
+
+        In System FC, data constructors produce values in representation types
+        (Repr(T)), but the expected type is the abstract type (T). This method
+        checks if there's a coercion axiom for the result type and wraps the
+        constructor in a Cast if needed.
+
+        Args:
+            term: The elaborated constructor term
+            result_type: The type produced by the constructor
+            location: Source location for error reporting
+            ctx: Current type context with coercion axioms
+
+        Returns:
+            Tuple of (possibly cast-wrapped term, final type)
+        """
+        # Check if result_type is a type constructor that has a coercion axiom
+        match result_type:
+            case TypeConstructor(name=type_name):
+                axiom_name = f"ax_{type_name}"
+                if ctx.is_coercion_axiom(axiom_name):
+                    # Found a coercion axiom - wrap in Cast
+                    from systemf.core.coercion import CoercionSym
+
+                    axiom = ctx.lookup_coercion_axiom(axiom_name)
+                    # Constructor produces Repr(T), but expected type is T.
+                    # ax_Nat : Nat ~ Repr(Nat), so Sym(ax_Nat) : Repr(Nat) ~ Nat
+                    # We need to cast from Repr(Nat) to Nat, so use Sym(axiom).
+                    cast_term = core.Cast(location, term, CoercionSym(axiom))
+                    return (cast_term, result_type)
+            case _:
+                pass
+
+        # No coercion needed
+        return (term, result_type)
+
+    def _maybe_add_inverse_coercion(
+        self,
+        term: core.Term,
+        scrut_type: Type,
+        location: Optional[Location],
+        ctx: TypeContext,
+    ) -> tuple[core.Term, Type]:
+        """Add inverse coercion cast when destructuring ADT values.
+
+        In System FC, pattern matching on ADT values requires converting from
+        abstract type (T) to representation type (Repr(T)) first. This method
+        checks if the scrutinee type has a coercion axiom and wraps the scrutinee
+        in a Cast with the inverse (symmetric) coercion.
+
+        For example:
+            - scrutinee has type Nat (abstract)
+            - We need to convert to Repr(Nat) for pattern matching
+            - Use Cast(scrutinee, Sym(ax_Nat)) : Repr(Nat)
+
+        Args:
+            term: The elaborated scrutinee term
+            scrut_type: The type of the scrutinee (expected to be abstract ADT)
+            location: Source location for error reporting
+            ctx: Current type context with coercion axioms
+
+        Returns:
+            Tuple of (possibly cast-wrapped term, representation type)
+        """
+        from systemf.core.coercion import CoercionSym
+
+        # Check if scrut_type is a type constructor that has a coercion axiom
+        match scrut_type:
+            case TypeConstructor(name=type_name):
+                axiom_name = f"ax_{type_name}"
+                if ctx.is_coercion_axiom(axiom_name):
+                    # Found a coercion axiom - use direct axiom for pattern matching
+                    axiom = ctx.lookup_coercion_axiom(axiom_name)
+                    # Pattern matching: scrutinee has type Nat (abstract), cast to Repr(Nat).
+                    # ax_Nat : Nat ~ Repr(Nat), so use axiom directly (not Sym).
+                    # axiom takes us from Nat to Repr(Nat) exactly as needed.
+                    cast_term = core.Cast(location, term, axiom)
+                    # Return the representation type
+                    repr_type = axiom.right
+                    return (cast_term, repr_type)
+            case _:
+                pass
+
+        # No coercion needed
+        return (term, scrut_type)
+
     def elaborate_declarations(
         self,
         decls: list[SurfaceDeclaration],
@@ -1185,6 +1298,10 @@ class TypeElaborator:
         if constructors:
             for name, ty in constructors.items():
                 ctx = ctx.add_constructor(name, ty)
+
+        # Phase 3.5: Generate coercion axioms for ADTs
+        # Run SCC analysis and generate coercion axioms for data declarations
+        ctx = self._generate_coercion_axioms(other_decls, ctx)
 
         # Phase 4: Elaborate each term declaration body with full context
         elaborated_terms: dict[str, core.TermDeclaration] = {}
@@ -1375,6 +1492,132 @@ class TypeElaborator:
             name=name,
             params=[],
             constructors=[],
+        )
+
+    def _generate_coercion_axioms(
+        self,
+        other_decls: list[tuple[int, SurfaceDeclaration]],
+        ctx: TypeContext,
+    ) -> TypeContext:
+        """Generate coercion axioms for ADT declarations.
+
+        This method implements Phase 3.5 of the System FC elaboration pipeline:
+        1. Run SCC analysis to identify recursive ADT groups
+        2. Generate coercion axioms for each data declaration
+        3. Add axioms to the type context for use during elaboration
+
+        Args:
+            other_decls: List of (index, declaration) tuples from elaboration
+            ctx: Current type context
+
+        Returns:
+            Updated type context with coercion axioms added
+        """
+        from systemf.surface.types import SurfaceDataDeclaration
+
+        # Extract data declarations for SCC analysis
+        data_decls: list[SurfaceDataDeclaration] = []
+        for _, decl in other_decls:
+            if isinstance(decl, SurfaceDataDeclaration):
+                data_decls.append(decl)
+
+        if not data_decls:
+            # No data declarations to process
+            return ctx
+
+        # Build SCC nodes from data declarations
+        scc_nodes: list[SCCNode[SurfaceDataDeclaration]] = []
+        decl_map: dict[str, SurfaceDataDeclaration] = {}
+
+        for decl in data_decls:
+            # Find dependencies (types referenced in constructor arguments)
+            dependencies: set[str] = set()
+            for con_info in decl.constructors:
+                for arg_type in con_info.args:
+                    # Extract type names from arguments
+                    self._collect_type_dependencies(arg_type, dependencies)
+
+            node = SCCNode(
+                id=decl.name,
+                data=decl,
+                dependencies=list(dependencies),
+            )
+            scc_nodes.append(node)
+            decl_map[decl.name] = decl
+
+        # Run SCC analysis
+        analyzer = SCCAnalyzer(scc_nodes)
+        scc_result = analyzer.analyze()
+
+        # Generate coercion axioms for each data declaration
+        axiom_generator = CoercionAxiomGenerator()
+
+        # Process components in order (respecting dependencies)
+        for component in scc_result.components:
+            for node_id in component.get_node_ids():
+                if node_id in decl_map:
+                    decl = decl_map[node_id]
+                    # Generate axiom: ax_Name : Name ~ Repr(Name)
+                    core_decl = self._convert_surface_to_core_data_decl(decl)
+                    adt_axiom = axiom_generator.generate_axiom(core_decl)
+
+                    # Add axiom to context
+                    ctx = ctx.add_coercion_axiom(adt_axiom.coercion)
+
+        return ctx
+
+    def _collect_type_dependencies(
+        self,
+        surface_type: SurfaceType,
+        dependencies: set[str],
+    ) -> None:
+        """Collect type constructor names from a surface type.
+
+        Args:
+            surface_type: Surface type to analyze
+            dependencies: Set to add dependency names to
+        """
+        from systemf.surface.types import (
+            SurfaceTypeConstructor,
+            SurfaceTypeArrow,
+            SurfaceTypeForall,
+        )
+
+        match surface_type:
+            case SurfaceTypeConstructor(name=name, args=args):
+                dependencies.add(name)
+                for arg in args:
+                    self._collect_type_dependencies(arg, dependencies)
+            case SurfaceTypeArrow(arg=arg, ret=ret):
+                self._collect_type_dependencies(arg, dependencies)
+                self._collect_type_dependencies(ret, dependencies)
+            case SurfaceTypeForall(body=body):
+                self._collect_type_dependencies(body, dependencies)
+            case _:
+                pass
+
+    def _convert_surface_to_core_data_decl(
+        self,
+        decl: SurfaceDataDeclaration,
+    ) -> core.DataDeclaration:
+        """Convert a surface data declaration to core data declaration.
+
+        Args:
+            decl: Surface data declaration
+
+        Returns:
+            Core data declaration
+        """
+        core_constructors: list[tuple[str, list[Type]]] = []
+
+        for con_info in decl.constructors:
+            core_args = [self._surface_to_core_type(arg, TypeContext()) for arg in con_info.args]
+            core_constructors.append((con_info.name, core_args))
+
+        return core.DataDeclaration(
+            name=decl.name,
+            params=decl.params,
+            constructors=core_constructors,
         )
 
 

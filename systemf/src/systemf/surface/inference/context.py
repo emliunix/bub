@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from systemf.core.types import Type, TypeArrow, TypeForall
+from systemf.core.coercion import CoercionAxiom
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class TypeContext:
     constructors: dict[str, Type] = field(default_factory=dict)
     globals: dict[str, Type] = field(default_factory=dict)
     metas: list[Type] = field(default_factory=list)
+    coercion_axioms: dict[str, CoercionAxiom] = field(default_factory=dict)
 
     def lookup_term_type(self, index: int) -> Type:
         """Get the type of a term variable by de Bruijn index.
@@ -186,6 +188,7 @@ class TypeContext:
             constructors=self.constructors,
             globals=self.globals,
             metas=self.metas,
+            coercion_axioms=self.coercion_axioms,
         )
 
     def extend_type(self, name: str, kind: Optional[Type] = None) -> TypeContext:
@@ -215,6 +218,7 @@ class TypeContext:
             constructors=self.constructors,
             globals=self.globals,
             metas=self.metas,
+            coercion_axioms=self.coercion_axioms,
         )
 
     def add_constructor(self, name: str, ty: Type) -> TypeContext:
@@ -235,6 +239,7 @@ class TypeContext:
             constructors=new_constructors,
             globals=self.globals,
             metas=self.metas,
+            coercion_axioms=self.coercion_axioms,
         )
 
     def add_global(self, name: str, ty: Type) -> TypeContext:
@@ -255,6 +260,7 @@ class TypeContext:
             constructors=self.constructors,
             globals=new_globals,
             metas=self.metas,
+            coercion_axioms=self.coercion_axioms,
         )
 
     def add_meta(self, meta: Type) -> TypeContext:
@@ -274,7 +280,82 @@ class TypeContext:
             constructors=self.constructors,
             globals=self.globals,
             metas=self.metas + [meta],
+            coercion_axioms=self.coercion_axioms,
         )
+
+    def lookup_coercion_axiom(self, name: str) -> CoercionAxiom:
+        """Get a coercion axiom by name.
+
+        Args:
+            name: The coercion axiom name (e.g., "ax_Nat")
+
+        Returns:
+            The coercion axiom
+
+        Raises:
+            NameError: If the coercion axiom is not found
+
+        Example:
+            >>> ctx = TypeContext(coercion_axioms={"ax_Nat": CoercionAxiom("ax_Nat", Nat, Repr(Nat))})
+            >>> ctx.lookup_coercion_axiom("ax_Nat")
+            CoercionAxiom(name='ax_Nat', ...)
+        """
+        if name not in self.coercion_axioms:
+            raise NameError(f"Undefined coercion axiom '{name}'")
+        return self.coercion_axioms[name]
+
+    def add_coercion_axiom(self, axiom: CoercionAxiom) -> TypeContext:
+        """Create a new context with an additional coercion axiom.
+
+        Args:
+            axiom: The coercion axiom to add
+
+        Returns:
+            A new TypeContext with the axiom added
+
+        Example:
+            >>> ctx = TypeContext()
+            >>> axiom = CoercionAxiom("ax_Nat", Nat, Repr(Nat))
+            >>> new_ctx = ctx.add_coercion_axiom(axiom)
+            >>> new_ctx.lookup_coercion_axiom("ax_Nat")
+            CoercionAxiom(name='ax_Nat', ...)
+        """
+        new_axioms = dict(self.coercion_axioms)
+        new_axioms[axiom.name] = axiom
+        return TypeContext(
+            term_types=self.term_types,
+            type_vars=self.type_vars,
+            constructors=self.constructors,
+            globals=self.globals,
+            metas=self.metas,
+            coercion_axioms=new_axioms,
+        )
+
+    def is_coercion_axiom(self, name: str) -> bool:
+        """Check if a name is a known coercion axiom.
+
+        Args:
+            name: The name to check
+
+        Returns:
+            True if the name is a coercion axiom
+
+        Example:
+            >>> ctx = TypeContext(coercion_axioms={"ax_Nat": ...})
+            >>> ctx.is_coercion_axiom("ax_Nat")
+            True
+            >>> ctx.is_coercion_axiom("ax_Bool")
+            False
+        """
+        return name in self.coercion_axioms
+
+    def get_coercion_axioms(self) -> dict[str, CoercionAxiom]:
+        """Get all coercion axioms in the context.
+
+        Returns:
+            Dictionary mapping axiom names to coercion axioms
+        """
+        return dict(self.coercion_axioms)
 
     def is_bound_term(self, index: int) -> bool:
         """Check if a term variable index is valid.
@@ -344,6 +425,7 @@ class TypeContext:
             f"type_vars={self.type_vars}, "
             f"constructors={set(self.constructors.keys())}, "
             f"globals={set(self.globals.keys())}, "
-            f"metas={len(self.metas)}"
+            f"metas={len(self.metas)}, "
+            f"coercion_axioms={set(self.coercion_axioms.keys())}"
             f")"
         )

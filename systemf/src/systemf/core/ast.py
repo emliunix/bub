@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from systemf.core.types import Type, TypeVar
+from systemf.core.coercion import Coercion, CoercionRefl
 from systemf.utils.location import Location
 
 
@@ -233,6 +234,55 @@ class ToolCall(Term):
 
 
 @dataclass(frozen=True)
+class Cast(Term):
+    """Type cast using coercion: expr ▷ γ
+
+    System FC extends System F with explicit type casts using coercions.
+    A cast (expr ▷ γ) converts expr from type τ₁ to type τ₂ where γ : τ₁ ~ τ₂.
+
+    The coercion γ is a proof that the two types are equal, witnessed by
+    the coercion system. Casts are zero-cost (erased at runtime).
+
+    Example:
+        x : Int, ax : Int ~ Nat ⊢ (x ▷ ax) : Nat
+    """
+
+    expr: Term = field(default_factory=lambda: Var())
+    coercion: Coercion = field(default_factory=lambda: CoercionRefl(TypeVar("_")))
+    # source_loc inherited from Term
+
+    def __str__(self) -> str:
+        return f"({self.expr} ▷ {self.coercion})"
+
+
+@dataclass(frozen=True)
+class Axiom(Term):
+    """Axiom term for introducing coercion proofs: axiom[name] @ [τ₁, ..., τₙ]
+
+    Axiom terms introduce named coercion axioms with type arguments.
+    They are used during elaboration to convert between abstract and
+    representation types for ADTs.
+
+    The name identifies the axiom (e.g., "ax_Nat"), and args provide
+    type arguments for polymorphic axioms.
+
+    Example:
+        axiom[ax_Nat] @ [] : Nat ~ Repr(Nat)
+        axiom[ax_List] @ [Int] : List Int ~ Repr(List Int)
+    """
+
+    name: str = ""
+    args: list[Type] = field(default_factory=list)
+    # source_loc inherited from Term
+
+    def __str__(self) -> str:
+        if not self.args:
+            return f"axiom[{self.name}]"
+        args_str = ", ".join(str(arg) for arg in self.args)
+        return f"axiom[{self.name}] @ [{args_str}]"
+
+
+@dataclass(frozen=True)
 class DataDeclaration:
     """data T a = K₁ τ₁ | ... | Kₙ τₙ"""
 
@@ -267,4 +317,6 @@ Declaration = DataDeclaration | TermDeclaration
 
 
 # Export the term union for type checking
-TermRepr = Union[Var, Abs, App, TAbs, TApp, Constructor, Case, Let, ToolCall, Lit, PrimOp]
+TermRepr = Union[
+    Var, Abs, App, TAbs, TApp, Constructor, Case, Let, ToolCall, Lit, PrimOp, Cast, Axiom
+]
