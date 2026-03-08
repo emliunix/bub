@@ -156,5 +156,29 @@ class PrimitiveType(Type):
         return self
 
 
+@dataclass(frozen=True)
+class TypeSkolem(Type):
+    """Rigid (skolem) type variable.
+
+    Created during skolemisation (GEN2, DEEP-SKOL). A skolem is a
+    placeholder for "any type" — it must NOT unify with anything except
+    itself (same name AND same unique id).
+
+    Paper: SkolemTv String Uniq (putting-2007-implementation.hs L60)
+    """
+
+    name: str
+    unique: int
+
+    def __str__(self) -> str:
+        return f"${self.name}_{self.unique}"
+
+    def free_vars(self) -> set[str]:
+        return {str(self)}
+
+    def substitute(self, subst: dict[str, Type]) -> Type:
+        return self
+
+
 # Export the type union for type checking
-TypeRepr = Union[TypeVar, TypeArrow, TypeForall, TypeConstructor, PrimitiveType]
+TypeRepr = Union[TypeVar, TypeArrow, TypeForall, TypeConstructor, PrimitiveType, TypeSkolem]

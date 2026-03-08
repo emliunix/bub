@@ -107,7 +107,7 @@ class TestGap1_LetPolymorphism:
         id_body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
         id_fn = ScopedAbs(var_name="x", var_type=None, body=id_body, location=DUMMY_LOC)
 
-        # id 3  (after let, id is at index 0)
+        # id 3  (in inner let RHS, before unused is bound, id is at index 0)
         id_var_0 = ScopedVar(index=0, debug_name="id", location=DUMMY_LOC)
         app_int = SurfaceApp(
             func=id_var_0,
@@ -115,8 +115,8 @@ class TestGap1_LetPolymorphism:
             location=DUMMY_LOC,
         )
 
-        # id True  (id still at index 0 – same scope)
-        id_var_1 = ScopedVar(index=0, debug_name="id", location=DUMMY_LOC)
+        # id True  (in inner let body, after unused is bound at index 0, id is at index 1)
+        id_var_1 = ScopedVar(index=1, debug_name="id", location=DUMMY_LOC)
         app_bool = SurfaceApp(
             func=id_var_1,
             arg=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
@@ -153,9 +153,13 @@ class TestGap1_LetPolymorphism:
         )
 
         # This should succeed – id should be generalised to ∀a. a → a
-        core_term, ty = elab.infer(outer_let, ctx_with_bool)
+        # Use typecheck() for end-to-end type inference (resolves all metas)
+        core_term, ty = elab.typecheck(outer_let, ctx_with_bool)
 
         # Result type should be Bool (the type of `id True`)
+        # After generalization, if no free vars, we get ForAll [] Bool
+        if isinstance(ty, TypeForall):
+            ty = ty.body  # Unwrap the forall
         assert isinstance(ty, TypeConstructor)
         assert ty.name == "Bool"
 
@@ -173,12 +177,12 @@ class TestGap1_LetPolymorphism:
             location=DUMMY_LOC,
         )
 
-        core_term, ty = elab.infer(let_term, empty_ctx)
+        # Use typecheck for top-level generalization (like Haskell's typecheck)
+        core_term, ty = elab.typecheck(let_term, empty_ctx)
 
         # The result should be a generalised forall type, not a bare meta arrow
         assert isinstance(ty, TypeForall), (
-            f"Expected ∀a. a→a but got {ty} — "
-            f"GEN1 generalisation is missing"
+            f"Expected ∀a. a→a but got {ty} — GEN1 generalisation is missing"
         )
 
 
@@ -285,6 +289,7 @@ class TestGap3_VarInstantiation:
         ctx = TypeContext(term_types=[poly_type])
 
         x = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
+        # Use infer to test internal inference behavior (VAR instantiation)
         _core_term, ty = elab.infer(x, ctx)
 
         # The returned type must be a rho (no top-level forall)
@@ -562,10 +567,12 @@ class TestCombinedGaps:
             location=DUMMY_LOC,
         )
 
-        core_term, ty = elab.infer(let_term, empty_ctx)
+        # Use typecheck for top-level generalization
+        core_term, ty = elab.typecheck(let_term, empty_ctx)
 
-        # Result should be a function type (the identity applied to itself)
-        assert isinstance(ty, TypeArrow), f"Expected function type but got {ty}"
+        # Result should be the polymorphic identity type (generalised)
+        # Haskell reference: ∀a. a → a
+        assert isinstance(ty, TypeForall), f"Expected polymorphic type but got {ty}"
 
     def test_checking_wrong_function_against_poly_annotation(self, elab, empty_ctx):
         r"""((\x -> 42) :: ∀a. a → a) should FAIL.
@@ -642,7 +649,9 @@ class TestCombinedGaps:
             location=DUMMY_LOC,
         )
 
-        core_term, ty = elab.infer(outer_let, empty_ctx)
+        # Use typecheck() for end-to-end type inference with generalization
+        core_term, ty = elab.typecheck(outer_let, empty_ctx)
 
-        # succ zero should have a function type
-        assert isinstance(ty, TypeArrow), f"Expected function type but got {ty}"
+        # succ zero should have a polymorphic type (generalised Church numeral)
+        # Type should be ∀a.∀b.(b -> a) -> b -> a
+        assert isinstance(ty, TypeForall), f"Expected polymorphic type but got {ty}"

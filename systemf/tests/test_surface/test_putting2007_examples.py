@@ -341,62 +341,78 @@ class TestMultiBranchConstructs:
     Key issue: Branches might have polymorphic (rho) types, not just mono.
     """
 
-    def test_simple_if_monotyped_branches(self, elab, empty_ctx):
-        r"""If with monomorphic branches (Choice 1)."""
-        # if True then 1 else 0
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-            else_branch=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+    def test_case_bool_monotyped_branches(self, elab, bool_ctx):
+        r"""Case with Bool and monomorphic branches (equivalent to if-then-else)."""
+        # case True of True -> 1 | False -> 0
+        branches = [
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
+                location=DUMMY_LOC,
+            ),
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+                location=DUMMY_LOC,
+            ),
+        ]
+
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            branches=branches,
             location=DUMMY_LOC,
         )
 
-        core_term, ty = elab.infer(if_term, empty_ctx)
+        # Use typecheck to get resolved concrete type
+        core_term, ty = elab.typecheck(case_term, bool_ctx)
 
         assert ty.name == "Int"
 
-    def test_if_polymorphic_branches(self, elab, empty_ctx):
-        r"""If with polymorphic branches - tests subsumption vs unification.
+    def test_case_bool_polymorphic_branches(self, elab, bool_ctx):
+        r"""Case with Bool and polymorphic branches - tests subsumption vs unification.
 
-        Paper example (Section 7.1):
-        if True then (\x -> x) else (\y -> y)
+        Paper example (Section 7.1) adapted to case:
+        case True of True -> (\x -> x) | False -> (\y -> y)
         -- Both branches: forall a. a -> a
 
         Choice 3 requires two-way subsumption:
         subsCheck rho1 rho2
         subsCheck rho2 rho1
         """
-        # if True then (\x -> x) else (\y -> y)
         # Both branches are identity functions
-
-        then_branch = ScopedAbs(
+        id_branch = ScopedAbs(
             var_name="x",
             var_type=None,
             body=ScopedVar(index=0, debug_name="x", location=DUMMY_LOC),
             location=DUMMY_LOC,
         )
 
-        else_branch = ScopedAbs(
-            var_name="y",
-            var_type=None,
-            body=ScopedVar(index=0, debug_name="y", location=DUMMY_LOC),
+        branches = [
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                body=id_branch,
+                location=DUMMY_LOC,
+            ),
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                body=id_branch,
+                location=DUMMY_LOC,
+            ),
+        ]
+
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            branches=branches,
             location=DUMMY_LOC,
         )
 
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=then_branch,
-            else_branch=else_branch,
-            location=DUMMY_LOC,
-        )
+        # Use typecheck to get resolved concrete type
+        core_term, ty = elab.typecheck(case_term, bool_ctx)
 
-        # This should work if we use two-way subsumption
-        # Current implementation uses unification, which may fail
-        # for polymorphic branches
-        core_term, ty = elab.infer(if_term, empty_ctx)
-
-        # Both branches should have the same function type
-        assert isinstance(ty, TypeArrow)
+        # Both branches should have the same polymorphic function type
+        # Result is forall a. a -> a, so check that it's a forall containing an arrow
+        assert isinstance(ty, TypeForall)
+        assert isinstance(ty.body, TypeArrow)
 
     def test_case_basic(self, elab, empty_ctx):
         r"""Basic case expression."""
@@ -428,7 +444,7 @@ class TestMultiBranchConstructs:
 
         assert ty.name == "Int"
 
-    def test_if_prenex_equality(self, elab, empty_ctx):
+    def test_case_prenex_equality(self, elab, bool_ctx):
         r"""Test if with branches equal up to prenex conversion.
 
         Paper Section 7.1: Two types can be equivalent under prenex conversion
@@ -464,19 +480,34 @@ class TestMultiBranchConstructs:
             location=DUMMY_LOC,
         )
 
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=branch1,
-            else_branch=branch2,
+        branches = [
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                body=branch1,
+                location=DUMMY_LOC,
+            ),
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                body=branch2,
+                location=DUMMY_LOC,
+            ),
+        ]
+
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            branches=branches,
             location=DUMMY_LOC,
         )
 
-        core_term, ty = elab.infer(if_term, empty_ctx)
+        # Use typecheck to get resolved concrete type
+        core_term, ty = elab.typecheck(case_term, bool_ctx)
 
-        # Both branches should have the same polymorphic type
-        assert isinstance(ty, TypeArrow)
+        # Both branches should have the same polymorphic function type
+        # Result is forall a. a -> a, so check that it's a forall containing an arrow
+        assert isinstance(ty, TypeForall)
+        assert isinstance(ty.body, TypeArrow)
 
-    def test_if_different_polymorphic_branches(self, elab, empty_ctx):
+    def test_case_different_polymorphic_branches(self, elab, bool_ctx):
         r"""Test if where branches have different but compatible polymorphic types.
 
         Branch 1: forall a. a -> a  (fully polymorphic identity)
@@ -501,19 +532,31 @@ class TestMultiBranchConstructs:
         inner_body2 = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
         branch2 = ScopedAbs(var_name="x", var_type=int_type, body=inner_body2, location=DUMMY_LOC)
 
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=branch1,
-            else_branch=branch2,
+        branches = [
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                body=branch1,
+                location=DUMMY_LOC,
+            ),
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                body=branch2,
+                location=DUMMY_LOC,
+            ),
+        ]
+
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            branches=branches,
             location=DUMMY_LOC,
         )
 
         # This should FAIL - the types are not equivalent under two-way subsumption
         with pytest.raises((TypeMismatchError, UnificationError)):
-            elab.infer(if_term, empty_ctx)
+            elab.infer(case_term, bool_ctx)
 
-    def test_if_equivalent_polymorphic_branches(self, elab, empty_ctx):
-        r"""Test if where branches have equivalent polymorphic types via instantiation.
+    def test_case_equivalent_polymorphic_branches(self, elab, bool_ctx):
+        r"""Test case where branches have equivalent polymorphic types via instantiation.
 
         Both branches: forall a. a -> a
         These should be equivalent (both ways subsumption succeeds).
@@ -537,25 +580,38 @@ class TestMultiBranchConstructs:
         )
         branch2 = SurfaceTypeAbs(var="b", body=inner_abs2, location=DUMMY_LOC)
 
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=branch1,
-            else_branch=branch2,
+        branches = [
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                body=branch1,
+                location=DUMMY_LOC,
+            ),
+            SurfaceBranch(
+                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                body=branch2,
+                location=DUMMY_LOC,
+            ),
+        ]
+
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            branches=branches,
             location=DUMMY_LOC,
         )
 
         # This should succeed - both branches have equivalent polymorphic types
-        core_term, ty = elab.infer(if_term, empty_ctx)
+        # Use typecheck to get resolved concrete type
+        core_term, ty = elab.typecheck(case_term, bool_ctx)
 
         # Result should be a polymorphic function type
         assert isinstance(ty, TypeForall)
 
-    def test_if_contravariant_subsumption(self, elab, empty_ctx):
+    def test_case_contravariant_subsumption(self, elab, bool_ctx):
         r"""Test subsumption in contravariant position (function arguments).
 
         Paper Section 3.3: Subsumption is contravariant in function arguments.
 
-        If:
+        Case:
         - Branch 1: (Int -> Int) -> Int   (accepts less polymorphic arg)
         - Branch 2: (forall a. a -> a) -> Int  (accepts more polymorphic arg)
 
@@ -714,7 +770,8 @@ class TestHigherRankConstructors:
 
         case_term = SurfaceCase(scrutinee=scrut, branches=branches, location=DUMMY_LOC)
 
-        core_term, ty = elab.infer(case_term, ctx)
+        # Use typecheck to get resolved concrete type
+        core_term, ty = elab.typecheck(case_term, ctx)
 
         # Result should be Int
         assert ty.name == "Int"
@@ -794,7 +851,8 @@ class TestPutting2007Integration:
 
         abs_term = ScopedAbs(var_name="f", var_type=surface_id_type, body=app, location=DUMMY_LOC)
 
-        core_term, ty = elab.infer(abs_term, empty_ctx)
+        # Use typecheck to get resolved concrete type
+        core_term, ty = elab.typecheck(abs_term, empty_ctx)
 
         # Should have type (forall a. a->a) -> Int
         assert isinstance(ty, TypeArrow)
@@ -823,3 +881,14 @@ def empty_ctx():
 def int_var_ctx():
     r"""Create a context with a variable of type Int."""
     return TypeContext(term_types=[TypeConstructor("Int", [])])
+
+
+@pytest.fixture
+def bool_ctx():
+    r"""Create a context with Bool constructors (True, False)."""
+    return TypeContext(
+        constructors={
+            "True": TypeConstructor("Bool", []),
+            "False": TypeConstructor("Bool", []),
+        }
+    )

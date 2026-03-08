@@ -38,6 +38,7 @@ from systemf.core.types import (
     TypeForall,
     TypeConstructor,
     PrimitiveType,
+    TypeSkolem,
 )
 from systemf.surface.types import (
     GlobalVar,
@@ -82,10 +83,21 @@ from systemf.surface.scoped.context import ScopeContext
 from systemf.utils.location import Location
 from systemf.elaborator.scc import SCCAnalyzer, SCCNode, analyze_type_dependencies
 from systemf.elaborator.coercion_axioms import (
-    CoercionAxiomGenerator,
-    generate_axioms_for_declarations,
-    ADTAxiom,
+    CoercionAxiom,
 )
+
+
+def _fresh_binder_names(count: int, ty: Type) -> list[str]:
+    """Generate fresh binder names not already used in ty."""
+    used = ty.free_vars()
+    candidates = [chr(c) for c in range(ord("a"), ord("z") + 1)] + [
+        f"{chr(c)}{i}" for i in range(1, 100) for c in range(ord("a"), ord("z") + 1)
+    ]
+    result = []
+    for name in candidates:
+        if name not in used and len(result) < count:
+            result.append(name)
+    return result
 
 
 class TypeElaborator:
@@ -111,6 +123,13 @@ class TypeElaborator:
         """Initialize the type elaborator."""
         self.subst: Substitution = Substitution.empty()
         self._meta_counter: int = 0
+        self._skolem_counter: int = 0
+
+    def _fresh_skolem(self, name: str) -> TypeSkolem:
+        """Create a fresh rigid skolem constant."""
+        uid = self._skolem_counter
+        self._skolem_counter += 1
+        return TypeSkolem(name, uid)
 
     def _fresh_meta(self, name: Optional[str] = None) -> TMeta:
         """Create a fresh meta type variable.
@@ -245,6 +264,10 @@ class TypeElaborator:
                     var_type = ctx.lookup_term_type(index)
                     # Apply current substitution
                     var_type = self._apply_subst(var_type)
+                    # INST1: instantiate sigma -> rho in synthesis mode
+                    # This is the VAR rule from Putting2007
+                    var_type = self._instantiate(var_type)
+                    var_type = self._apply_subst(var_type)
                     core_term = core.Var(location, index, debug_name)
                     return (core_term, var_type)
                 except IndexError:
@@ -321,8 +344,8 @@ class TypeElaborator:
 
                 match func_type:
                     case TypeArrow(param_type, ret_type):
-                        # Check argument against parameter type
-                        core_arg = self.check(arg, param_type, ctx)
+                        # Check argument against parameter type (use check_sigma for polymorphic args)
+                        core_arg = self.check_sigma(arg, param_type, ctx)
                         # Apply substitution to resolve any meta-variables in return type
                         ret_type = self._apply_subst(ret_type)
 
@@ -416,8 +439,8 @@ class TypeElaborator:
                 core_bindings = []
 
                 for var_name, var_type_ann, value in bindings:
-                    # Infer value type
-                    core_value, value_type = self.infer(value, new_ctx)
+                    # GEN1: Infer and generalise value type
+                    core_value, value_type = self.infer_sigma(value, new_ctx)
 
                     # If there's a type annotation, check against it
                     if var_type_ann is not None:
@@ -731,15 +754,11 @@ class TypeElaborator:
                         return core.Abs(location, var_name, final_param_type, core_body)
 
                     case TypeForall(_, _) as forall_type:
-                        # Lambda against forall: instantiate and check
+                        # Lambda against forall: skolemize and check (GEN2)
                         # Example: checking `λx → x` against `∀a. a → a`
-                        # Instantiate to get `a → a` (with fresh meta), then check lambda
-                        instantiated = self._instantiate(forall_type)
-                        instantiated = self._apply_subst(instantiated)
-
-                        # Now check the lambda against the instantiated type
-                        # This will match the TypeArrow case above
-                        return self.check(term, instantiated, ctx)
+                        # Skolemize to get `$a_0 → $a_0` (rigid skolem), then check lambda
+                        # This prevents unification with concrete types
+                        return self.check_sigma(term, forall_type, ctx)
 
                     case TMeta() as meta:
                         # Unknown expected type - infer lambda type
@@ -867,8 +886,6 @@ class TypeElaborator:
                     )
                 except UnificationError as e:
                     # Convert to TypeMismatchError for better error messages
-                    from .errors import TypeMismatchError
-
                     raise TypeMismatchError(
                         expected=expected,
                         actual=inferred_type,
@@ -1177,7 +1194,7 @@ class TypeElaborator:
                 # MONO rule: Unify monomorphic types
                 self._unify(sigma, rho, location)
 
-    def _skolemise(self, ty: Type) -> tuple[list[str], Type]:
+    def _skolemise(self, ty: Type) -> tuple[list[TypeSkolem], Type]:
         """Weak prenex conversion: pr(σ) = ∀ā.ρ.
 
         From Putting2007 paper Section 4.5:
@@ -1191,19 +1208,19 @@ class TypeElaborator:
             ty: The type to skolemize
 
         Returns:
-            Tuple of (skolem variable names, rho type)
+            Tuple of (skolem constants, rho type)
         """
-        skolems: list[str] = []
+        skolems: list[TypeSkolem] = []
         current = ty
 
         while True:
             match current:
                 case TypeForall(var, body):
-                    # Create skolem constant for this bound variable
-                    skolem_name = f"_skol_{var}_{len(skolems)}"
-                    skolems.append(skolem_name)
+                    # Create rigid skolem constant for this bound variable
+                    sk = self._fresh_skolem(var)
+                    skolems.append(sk)
                     # Substitute skolem for bound variable
-                    current = self._subst_type_var(body, var, TypeVar(skolem_name))
+                    current = self._subst_type_var(body, var, sk)
 
                 case TypeArrow(arg, ret, doc):
                     # Check if return type has foralls that can be hoisted
@@ -1211,9 +1228,9 @@ class TypeElaborator:
                         case TypeForall(ret_var, ret_body):
                             # PRFUN: hoist foralls from return type
                             # pr(σ₁→∀ā.σ₂) = ∀ā.(σ₁→σ₂) if ā ∉ fv(σ₁)
-                            skolem_name = f"_skol_{ret_var}_{len(skolems)}"
-                            skolems.append(skolem_name)
-                            new_ret = self._subst_type_var(ret_body, ret_var, TypeVar(skolem_name))
+                            sk = self._fresh_skolem(ret_var)
+                            skolems.append(sk)
+                            new_ret = self._subst_type_var(ret_body, ret_var, sk)
                             current = TypeArrow(arg, new_ret, doc)
                             # Continue processing in case there are more foralls
                             continue
@@ -1746,6 +1763,138 @@ class TypeElaborator:
             constructors=core_constructors,
         )
 
+    def typecheck(
+        self,
+        term: ScopedVar
+        | ScopedAbs
+        | SurfaceApp
+        | SurfaceTypeAbs
+        | SurfaceTypeApp
+        | SurfaceLet
+        | SurfaceAnn
+        | SurfaceConstructor
+        | SurfaceCase
+        | SurfaceIf
+        | SurfaceTuple
+        | SurfaceLit
+        | SurfaceOp
+        | SurfaceToolCall,
+        ctx: TypeContext,
+    ) -> tuple[core.Term, Type]:
+        """Top-level type checking entry point.
+
+        Like Haskell's 'typecheck' - infers the type and generalizes
+        over free meta variables (GEN1).
+
+        Returns generalized sigma types suitable for top-level declarations.
+        """
+        return self.infer_sigma(term, ctx)
+
+    def infer_sigma(self, term, ctx: TypeContext) -> tuple[core.Term, Type]:
+        """Infer a term's type and generalize over free metas (GEN1).
+
+        Paper: inferSigma (putting-2007-implementation.hs L520-531)
+        """
+        core_term, rho = self.infer(term, ctx)
+        rho = self._apply_subst(rho)
+
+        # Collect metas in the environment (must NOT generalise these)
+        env_metas: set[int] = set()
+        for t in ctx.term_types:
+            env_metas |= self._collect_metas(t)
+        for t in ctx.globals.values():
+            env_metas |= self._collect_metas(t)
+
+        # Collect metas in the result type
+        res_metas = self._collect_metas(rho)
+
+        # Generalisable = in result but not in environment
+        forall_metas = res_metas - env_metas
+
+        if not forall_metas:
+            return (core_term, rho)
+
+        # Quantify: bind each generalisable meta to a fresh bound variable
+        binder_names = _fresh_binder_names(len(forall_metas), rho)
+        meta_to_var: dict[int, str] = {}
+        for mid, name in zip(sorted(forall_metas), binder_names):
+            meta_to_var[mid] = name
+            # Extend the substitution so the meta resolves to the bound var
+            self.subst = self.subst.extend(TMeta(mid), TypeVar(name))
+
+        # Apply substitution to get the type with TypeVars instead of TMetas
+        generalised_body = self._apply_subst(rho)
+
+        # Wrap in foralls (outermost first)
+        result_type = generalised_body
+        for name in reversed(binder_names):
+            result_type = TypeForall(name, result_type)
+
+        return (core_term, result_type)
+
+    def _collect_metas(self, ty: Type) -> set[int]:
+        """Collect all TMeta ids that appear (after applying subst)."""
+        ty = self._apply_subst(ty)
+        match ty:
+            case TMeta(id=mid):
+                return {mid}
+            case TypeArrow(arg, ret, _):
+                return self._collect_metas(arg) | self._collect_metas(ret)
+            case TypeForall(_, body):
+                return self._collect_metas(body)
+            case TypeConstructor(_, args):
+                result: set[int] = set()
+                for a in args:
+                    result |= self._collect_metas(a)
+                return result
+            case _:
+                return set()
+
+    def check_sigma(self, term, sigma: Type, ctx: TypeContext) -> core.Term:
+        """GEN2: Check term against a polymorphic type by skolemising.
+
+        Paper: checkSigma (putting-2007-implementation.hs L535-542)
+        """
+        skol_tvs, rho = self._skolemise(sigma)
+        core_term = self.check(term, rho, ctx)
+
+        # Skolem escape check
+        if skol_tvs:
+            env_skolems: set[TypeSkolem] = set()
+            for t in ctx.term_types:
+                env_skolems |= self._free_skolems(t)
+            sigma_skolems = self._free_skolems(self._apply_subst(sigma))
+            escaped = env_skolems | sigma_skolems
+            bad = [sk for sk in skol_tvs if sk in escaped]
+            if bad:
+                raise TypeMismatchError(
+                    expected=sigma,
+                    actual="<term>",
+                    location=getattr(term, "location", None),
+                    term=term,
+                    context="type not polymorphic enough",
+                )
+
+        return core_term
+
+    def _free_skolems(self, ty: Type) -> set[TypeSkolem]:
+        """Collect all TypeSkolem values that appear in ty."""
+        ty = self._apply_subst(ty)
+        match ty:
+            case TypeSkolem() as sk:
+                return {sk}
+            case TypeArrow(arg, ret, _):
+                return self._free_skolems(arg) | self._free_skolems(ret)
+            case TypeForall(_, body):
+                return self._free_skolems(body)
+            case TypeConstructor(_, args):
+                result: set[TypeSkolem] = set()
+                for a in args:
+                    result |= self._free_skolems(a)
+                return result
+            case _:
+                return set()
+
 
 def elaborate_term(
     term: ScopedVar
@@ -1785,4 +1934,4 @@ def elaborate_term(
     elab = TypeElaborator()
     if ctx is None:
         ctx = TypeContext()
-    return elab.infer(term, ctx)
+    return elab.typecheck(term, ctx)

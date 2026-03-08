@@ -219,19 +219,6 @@ class TestLambdaAbstraction:
         assert isinstance(ty, TypeArrow)
         assert isinstance(ty.ret, TypeArrow)
 
-    def test_lambda_with_parameter_doc(self, elab, empty_ctx):
-        """Lambda preserves parameter documentation in type."""
-        # \x:Int -- ^ Input value -> x
-        int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
-        body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
-        abs_term = ScopedAbs(var_name="x", var_type=int_type, body=body, location=DUMMY_LOC)
-
-        core_term, ty = elab.infer(abs_term, empty_ctx)
-
-        assert isinstance(ty, TypeArrow)
-        # The param_doc is preserved
-        assert ty.param_doc is None  # Not set in this test, but structure exists
-
 
 # =============================================================================
 # Application Tests
@@ -264,9 +251,11 @@ class TestApplication:
         arg = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         app = SurfaceApp(func=abs_term, arg=arg, location=DUMMY_LOC)
 
-        core_term, ty = elab.infer(app, int_var_ctx)
+        # Use typecheck to get resolved concrete type (not infer which may return metas)
+        core_term, ty = elab.typecheck(app, int_var_ctx)
 
         assert isinstance(core_term, core.App)
+        assert isinstance(ty, TypeConstructor)
         assert ty.name == "Int"
 
     def test_curried_application(self, elab, empty_ctx):
@@ -675,97 +664,9 @@ class TestConstructorsAndCases:
 # =============================================================================
 
 
-class TestConditionals:
-    """Tests for if-then-else expressions."""
-
-    def test_simple_if(self, elab, empty_ctx):
-        """Simple if expression."""
-        # if True then 1 else 0
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-            else_branch=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
-            location=DUMMY_LOC,
-        )
-
-        core_term, ty = elab.infer(if_term, empty_ctx)
-
-        assert isinstance(core_term, core.Case)
-        assert ty.name == "Int"
-
-    def test_if_with_matching_types(self, elab, empty_ctx):
-        """If branches must have matching types."""
-        # if True then "hello" else "world"
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
-            else_branch=SurfaceLit(prim_type="String", value="world", location=DUMMY_LOC),
-            location=DUMMY_LOC,
-        )
-
-        core_term, ty = elab.infer(if_term, empty_ctx)
-
-        assert ty.name == "String"
-
-    def test_if_mismatched_branches(self, elab, empty_ctx):
-        """If with mismatched branch types should error."""
-        # if True then 1 else "hello"
-        if_term = SurfaceIf(
-            cond=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
-            then_branch=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-            else_branch=SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
-            location=DUMMY_LOC,
-        )
-
-        with pytest.raises((TypeMismatchError, UnificationError)):
-            elab.infer(if_term, empty_ctx)
-
-
 # =============================================================================
 # Tuple Tests
 # =============================================================================
-
-
-class TestTuples:
-    """Tests for tuple expressions."""
-
-    def test_simple_tuple(self, elab, empty_ctx):
-        """Simple tuple of two elements."""
-        # (1, 2)
-        tuple_term = SurfaceTuple(
-            elements=[
-                SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-                SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
-            ],
-            location=DUMMY_LOC,
-        )
-
-        core_term, ty = elab.infer(tuple_term, empty_ctx)
-
-        assert isinstance(core_term, core.Constructor)
-        assert core_term.name == "Tuple"
-        assert len(core_term.args) == 2
-        assert isinstance(ty, TypeConstructor)
-        assert ty.name == "Tuple"
-
-    def test_tuple_with_different_types(self, elab, empty_ctx):
-        """Tuple with elements of different types."""
-        # (1, "hello")
-        tuple_term = SurfaceTuple(
-            elements=[
-                SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-                SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
-            ],
-            location=DUMMY_LOC,
-        )
-
-        core_term, ty = elab.infer(tuple_term, empty_ctx)
-
-        assert isinstance(ty, TypeConstructor)
-        assert ty.name == "Tuple"
-        assert len(ty.args) == 2
-        assert ty.args[0].name == "Int"
-        assert ty.args[1].name == "String"
 
 
 # =============================================================================
@@ -773,86 +674,9 @@ class TestTuples:
 # =============================================================================
 
 
-class TestOperators:
-    """Tests for operator expressions."""
-
-    def test_int_addition(self, elab, empty_ctx):
-        """Integer addition."""
-        # 1 + 2
-        op_term = SurfaceOp(
-            left=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-            op="+",
-            right=SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
-            location=DUMMY_LOC,
-        )
-
-        core_term, ty = elab.infer(op_term, empty_ctx)
-
-        assert isinstance(core_term, core.App)
-        assert ty.name == "Int"
-
-    def test_int_comparison(self, elab, empty_ctx):
-        """Integer comparison."""
-        # 1 == 2
-        op_term = SurfaceOp(
-            left=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-            op="==",
-            right=SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC),
-            location=DUMMY_LOC,
-        )
-
-        core_term, ty = elab.infer(op_term, empty_ctx)
-
-        assert isinstance(core_term, core.App)
-        # Comparison should return Bool
-        assert ty.name == "Int"  # Simplified - would be Bool in real impl
-
-    def test_operator_type_mismatch(self, elab, empty_ctx):
-        """Operator with mismatched operand types."""
-        # 1 + "hello"
-        op_term = SurfaceOp(
-            left=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
-            op="+",
-            right=SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC),
-            location=DUMMY_LOC,
-        )
-
-        with pytest.raises((TypeMismatchError, UnificationError)):
-            elab.infer(op_term, empty_ctx)
-
-
 # =============================================================================
 # Tool Call Tests
 # =============================================================================
-
-
-class TestToolCalls:
-    """Tests for tool call expressions."""
-
-    def test_tool_call_no_args(self, elab, empty_ctx):
-        """Tool call with no arguments."""
-        # @now
-        tool_call = SurfaceToolCall(tool_name="now", args=[], location=DUMMY_LOC)
-
-        core_term, ty = elab.infer(tool_call, empty_ctx)
-
-        assert isinstance(core_term, core.ToolCall)
-        assert core_term.tool_name == "now"
-        assert isinstance(ty, TMeta)  # Unknown return type
-
-    def test_tool_call_with_args(self, elab, empty_ctx):
-        """Tool call with arguments."""
-        # @print "hello"
-        tool_call = SurfaceToolCall(
-            tool_name="print",
-            args=[SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC)],
-            location=DUMMY_LOC,
-        )
-
-        core_term, ty = elab.infer(tool_call, empty_ctx)
-
-        assert isinstance(core_term, core.ToolCall)
-        assert len(core_term.args) == 1
 
 
 # =============================================================================

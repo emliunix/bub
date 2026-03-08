@@ -22,6 +22,7 @@ from systemf.core.types import (
     TypeForall,
     TypeConstructor,
     PrimitiveType,
+    TypeSkolem,
 )
 from systemf.surface.inference.errors import (
     UnificationError,
@@ -172,8 +173,8 @@ class Substitution:
                     return self.apply_to_type(resolved)
                 return ty
 
-            case TypeVar(_):
-                # Regular type variables are not substituted
+            case TypeVar(_) | TypeSkolem(_):
+                # Regular type variables and skolems are not substituted
                 return ty
 
             case TypeArrow(arg, ret, param_doc):
@@ -264,7 +265,7 @@ def _occurs_check_recursive(meta: TMeta, ty: Type) -> bool:
         case TMeta(id=other_id):
             return meta.id == other_id
 
-        case TypeVar(_):
+        case TypeVar(_) | TypeSkolem(_):
             return False
 
         case TypeArrow(arg, ret, _):
@@ -281,6 +282,32 @@ def _occurs_check_recursive(meta: TMeta, ty: Type) -> bool:
 
         case _:
             raise TypeError(f"Unknown type: {ty}")
+
+
+def _subst_type_var_in_type(ty: Type, var: str, replacement: Type) -> Type:
+    """Substitute free occurrences of TypeVar(var) with replacement."""
+    match ty:
+        case TypeVar(name) if name == var:
+            return replacement
+        case TypeVar(_) | TMeta(_) | PrimitiveType(_) | TypeSkolem():
+            return ty
+        case TypeArrow(arg, ret, doc):
+            return TypeArrow(
+                _subst_type_var_in_type(arg, var, replacement),
+                _subst_type_var_in_type(ret, var, replacement),
+                doc,
+            )
+        case TypeForall(bv, body) if bv == var:
+            return ty  # shadowed
+        case TypeForall(bv, body):
+            return TypeForall(bv, _subst_type_var_in_type(body, var, replacement))
+        case TypeConstructor(name, args):
+            return TypeConstructor(
+                name,
+                [_subst_type_var_in_type(a, var, replacement) for a in args],
+            )
+        case _:
+            return ty
 
 
 # =============================================================================
@@ -326,6 +353,21 @@ def unify(
         case TMeta(id=id1), TMeta(id=id2) if id1 == id2:
             return subst
 
+        # Skolem vs skolem: must be identical (name + unique)
+        case TypeSkolem(name1, u1), TypeSkolem(name2, u2):
+            if name1 == name2 and u1 == u2:
+                return subst
+            raise UnificationError(t1, t2, location, None)
+
+        # Skolem vs anything else (including Meta): rigid, cannot unify
+        # These must come BEFORE meta variable cases to prevent meta from
+        # unifying with a rigid skolem
+        case TypeSkolem(), _:
+            raise UnificationError(t1, t2, location, None)
+
+        case _, TypeSkolem():
+            raise UnificationError(t1, t2, location, None)
+
         # t1 is a meta variable
         case TMeta() as meta, _:
             if occurs_check(meta, t2, subst):
@@ -359,15 +401,12 @@ def unify(
 
         # Both are forall types (first-order unification)
         case TypeForall(var1, body1), TypeForall(var2, body2):
-            # For first-order unification, we unify bodies directly
-            # This is a simplification - full higher-order unification is complex
-            # We rename bound variables to avoid capture if needed
             if var1 == var2:
                 return unify(body1, body2, subst, location)
             else:
-                # Different bound variables - rename to avoid capture
-                # For now, we just unify directly (simplified approach)
-                return unify(body1, body2, subst, location)
+                # Alpha-rename: replace var2 with var1 in body2
+                renamed_body2 = _subst_type_var_in_type(body2, var2, TypeVar(var1))
+                return unify(body1, renamed_body2, subst, location)
 
         # Both are type constructors
         case TypeConstructor(name1, args1), TypeConstructor(name2, args2):
@@ -396,7 +435,6 @@ def unify(
             raise UnificationError(t1, t2, location, None)
 
 
-# =============================================================================
 # Utility Functions
 # =============================================================================
 
