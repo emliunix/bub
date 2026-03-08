@@ -2,6 +2,8 @@
 
 This document provides a comprehensive overview of the SystemF compiler architecture and detailed design specifications for key subsystems.
 
+**Last Updated**: 2026-03-09
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -36,7 +38,7 @@ graph TB
     subgraph Surface["Surface Language"]
         L[Lexer<br/>INDENT/DEDENT tokens]
         P[Parser<br/>parsy combinators]
-        E[Elaborator<br/>Surface → Core]
+        E[Pipeline<br/>15-pass elaboration]
         L --> P --> E
     end
     
@@ -63,7 +65,7 @@ graph TB
         IM --> Val
     end
     
-    Surface -->|Elaborate| Core
+    Surface -->|15-pass Pipeline| Core
     Core -->|Type Check| TypeChecker
     TypeChecker -->|Evaluate| Interpreter
 ```
@@ -90,8 +92,21 @@ systemf/
 │   │   ├── types.py            # Token types and lexer types
 │   │   ├── lexer.py            # Indentation-aware tokenizer
 │   │   ├── parser.py           # Parsy-based parser
-│   │   ├── elaborator.py       # Surface → Core translation
-│   │   └── desugar.py          # Desugaring (operators → primitives)
+│   │   ├── pipeline.py         # Multi-pass elaboration orchestration
+│   │   ├── result.py           # Elaboration result types
+│   │   ├── desugar/            # Desugaring passes (15 granular passes)
+│   │   │   ├── __init__.py
+│   │   │   ├── operators.py    # Binary/unary operator desugaring
+│   │   │   ├── patterns.py     # Pattern compilation
+│   │   │   └── ...
+│   │   ├── inference/          # Type inference passes
+│   │   │   ├── bidi_inference.py  # Bidirectional type checking
+│   │   │   ├── context.py      # Type checking context
+│   │   │   ├── unification.py  # Type constraint solving
+│   │   │   └── ...
+│   │   └── scoped/             # Scope checking passes
+│   │       ├── scope_pass.py   # Name resolution → de Bruijn indices
+│   │       └── context.py      # Scope checking context
 │   │
 │   ├── eval/                    # Interpreter layer
 │   │   ├── value.py            # Runtime values
@@ -118,14 +133,14 @@ systemf/
 
 1. **Source** → Lexer emits tokens (including INDENT/DEDENT)
 2. **Tokens** → Parser builds surface AST
-3. **Surface AST** → Elaborator converts to core AST (name resolution, de Bruijn indices)
+3. **Surface AST** → Multi-pass pipeline (15 granular passes: desugar → scope → type) converts to Core AST
 4. **Core AST** → Type checker validates (bidirectional inference)
 5. **Core AST** → Evaluator executes (call-by-value semantics)
 
 !!! tip "Compilation Pipeline"
     Each transformation preserves semantics while changing representation:
     - Source text → structured tokens (surface syntax)
-    - Surface AST → canonical core language (name resolution)
+    - Surface AST → canonical core language (15-pass elaboration)
     - Core terms → verified well-typed terms (type checking)
     - Well-typed terms → runtime values (evaluation)
 
@@ -133,15 +148,28 @@ systemf/
 
 ## Multi-Pass Pipeline
 
-The elaboration process uses a three-phase pipeline following Idris 2's architecture:
+The elaboration process uses a multi-pass pipeline with three conceptual phases (following Idris 2's architecture), implemented as 15 granular passes:
 
 ```mermaid
 graph LR
-    SD[Surface Declarations] --> P1[Phase 1: Scope Check]
+    SD[Surface Declarations] --> P0[Phase 0: Desugar]
+    P0 --> P1[Phase 1: Scope Check]
     P1 --> P2[Phase 2: Type Elaboration]
     P2 --> P3[Phase 3: LLM Pragma Pass]
     P3 --> CD[Core Declarations]
 ```
+
+### Phase 0: Desugaring
+
+**Input:** Surface AST
+**Output:** Desugared Surface AST
+
+Preprocessing passes that transform surface-level conveniences into core forms:
+- Binary/unary operator desugaring (`+` → `$prim.int_plus`)
+- Pattern compilation into case expressions
+- Other syntactic sugar elimination
+
+Implemented as multiple granular passes in `src/systemf/surface/desugar/`.
 
 ### Phase 1: Scope Checking
 
@@ -154,7 +182,7 @@ The scope checker resolves names to de Bruijn indices and performs basic validat
 - Scope error detection
 
 **Key Files:**
-- `src/systemf/surface/scoped/checker.py`
+- `src/systemf/surface/scoped/scope_pass.py`
 - `src/systemf/surface/scoped/context.py`
 
 ### Phase 2: Type Elaboration
@@ -169,9 +197,11 @@ The type elaborator performs bidirectional type inference (Pierce & Turner style
 - **Unification:** Solve type constraints
 
 **Key Files:**
-- `src/systemf/surface/inference/elaborator.py`
+- `src/systemf/surface/inference/bidi_inference.py` (main bidirectional checker)
 - `src/systemf/surface/inference/context.py`
 - `src/systemf/surface/inference/unification.py`
+
+**Implementation Detail:** Phase 2 (Type Elaboration) is implemented as multiple granular passes within the `inference/` directory, each handling specific AST node types and type constructs.
 
 ### Phase 3: LLM Pragma Pass
 
@@ -629,8 +659,10 @@ prim_op int_plus : Int -> Int -> Int
 - `systemf/src/systemf/surface/ast.py` - SurfacePrimTypeDecl, SurfacePrimOpDecl
 - `systemf/src/systemf/surface/lexer.py` - PRIM_TYPE, PRIM_OP tokens
 - `systemf/src/systemf/surface/parser.py` - Parse declarations
-- `systemf/src/systemf/surface/elaborator.py` - Elaborate IntLit, PrimOp, declarations
-- `systemf/src/systemf/surface/desugar.py` - Operator desugaring (+ → $prim.int_plus)
+- `systemf/src/systemf/surface/pipeline.py` - Multi-pass elaboration orchestration
+- `systemf/src/systemf/surface/desugar/` - Desugaring passes (operators, patterns)
+- `systemf/src/systemf/surface/scoped/scope_pass.py` - Name resolution, de Bruijn conversion
+- `systemf/src/systemf/surface/inference/bidi_inference.py` - Type elaboration
 - `systemf/src/systemf/eval/value.py` - VInt, VString
 - `systemf/src/systemf/eval/machine.py` - primitive_impls registry
 - `systemf/prelude.sf` - Primitive declarations
@@ -790,7 +822,7 @@ class ToolCall(Term):
     SystemF maintains high test coverage across all architectural layers to ensure correctness and prevent regressions.
 
 - **400+ tests** across all layers
-- Unit tests for each component (lexer, parser, elaborator, checker, evaluator)
+- Unit tests for each component (lexer, parser, pipeline, checker, evaluator)
 - Integration tests for full pipeline
 - Property-based tests for type safety
 

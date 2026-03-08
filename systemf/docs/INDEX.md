@@ -2,7 +2,7 @@
 title: "System F Documentation Index"
 category: "meta"
 status: "current"
-last-updated: "2026-03-03"
+last-updated: "2026-03-09"
 description: "Complete index and navigation guide for System F documentation"
 ---
 
@@ -195,6 +195,7 @@ For those who want to **hack** on the compiler:
 
 | Date | Document | Change |
 |------|----------|--------|
+| 2026-03-09 | architecture/elaborator-design.md | Updated for 15-pass multi-pass architecture implementation |
 | 2026-03-03 | docs/INDEX.md | Complete reorganization of documentation |
 | 2026-03-03 | concepts/*.md | New concept documents explaining theory |
 | 2026-03-03 | pipeline/*.md | New pipeline documentation |
