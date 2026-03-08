@@ -45,7 +45,7 @@ from systemf.surface.types import (
     GlobalVar,
 )
 from systemf.surface.inference import (
-    TypeElaborator,
+    BidiInference,
     TypeContext,
     TMeta,
 )
@@ -65,7 +65,7 @@ DUMMY_LOC = Location(line=1, column=1, file="test.py")
 
 @pytest.fixture
 def elab():
-    return TypeElaborator()
+    return BidiInference()
 
 
 @pytest.fixture

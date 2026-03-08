@@ -5,15 +5,15 @@ processing LLM pragma annotations on function declarations.
 """
 
 from systemf.surface.llm.pragma_pass import (
-    LLMPragmaPass,
-    LLMPragmaResult,
-    process_llm_pragmas,
+    llm_pragma_pass,
+    LLMError,
     parse_pragma_config,
 )
+from systemf.core.module import LLMMetadata
 
 __all__ = [
-    "LLMPragmaPass",
-    "LLMPragmaResult",
-    "process_llm_pragmas",
+    "llm_pragma_pass",
+    "LLMMetadata",
+    "LLMError",
     "parse_pragma_config",
 ]

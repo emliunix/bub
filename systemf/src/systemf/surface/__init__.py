@@ -4,6 +4,7 @@ This module provides the surface language AST, parser, and the new multi-pass
 elaboration pipeline for System F.
 """
 
+# AST Types
 from systemf.surface.types import (
     SurfaceAbs,
     SurfaceApp,
@@ -26,20 +27,74 @@ from systemf.surface.types import (
     SurfaceVar,
     SurfaceAnn,
 )
-from systemf.surface.desugar import (
-    Desugarer,
-    desugar,
-)
-from systemf.core.errors import ElaborationError
+
+# Lexer
+from systemf.surface.parser import Lexer, lex, Token
+
+# Pipeline
 from systemf.surface.pipeline import (
     ElaborationPipeline,
     PipelineResult,
     elaborate_module,
 )
-from systemf.surface.parser import Lexer, lex, Token
+from systemf.core.errors import ElaborationError
+
+# Desugaring passes
+from systemf.surface.desugar import (
+    if_to_case_pass,
+    operator_to_prim_pass,
+    multi_arg_lambda_pass,
+    multi_var_type_abs_pass,
+    implicit_type_abs_pass,
+    desugar_term,
+    desugar_declaration,
+)
+
+# Scope checking passes
+from systemf.surface.scoped import (
+    scope_check_pass,
+    ScopeContext,
+    ScopeError,
+    UndefinedVariableError,
+    UndefinedTypeVariableError,
+    DuplicateBindingError,
+    ScopeDepthError,
+    GlobalVariableError,
+)
+
+# Type inference passes
+from systemf.surface.inference import (
+    BidiInference,
+    signature_collect_pass,
+    data_decl_elab_pass,
+    prepare_contexts_pass,
+    elab_bodies_pass,
+    build_decls_pass,
+    TypeContext,
+    TypeError,
+    TypeMismatchError,
+    InfiniteTypeError,
+    UnificationError,
+    KindError,
+    UndefinedTypeError,
+    TMeta,
+    Substitution,
+    unify,
+    occurs_check,
+    resolve_type,
+    is_meta_variable,
+    is_unresolved_meta,
+)
+
+# LLM pragma pass
+from systemf.surface.llm import (
+    llm_pragma_pass,
+    LLMMetadata,
+    LLMError,
+)
 
 __all__ = [
-    # AST
+    # AST Types
     "SurfaceTerm",
     "SurfaceVar",
     "SurfaceAbs",
@@ -56,7 +111,6 @@ __all__ = [
     "SurfaceDataDeclaration",
     "SurfaceTermDeclaration",
     "SurfaceConstructorInfo",
-    # Types
     "SurfaceTypeVar",
     "SurfaceTypeArrow",
     "SurfaceTypeForall",
@@ -65,14 +119,51 @@ __all__ = [
     "Lexer",
     "Token",
     "lex",
-    # Pipeline (new multi-pass elaborator)
+    # Pipeline
     "ElaborationPipeline",
     "PipelineResult",
     "elaborate_module",
     "ElaborationError",
-    # Desugarer
-    "Desugarer",
-    "LetToLambdaDesugarer",
-    "desugar",
-    "desugar_lets",
+    # Desugaring passes
+    "if_to_case_pass",
+    "operator_to_prim_pass",
+    "multi_arg_lambda_pass",
+    "multi_var_type_abs_pass",
+    "implicit_type_abs_pass",
+    "desugar_term",
+    "desugar_declaration",
+    # Scope checking passes
+    "scope_check_pass",
+    "ScopeContext",
+    "ScopeError",
+    "UndefinedVariableError",
+    "UndefinedTypeVariableError",
+    "DuplicateBindingError",
+    "ScopeDepthError",
+    "GlobalVariableError",
+    # Type inference passes
+    "BidiInference",
+    "signature_collect_pass",
+    "data_decl_elab_pass",
+    "prepare_contexts_pass",
+    "elab_bodies_pass",
+    "build_decls_pass",
+    "TypeContext",
+    "TypeError",
+    "TypeMismatchError",
+    "InfiniteTypeError",
+    "UnificationError",
+    "KindError",
+    "UndefinedTypeError",
+    "TMeta",
+    "Substitution",
+    "unify",
+    "occurs_check",
+    "resolve_type",
+    "is_meta_variable",
+    "is_unresolved_meta",
+    # LLM pragma pass
+    "llm_pragma_pass",
+    "LLMMetadata",
+    "LLMError",
 ]

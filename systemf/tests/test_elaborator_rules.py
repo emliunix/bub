@@ -12,7 +12,7 @@ from systemf.core.types import (
     TypeForall,
     TypeVar,
 )
-from systemf.surface.inference import TypeElaborator
+from systemf.surface.inference import BidiInference
 from systemf.surface.inference.context import TypeContext
 from systemf.utils.location import Location
 from systemf.surface.types import (
@@ -47,7 +47,7 @@ class TestSynthesisRules:
 
     def test_literal_int_synthesis(self):
         """Rule: SurfaceLit(prim_type="Int") => Int"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         lit = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
@@ -60,7 +60,7 @@ class TestSynthesisRules:
 
     def test_literal_string_synthesis(self):
         """Rule: SurfaceLit(prim_type="String") => String"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         lit = SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC)
@@ -73,7 +73,7 @@ class TestSynthesisRules:
 
     def test_variable_lookup_synthesis(self):
         """Rule: ScopedVar(index) => ctx.lookup_term(index)"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext(term_types=[TypeConstructor("Int", [])])
 
         var = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
@@ -86,7 +86,7 @@ class TestSynthesisRules:
 
     def test_lambda_with_annotation_synthesis(self):
         """Rule: ScopedAbs(var, Some(type), body) => type -> body_type"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
@@ -102,7 +102,7 @@ class TestSynthesisRules:
 
     def test_lambda_without_annotation_synthesis(self):
         """Rule: ScopedAbs(var, None, body) => _a -> body_type"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
@@ -116,7 +116,7 @@ class TestSynthesisRules:
 
     def test_application_arrow_synthesis(self):
         """Rule: SurfaceApp(func, arg) where func => A -> B, arg <= A => B"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # Create: (\x:Int -> x) 42
@@ -134,7 +134,7 @@ class TestSynthesisRules:
 
     def test_type_abstraction_synthesis(self):
         """Rule: SurfaceTypeAbs(var, body) => forall var. body_type"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # /\a. \x:a -> x
@@ -155,7 +155,7 @@ class TestSynthesisRules:
 
     def test_type_application_synthesis(self):
         """Rule: SurfaceTypeApp(func, type_arg) where func => forall a. body => body[a/type_arg]"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # id : forall a. a -> a
@@ -183,7 +183,7 @@ class TestSynthesisRules:
 
     def test_let_binding_synthesis(self):
         """Rule: SurfaceLet(bindings, body) => body_type (after extending ctx)"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # let x = 42 in x
@@ -199,7 +199,7 @@ class TestSynthesisRules:
 
     def test_annotation_synthesis(self):
         """Rule: SurfaceAnn(term, type) => type (after checking term <= type)"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
@@ -217,7 +217,7 @@ class TestSynthesisRules:
 
     def test_constructor_synthesis(self):
         """Rule: SurfaceConstructor(name, args) => constructor_type (instantiated)"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         # Register a constructor
         ctx = TypeContext(constructors={"True": TypeConstructor("Bool", [])})
 
@@ -230,7 +230,7 @@ class TestSynthesisRules:
 
     def test_case_synthesis(self):
         """Rule: SurfaceCase(scrutinee, branches) => common_type (after checking all branches)"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext(
             constructors={"True": TypeConstructor("Bool", []), "False": TypeConstructor("Bool", [])}
         )
@@ -261,7 +261,7 @@ class TestSynthesisRules:
 
     def test_tuple_synthesis(self):
         """Rule: SurfaceTuple(elements) => Tuple constructor with args"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         tuple_term = SurfaceTuple(
@@ -281,7 +281,7 @@ class TestSynthesisRules:
 
     def test_operator_synthesis(self):
         """Rule: SurfaceOp(left, op, right) where op desugars to primitive => result_type"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         op_term = SurfaceOp(
@@ -302,7 +302,7 @@ class TestCheckingRules:
 
     def test_lambda_checking(self):
         """Rule: check(ScopedAbs, A -> B) => Abs (after extending ctx with A)"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # Check \x -> x against Int -> Int
@@ -318,7 +318,7 @@ class TestCheckingRules:
 
     def test_annotation_checking(self):
         """Rule: check(SurfaceAnn(term, ann), expected) => check(term, ann) if ann == expected"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         int_type_surf = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
@@ -337,7 +337,7 @@ class TestCheckingRules:
     def test_fallback_infer_check(self):
         """Rule: check(term, expected) where term not specifically handled =>
         infer(term) then unify with expected"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         int_type = TypeConstructor("Int", [])
@@ -354,7 +354,7 @@ class TestTypeConversionRules:
 
     def test_surface_type_var_conversion(self):
         """Convert SurfaceTypeVar to TypeVar"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext(type_vars=[("a", None)])
 
         type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
@@ -365,7 +365,7 @@ class TestTypeConversionRules:
 
     def test_surface_type_constructor_conversion(self):
         """Convert SurfaceTypeConstructor to TypeConstructor"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         constr = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
@@ -376,7 +376,7 @@ class TestTypeConversionRules:
 
     def test_surface_type_arrow_conversion(self):
         """Convert SurfaceTypeArrow to TypeArrow"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
@@ -389,7 +389,7 @@ class TestTypeConversionRules:
 
     def test_surface_type_forall_conversion(self):
         """Convert SurfaceTypeForall to TypeForall"""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
@@ -405,7 +405,7 @@ class TestPolymorphismRules:
 
     def test_implicit_instantiation(self):
         """Test that polymorphic functions are implicitly instantiated at application."""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # Create: id @Int 42 where id : forall a. a -> a
@@ -439,7 +439,7 @@ class TestPolymorphismRules:
 
     def test_polymorphic_identity_synthesis(self):
         """Test synthesis of polymorphic identity function."""
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # id : forall a. a -> a

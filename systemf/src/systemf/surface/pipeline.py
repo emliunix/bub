@@ -1,365 +1,523 @@
 """Pipeline orchestrator for System F elaboration.
 
-This module provides the main integration point for the three-phase elaboration
-pipeline:
+This module provides the main integration point for the 15-pass elaboration
+pipeline organized into 4 phases:
 
-1. Phase 1 - Scope Checking: Surface AST → Scoped AST
-2. Phase 2 - Type Elaboration: Scoped AST → typed Core AST
-3. Phase 3 - LLM Pragma Pass: Transform LLM functions
+Phase 0: Desugar (5 passes)
+    1. if_to_case_pass - Transform if-then-else to case expressions
+    2. operator_to_prim_pass - Transform operators to primitive applications
+    3. multi_arg_lambda_pass - Convert multi-arg lambdas to nested single-arg
+    4. multi_var_type_abs_pass - Convert multi-var type abs to nested single-var
+    5. implicit_type_abs_pass - Insert implicit type abstractions for rank-1 poly
 
-The orchestrator coordinates these phases with proper error handling and
-collects all compilation artifacts into a Core.Module.
+Phase 1: Scope (1 pass)
+    6. scope_check_pass - Transform names to de Bruijn indices
 
-Example:
-    >>> from systemf.surface.pipeline import ElaborationPipeline
-    >>> from systemf.surface.types import SurfaceTermDeclaration
-    >>>
-    >>> # Create pipeline
-    >>> pipeline = ElaborationPipeline(module_name="main")
-    >>>
-    >>> # Elaborate declarations
-    >>> declarations = [func1_decl, func2_decl]
-    >>> module = pipeline.elaborate_module(declarations)
-    >>>
-    >>> # Check for errors
-    >>> if module.errors:
-    ...     print(f"Errors: {module.errors}")
-    >>> else:
-    ...     print(f"Success: {len(module.declarations)} declarations")
+Phase 2: Type (6 components)
+    7. signature_collect_pass - Collect type signatures from declarations
+    8. data_decl_elab_pass - Elaborate data type declarations
+    9. prepare_contexts_pass - Prepare type contexts for body elaboration
+    10. elab_bodies_pass - Elaborate term bodies using bidirectional inference
+    11. build_decls_pass - Build core term declarations from elaborated bodies
+    12. BidiInference - Utility class used by elab_bodies_pass
+
+Phase 3: LLM (1 pass)
+    13. llm_pragma_pass - Transform LLM functions and extract metadata
+
+The orchestrator coordinates these passes with proper error handling using
+Result types and match/case for explicit error propagation.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from systemf.core import ast as core
 from systemf.core.module import LLMMetadata, Module
-from systemf.core.types import PrimitiveType, Type
-from systemf.core.errors import ElaborationError
-from systemf.surface.scoped.checker import ScopeChecker
+from systemf.core.types import Type
+from systemf.surface.desugar.if_to_case_pass import if_to_case_pass, DesugarError as IfDesugarError
+from systemf.surface.desugar.operator_pass import (
+    operator_to_prim_pass,
+    DesugarError as OpDesugarError,
+)
+from systemf.surface.desugar.multi_arg_lambda_pass import (
+    multi_arg_lambda_pass,
+    DesugarError as LambdaDesugarError,
+)
+from systemf.surface.desugar.multi_var_type_abs_pass import (
+    multi_var_type_abs_pass,
+    DesugarError as TypeAbsDesugarError,
+)
+from systemf.surface.desugar.implicit_type_abs_pass import (
+    implicit_type_abs_pass,
+    DesugarError as ImplicitDesugarError,
+)
+from systemf.surface.scoped.scope_pass import scope_check_pass
 from systemf.surface.scoped.context import ScopeContext
-from systemf.surface.scoped.errors import UndefinedVariableError
-from systemf.surface.inference import TypeElaborator, TypeContext
-from systemf.surface.inference.errors import (
-    TypeError,
-    TypeMismatchError,
-    UnificationError,
+from systemf.surface.scoped.errors import ScopeError
+from systemf.surface.inference.signature_collect_pass import signature_collect_pass
+from systemf.surface.inference.data_decl_elab_pass import data_decl_elab_pass
+from systemf.surface.inference.prepare_contexts_pass import prepare_contexts_pass
+from systemf.surface.inference.elab_bodies_pass import elab_bodies_pass
+from systemf.surface.inference.build_decls_pass import build_decls_pass
+from systemf.surface.inference.bidi_inference import BidiInference
+from systemf.surface.inference.context import TypeContext
+from systemf.surface.inference.errors import TypeError
+from systemf.surface.llm.pragma_pass import llm_pragma_pass, LLMError
+from systemf.surface.result import Result, Ok, Err
+from systemf.surface.types import (
+    SurfaceDeclaration,
+    SurfaceTermDeclaration,
+    SurfaceDataDeclaration,
+    SurfacePrimOpDecl,
 )
-from systemf.surface.llm.pragma_pass import LLMPragmaPass, LLMPragmaResult
-from systemf.surface.types import SurfaceDeclaration, SurfaceTermDeclaration
-from systemf.surface.desugar import (
-    desugar_term,
-    insert_implicit_type_abstractions,
-)
 
 
-@dataclass
-class PipelineResult:
-    """Result of running the elaboration pipeline.
+@dataclass(frozen=True)
+class PipelineError:
+    """Error that occurs during pipeline execution.
 
-    Attributes:
-        module: The compiled module (may contain errors)
-        success: Whether the pipeline completed without errors
-        errors: List of errors encountered during elaboration
-        warnings: List of warnings generated
+    Wraps errors from individual passes with phase context.
     """
 
-    module: Module
-    success: bool
-    errors: list[ElaborationError] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    phase: str
+    message: str
+    original_error: Exception | None = None
+
+    def __str__(self) -> str:
+        if self.original_error:
+            return f"[{self.phase}] {self.message}: {self.original_error}"
+        return f"[{self.phase}] {self.message}"
 
 
 class ElaborationPipeline:
     """Main pipeline orchestrator for System F elaboration.
 
-    Coordinates the three-phase elaboration process:
-    1. Scope checking - resolve names to de Bruijn indices
-    2. Type elaboration - infer and check types
-    3. LLM pragma pass - transform LLM functions
+    Coordinates all 15 passes across 4 phases:
+    - Phase 0: Desugar (5 passes)
+    - Phase 1: Scope (1 pass)
+    - Phase 2: Type (6 components)
+    - Phase 3: LLM (1 pass)
 
-    The pipeline handles errors gracefully, collecting all errors
-    and warnings into the resulting Module.
+    Each phase feeds into the next, with explicit error handling via
+    Result types and match/case for error propagation.
 
     Attributes:
         module_name: Name of the module being compiled
-        scope_checker: Phase 1 scope checker
-        type_elaborator: Phase 2 type elaborator
-        llm_pass: Phase 3 LLM pragma processor
 
     Example:
         >>> pipeline = ElaborationPipeline(module_name="main")
-        >>> decls = [func1_decl, func2_decl]
-        >>> result = pipeline.run(decls)
-        >>>
-        >>> if result.success:
-        ...     print(f"Compiled {len(result.module.declarations)} declarations")
-        ... else:
-        ...     for error in result.errors:
+        >>> result = pipeline.run(declarations, scope_ctx, type_ctx)
+        >>> match result:
+        ...     case Ok(module):
+        ...         print(f"Success: {len(module.declarations)} declarations")
+        ...     case Err(error):
         ...         print(f"Error: {error}")
     """
 
     def __init__(self, module_name: str = "main"):
-        """Initialize the elaboration pipeline.
-
-        Args:
-            module_name: Name for the compiled module
-        """
         self.module_name = module_name
-        self.scope_checker = ScopeChecker()
-        self.type_elaborator = TypeElaborator()
-        self.llm_pass = LLMPragmaPass()
-        self._errors: list[ElaborationError] = []
-        self._warnings: list[str] = []
 
     def run(
         self,
         declarations: list[SurfaceDeclaration],
-        constructors: Optional[dict[str, Type]] = None,
-        global_types: Optional[dict[str, Type]] = None,
-        global_terms: Optional[set[str]] = None,
-    ) -> PipelineResult:
-        """Run the full elaboration pipeline on a list of declarations.
+        scope_ctx: ScopeContext,
+        type_ctx: TypeContext,
+        constructors: dict[str, Type] | None = None,
+    ) -> Result[Module, PipelineError]:
+        """Run the full 15-pass elaboration pipeline.
 
-        Executes all phases:
-        0. Desugaring - Surface AST → Desugared Surface AST
-        1. Scope checking - Surface AST → Scoped AST
-        2. Type elaboration - Scoped AST → Core AST with types
-        3. LLM pragma pass - Transform LLM functions
+        Executes all phases in dependency order with explicit error handling:
+        1. Phase 0: Desugar - Transform surface syntax to core forms
+        2. Phase 1: Scope - Resolve names to de Bruijn indices
+        3. Phase 2: Type - Infer and check types, elaborate to Core AST
+        4. Phase 3: LLM - Process LLM pragma annotations
 
         Args:
             declarations: List of surface declarations to elaborate
-            constructors: Optional data constructor types
+            scope_ctx: Initial scope context for name resolution
+            type_ctx: Initial type context for type checking
+            constructors: Optional data constructor types from previous modules
 
         Returns:
-            PipelineResult containing the compiled module and status
+            Result containing either the compiled Module or a PipelineError
         """
-        try:
-            # Phase 0: Desugar surface syntax (if-then-else, operators, etc.)
-            declarations = self._desugar_declarations(declarations)
+        # =====================================================================
+        # Phase 0: Desugar (5 passes)
+        # =====================================================================
+        # Transform high-level surface syntax into simpler core forms:
+        # - if-then-else → case expressions
+        # - operators → primitive applications
+        # - multi-arg lambdas → nested single-arg lambdas
+        # - multi-var type abstractions → nested single-var
+        # - Insert implicit type abstractions for rank-1 polymorphism
 
-            # Phase 1 & 2: Scope check and type elaborate
-            # Pass accumulated global context for REPL-style elaboration
-            core_decls, ctx, new_global_types, new_constructors = self._elaborate_declarations(
-                declarations, constructors, global_types, global_terms
-            )
+        desugared_decls_result = self._run_phase0_desugar(declarations)
+        match desugared_decls_result:
+            case Err(error):
+                return Err(error)
+            case Ok(desugared_decls):
+                pass
 
-            # Phase 3: Process LLM pragmas
-            # Use new_global_types which includes accumulated + new types
-            final_decls, llm_functions = self._process_llm_pragmas(
-                declarations, core_decls, new_global_types
-            )
+        # =====================================================================
+        # Phase 1: Scope
+        # =====================================================================
+        # Transform name-based variable references to de Bruijn indices.
+        # This enables the type checker to work with index-based references
+        # and supports mutual recursion by making all globals available.
 
-            # Collect docstrings
-            docstrings = self._collect_docstrings(declarations)
+        scoped_decls_result = self._run_phase1_scope(desugared_decls, scope_ctx)
+        match scoped_decls_result:
+            case Err(error):
+                return Err(error)
+            case Ok(scoped_decls):
+                pass
 
-            # Merge constructor types: input + newly defined
-            all_constructors = (constructors or {}) | new_constructors
+        # =====================================================================
+        # Phase 2: Type (6 steps)
+        # =====================================================================
+        # Elaborate scoped declarations to typed Core AST through 6 coordinated
+        # steps that progressively build up type information and Core terms.
 
-            # Create the module
-            # Use new_global_types (includes accumulated + newly defined types)
-            module = Module(
-                name=self.module_name,
-                declarations=final_decls,
-                constructor_types=all_constructors,
-                global_types=new_global_types or {},
-                primitive_types={},
-                docstrings=docstrings,
-                llm_functions=llm_functions,
-                errors=list(self._errors),
-                warnings=list(self._warnings),
-            )
+        type_result = self._run_phase2_type(scoped_decls, type_ctx, constructors)
+        match type_result:
+            case Err(error):
+                return Err(error)
+            case Ok((core_decls, final_ctx, all_constructors, global_types)):
+                pass
 
-            return PipelineResult(
-                module=module,
-                success=len(self._errors) == 0,
-                errors=list(self._errors),
-                warnings=list(self._warnings),
-            )
+        # =====================================================================
+        # Phase 3: LLM
+        # =====================================================================
+        # Process LLM pragma annotations on function declarations.
+        # Transforms LLM function bodies to PrimOp references and extracts
+        # metadata (model config, docstrings, types) for runtime execution.
 
-        except Exception as e:
-            # Handle unexpected errors
-            error = ElaborationError(
-                message=f"Pipeline failed: {e}",
-                location=None,
-            )
-            self._errors.append(error)
+        llm_result = self._run_phase3_llm(core_decls, scoped_decls)
+        match llm_result:
+            case Err(error):
+                return Err(error)
+            case Ok((final_decls, llm_functions)):
+                pass
 
-            # Return empty module with error
-            module = Module(
-                name=self.module_name,
-                declarations=[],
-                constructor_types=constructors or {},
-                global_types={},
-                primitive_types={},
-                docstrings={},
-                llm_functions={},
-                errors=list(self._errors),
-                warnings=list(self._warnings),
-            )
+        # =====================================================================
+        # Build and return Module
+        # =====================================================================
+        # Collect all compilation artifacts into a Module structure containing:
+        # - declarations: Core AST declarations (data and term)
+        # - constructor_types: Data constructor signatures
+        # - global_types: Top-level term signatures
+        # - llm_functions: LLM metadata for runtime
+        # - docstrings: Documentation from surface declarations
 
-            return PipelineResult(
-                module=module,
-                success=False,
-                errors=list(self._errors),
-                warnings=list(self._warnings),
-            )
+        docstrings = self._collect_docstrings(declarations)
 
-    def elaborate_module(
-        self,
-        declarations: list[SurfaceDeclaration],
-        constructors: Optional[dict[str, Type]] = None,
-    ) -> Module:
-        """Elaborate declarations into a Core.Module.
+        module = Module(
+            name=self.module_name,
+            declarations=final_decls,
+            constructor_types=all_constructors,
+            global_types=global_types,
+            primitive_types={},
+            docstrings=docstrings,
+            llm_functions=llm_functions,
+            errors=[],
+            warnings=[],
+        )
 
-        Convenience method that runs the pipeline and returns just the module.
+        return Ok(module)
 
-        Args:
-            declarations: List of surface declarations
-            constructors: Optional data constructor types
+    def _run_phase0_desugar(
+        self, declarations: list[SurfaceDeclaration]
+    ) -> Result[list[SurfaceDeclaration], PipelineError]:
+        """Phase 0: Run all 5 desugaring passes on declarations.
 
-        Returns:
-            The compiled Module (check module.errors for issues)
+        Passes run in order:
+        1. if_to_case_pass - if-then-else → case
+        2. operator_to_prim_pass - operators → primitives
+        3. multi_arg_lambda_pass - multi-arg → nested single-arg
+        4. multi_var_type_abs_pass - multi-var → nested single-var
+        5. implicit_type_abs_pass - insert implicit Λ for rank-1 poly
+
+        Each pass operates on term bodies within declarations.
         """
-        result = self.run(declarations, constructors)
-        return result.module
+        desugared_decls: list[SurfaceDeclaration] = []
 
-    def _elaborate_declarations(
-        self,
-        declarations: list[SurfaceDeclaration],
-        constructors: Optional[dict[str, Type]],
-        global_types: Optional[dict[str, Type]] = None,
-        global_terms: Optional[set[str]] = None,
-    ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type], dict[str, Type]]:
-        """Run Phase 1 (scope checking) and Phase 2 (type elaboration).
-
-        Uses TypeElaborator.elaborate_declarations() which internally
-        calls ScopeChecker for the scope checking phase.
-
-        Args:
-            declarations: Surface declarations
-            constructors: Optional constructor types
-            global_types: Accumulated global types from REPL (optional)
-            global_terms: Accumulated global term names from REPL (optional)
-
-        Returns:
-            Tuple of (core declarations, type context, global types, constructor types)
-        """
-        try:
-            return self.type_elaborator.elaborate_declarations(
-                declarations, constructors, global_types, global_terms
-            )
-        except (UndefinedVariableError, TypeError, UnificationError) as e:
-            # Convert to ElaborationError and re-raise for outer handler
-            self._errors.append(
-                ElaborationError(
-                    message=str(e),
-                    location=getattr(e, "location", None),
-                )
-            )
-            # Return empty results
-            return [], TypeContext(), {}, {}
-
-    def _desugar_declarations(
-        self,
-        declarations: list[SurfaceDeclaration],
-    ) -> list[SurfaceDeclaration]:
-        """Phase 0: Desugar surface syntax.
-
-        Transforms high-level surface constructs into simpler forms:
-        - if-then-else → case expressions
-        - Multi-argument lambdas → nested single-argument lambdas
-        - Operators → primitive applications
-
-        Args:
-            declarations: Surface declarations to desugar
-
-        Returns:
-            Desugared declarations
-        """
-        desugared = []
         for decl in declarations:
-            if isinstance(decl, SurfaceTermDeclaration):
-                # Phase 0a: Insert implicit type abstractions
-                # (e.g., `id : ∀a. a → a = λx → x` becomes `id : ∀a. a → a = Λa. λx → x`)
-                decl_with_type_abs = insert_implicit_type_abstractions(decl)
+            match decl:
+                case SurfaceTermDeclaration(body=body) if body is not None:
+                    # Pass 1: if-then-else → case expressions
+                    result = if_to_case_pass(body)
+                    match result:
+                        case Err(error):
+                            return Err(
+                                PipelineError(
+                                    phase="Phase 0: Desugar",
+                                    message=f"if_to_case_pass failed for '{decl.name}'",
+                                    original_error=error,
+                                )
+                            )
+                        case Ok(term):
+                            body = term
 
-                # Phase 0b: Desugar the body term
-                # Includes: multi-var type abs, multi-arg lambdas, if-then-else, operators
-                if decl_with_type_abs.body is not None:
-                    desugared_body = desugar_term(decl_with_type_abs.body)
-                else:
-                    desugared_body = decl_with_type_abs.body
+                    # Pass 2: operators → primitive applications
+                    result = operator_to_prim_pass(body)
+                    match result:
+                        case Err(error):
+                            return Err(
+                                PipelineError(
+                                    phase="Phase 0: Desugar",
+                                    message=f"operator_to_prim_pass failed for '{decl.name}'",
+                                    original_error=error,
+                                )
+                            )
+                        case Ok(term):
+                            body = term
 
-                desugared.append(
-                    SurfaceTermDeclaration(
-                        name=decl_with_type_abs.name,
-                        type_annotation=decl_with_type_abs.type_annotation,
-                        body=desugared_body,
-                        location=decl_with_type_abs.location,
-                        docstring=decl_with_type_abs.docstring,
-                        pragma=decl_with_type_abs.pragma,
+                    # Pass 3: multi-arg lambdas → nested single-arg
+                    result = multi_arg_lambda_pass(body)
+                    match result:
+                        case Err(error):
+                            return Err(
+                                PipelineError(
+                                    phase="Phase 0: Desugar",
+                                    message=f"multi_arg_lambda_pass failed for '{decl.name}'",
+                                    original_error=error,
+                                )
+                            )
+                        case Ok(term):
+                            body = term
+
+                    # Pass 4: multi-var type abstractions → nested single-var
+                    result = multi_var_type_abs_pass(body)
+                    match result:
+                        case Err(error):
+                            return Err(
+                                PipelineError(
+                                    phase="Phase 0: Desugar",
+                                    message=f"multi_var_type_abs_pass failed for '{decl.name}'",
+                                    original_error=error,
+                                )
+                            )
+                        case Ok(term):
+                            body = term
+
+                    # Build updated declaration with desugared body
+                    desugared_decl = SurfaceTermDeclaration(
+                        name=decl.name,
+                        type_annotation=decl.type_annotation,
+                        body=body,
+                        location=decl.location,
+                        docstring=decl.docstring,
+                        pragma=decl.pragma,
+                    )
+
+                    # Pass 5: insert implicit type abstractions
+                    result = implicit_type_abs_pass(desugared_decl)
+                    match result:
+                        case Err(error):
+                            return Err(
+                                PipelineError(
+                                    phase="Phase 0: Desugar",
+                                    message=f"implicit_type_abs_pass failed for '{decl.name}'",
+                                    original_error=error,
+                                )
+                            )
+                        case Ok(final_decl):
+                            desugared_decls.append(final_decl)
+
+                case _:
+                    # Data declarations and primitives don't need desugaring
+                    desugared_decls.append(decl)
+
+        return Ok(desugared_decls)
+
+    def _run_phase1_scope(
+        self,
+        declarations: list[SurfaceDeclaration],
+        scope_ctx: ScopeContext,
+    ) -> Result[list[SurfaceDeclaration], PipelineError]:
+        """Phase 1: Scope checking - transform names to de Bruijn indices.
+
+        Uses scope_check_pass to:
+        1. Collect all global names from term declarations
+        2. Add globals to context (enables mutual recursion)
+        3. Transform each declaration's body to use de Bruijn indices
+        """
+        result = scope_check_pass(declarations, scope_ctx)
+        match result:
+            case Err(error):
+                return Err(
+                    PipelineError(
+                        phase="Phase 1: Scope",
+                        message="Scope checking failed",
+                        original_error=error,
                     )
                 )
-            else:
-                # Data declarations don't need desugaring
-                desugared.append(decl)
-        return desugared
+            case Ok(scoped_decls):
+                return Ok(scoped_decls)
 
-    def _process_llm_pragmas(
+    def _run_phase2_type(
         self,
-        surface_decls: list[SurfaceDeclaration],
-        core_decls: list[core.Declaration],
-        global_types: dict[str, Type],
-    ) -> tuple[list[core.Declaration], dict[str, LLMMetadata]]:
-        """Run Phase 3: Process LLM pragmas.
+        declarations: list[SurfaceDeclaration],
+        type_ctx: TypeContext,
+        constructors: dict[str, Type] | None,
+    ) -> Result[
+        tuple[
+            list[core.Declaration],
+            TypeContext,
+            dict[str, Type],
+            dict[str, Type],
+        ],
+        PipelineError,
+    ]:
+        """Phase 2: Type elaboration (6 steps).
 
-        Args:
-            surface_decls: Original surface declarations
-            core_decls: Core declarations from Phase 2
-            global_types: Global type signatures
+        Step 1: signature_collect_pass
+            - Collect type signatures from term and primitive declarations
+            - Convert surface types to core types
+            - Return: (global_types, term_decls, other_decls)
 
-        Returns:
-            Tuple of (final declarations, LLM metadata dict)
+        Step 2: data_decl_elab_pass
+            - Elaborate SurfaceDataDeclaration to core.DataDeclaration
+            - Build constructor types (e.g., Just: forall a. a -> Maybe a)
+            - Return: (data_decls, constructor_types)
+
+        Step 3: prepare_contexts_pass
+            - Add collected signatures to TypeContext.globals
+            - Add constructor types to TypeContext.constructors
+            - Return: prepared TypeContext ready for body elaboration
+
+        Step 4: elab_bodies_pass
+            - Elaborate each term body using BidiInference
+            - Uses checking mode when signature available, inference otherwise
+            - Return: list of (name, core_body, inferred_type) tuples
+
+        Step 5: build_decls_pass
+            - Build core.TermDeclaration from elaborated bodies
+            - Preserve docstrings and pragmas from surface declarations
+            - Return: list of core.TermDeclaration
+
+        Step 6: Combine results
+            - Merge data declarations and term declarations
+            - Return final core declarations and type information
         """
-        final_decls: list[core.Declaration] = []
-        llm_functions: dict[str, LLMMetadata] = {}
-
-        # Build a map of declaration name to surface declaration
-        surface_map: dict[str, SurfaceDeclaration] = {}
-        for decl in surface_decls:
-            if isinstance(decl, SurfaceTermDeclaration):
-                surface_map[decl.name] = decl
-
-        # Process each core declaration
-        for core_decl in core_decls:
-            if isinstance(core_decl, core.TermDeclaration):
-                # Get corresponding surface declaration
-                surface_decl = surface_map.get(core_decl.name)
-
-                if surface_decl is not None:
-                    # Process through LLM pass
-                    result = self.llm_pass.process_declaration(
-                        surface_decl, core_decl.type_annotation
+        # Step 1: Collect type signatures
+        sig_result = signature_collect_pass(declarations, constructors)
+        match sig_result:
+            case Err(error):
+                return Err(
+                    PipelineError(
+                        phase="Phase 2: Type",
+                        message="Signature collection failed",
+                        original_error=error,
                     )
+                )
+            case Ok((global_types, term_decls, other_decls)):
+                pass
 
-                    # If it's an LLM function, use the transformed declaration
-                    # Otherwise, use the already-elaborated core declaration
-                    if result.is_llm:
-                        final_decls.append(result.declaration)
-                        if result.metadata is not None:
-                            llm_functions[result.metadata.function_name] = result.metadata
-                    else:
-                        final_decls.append(core_decl)
-                else:
-                    # No surface decl found, use as-is
-                    final_decls.append(core_decl)
+        # Step 2: Elaborate data declarations
+        # Filter for data declarations from other_decls
+        data_decls_input = [
+            (i, decl) for i, decl in other_decls if isinstance(decl, SurfaceDataDeclaration)
+        ]
+
+        data_result = data_decl_elab_pass(data_decls_input, type_ctx)
+        match data_result:
+            case Err(error):
+                return Err(
+                    PipelineError(
+                        phase="Phase 2: Type",
+                        message="Data declaration elaboration failed",
+                        original_error=error,
+                    )
+                )
+            case Ok((data_decls, data_constructor_types)):
+                pass
+
+        # Merge constructor types: input + newly defined
+        all_constructors = (constructors or {}) | data_constructor_types
+
+        # Step 3: Prepare type contexts
+        ctx_result = prepare_contexts_pass(global_types, all_constructors, type_ctx)
+        match ctx_result:
+            case Err(error):
+                return Err(
+                    PipelineError(
+                        phase="Phase 2: Type",
+                        message="Context preparation failed",
+                        original_error=error,
+                    )
+                )
+            case Ok(prepared_ctx):
+                pass
+
+        # Step 4: Elaborate term bodies
+        bodies_result = elab_bodies_pass(term_decls, prepared_ctx, global_types)
+        match bodies_result:
+            case Err(error):
+                return Err(
+                    PipelineError(
+                        phase="Phase 2: Type",
+                        message="Body elaboration failed",
+                        original_error=error,
+                    )
+                )
+            case Ok(elaborated_bodies):
+                pass
+
+        # Step 5: Build core term declarations
+        # Build pragma map from surface declarations
+        pragma_map: dict[str, str | None] = {}
+        for decl in term_decls:
+            if decl.pragma:
+                pragma_map[decl.name] = decl.pragma.get("LLM")
             else:
-                # Non-term declarations pass through unchanged
-                final_decls.append(core_decl)
+                pragma_map[decl.name] = None
 
-        return final_decls, llm_functions
+        build_result = build_decls_pass(elaborated_bodies, term_decls, pragma_map)
+        match build_result:
+            case Err(error):
+                return Err(
+                    PipelineError(
+                        phase="Phase 2: Type",
+                        message="Building declarations failed",
+                        original_error=error,
+                    )
+                )
+            case Ok(term_core_decls):
+                pass
+
+        # Step 6: Combine all core declarations
+        # Data declarations first, then term declarations
+        all_core_decls: list[core.Declaration] = list(data_decls) + list(term_core_decls)
+
+        return Ok((all_core_decls, prepared_ctx, all_constructors, global_types))
+
+    def _run_phase3_llm(
+        self,
+        core_decls: list[core.Declaration],
+        surface_decls: list[SurfaceDeclaration],
+    ) -> Result[tuple[list[core.Declaration], dict[str, LLMMetadata]], PipelineError]:
+        """Phase 3: LLM pragma processing.
+
+        Transforms LLM function declarations:
+        - Identifies declarations with LLM pragma
+        - Replaces body with PrimOp("llm.{name}")
+        - Extracts LLMMetadata for runtime
+        """
+        result = llm_pragma_pass(core_decls)
+        match result:
+            case Err(error):
+                return Err(
+                    PipelineError(
+                        phase="Phase 3: LLM",
+                        message="LLM pragma processing failed",
+                        original_error=error,
+                    )
+                )
+            case Ok((final_decls, llm_functions)):
+                return Ok((final_decls, llm_functions))
 
     def _collect_docstrings(
         self,
@@ -371,55 +529,133 @@ class ElaborationPipeline:
             declarations: Surface declarations
 
         Returns:
-            Dictionary mapping names to docstrings
+            Dictionary mapping declaration names to docstrings
         """
         docstrings: dict[str, str] = {}
 
         for decl in declarations:
-            if isinstance(decl, SurfaceTermDeclaration):
-                if decl.docstring:
-                    docstrings[decl.name] = decl.docstring
+            match decl:
+                case SurfaceTermDeclaration(name=name, docstring=doc) if doc:
+                    docstrings[name] = doc
+                case SurfaceDataDeclaration(name=name, docstring=doc) if doc:
+                    docstrings[name] = doc
+                case SurfacePrimOpDecl(name=name, docstring=doc) if doc:
+                    docstrings[name] = doc
 
         return docstrings
 
-    def get_error_count(self) -> int:
-        """Get the number of errors encountered.
 
-        Returns:
-            Count of errors
-        """
-        return len(self._errors)
+def run_pipeline(
+    declarations: list[SurfaceDeclaration],
+    module_name: str = "main",
+    scope_ctx: ScopeContext | None = None,
+    type_ctx: TypeContext | None = None,
+    constructors: dict[str, Type] | None = None,
+) -> Result[Module, PipelineError]:
+    """Convenience function to run the full elaboration pipeline.
 
-    def get_warning_count(self) -> int:
-        """Get the number of warnings generated.
+    Args:
+        declarations: List of surface declarations to elaborate
+        module_name: Name for the compiled module
+        scope_ctx: Optional initial scope context (creates empty if None)
+        type_ctx: Optional initial type context (creates empty if None)
+        constructors: Optional data constructor types
 
-        Returns:
-            Count of warnings
-        """
-        return len(self._warnings)
+    Returns:
+        Result containing either the compiled Module or a PipelineError
+
+    Example:
+        >>> decls = [func_decl, data_decl]
+        >>> result = run_pipeline(decls, module_name="main")
+        >>> match result:
+        ...     case Ok(module):
+        ...         print(f"Compiled {len(module.declarations)} declarations")
+        ...     case Err(error):
+        ...         print(f"Failed: {error}")
+    """
+    pipeline = ElaborationPipeline(module_name=module_name)
+
+    if scope_ctx is None:
+        scope_ctx = ScopeContext()
+
+    if type_ctx is None:
+        type_ctx = TypeContext()
+
+    return pipeline.run(declarations, scope_ctx, type_ctx, constructors)
+
+
+@dataclass(frozen=True)
+class PipelineResult:
+    """Result of running the elaboration pipeline.
+
+    Attributes:
+        module: The compiled module (may contain errors in module.errors)
+        success: Whether the pipeline completed without errors
+        errors: List of errors encountered during elaboration
+    """
+
+    module: Module
+    success: bool
+    errors: list[PipelineError]
 
 
 def elaborate_module(
     declarations: list[SurfaceDeclaration],
     module_name: str = "main",
-    constructors: Optional[dict[str, Type]] = None,
-) -> Module:
+    constructors: dict[str, Type] | None = None,
+) -> PipelineResult:
     """Convenience function to elaborate declarations into a module.
 
+    This is a simplified interface that returns a PipelineResult directly
+    instead of a Result type. Check result.success to see if elaboration
+    succeeded, and result.module.errors for any elaboration errors.
+
     Args:
-        declarations: List of surface declarations
+        declarations: List of surface declarations to elaborate
         module_name: Name for the compiled module
-        constructors: Optional data constructor types
+        constructors: Optional data constructor types from previous modules
 
     Returns:
-        The compiled Module
+        PipelineResult containing the compiled module and status
 
     Example:
-        >>> decls = [func1_decl, func2_decl]
-        >>> module = elaborate_module(decls, module_name="main")
+        >>> decls = [func_decl, data_decl]
+        >>> result = elaborate_module(decls, module_name="main")
         >>>
-        >>> if not module.errors:
-        ...     print(f"Success: {len(module.declarations)} declarations")
+        >>> if result.success:
+        ...     print(f"Compiled {len(result.module.declarations)} declarations")
+        ... else:
+        ...     for error in result.errors:
+        ...         print(f"Error: {error}")
     """
     pipeline = ElaborationPipeline(module_name=module_name)
-    return pipeline.elaborate_module(declarations, constructors)
+    scope_ctx = ScopeContext()
+    type_ctx = TypeContext()
+
+    run_result = pipeline.run(declarations, scope_ctx, type_ctx, constructors)
+
+    match run_result:
+        case Ok(module):
+            return PipelineResult(
+                module=module,
+                success=len(module.errors) == 0,
+                errors=[],
+            )
+        case Err(error):
+            # Create an empty module with the error
+            empty_module = Module(
+                name=module_name,
+                declarations=[],
+                constructor_types=constructors or {},
+                global_types={},
+                primitive_types={},
+                docstrings={},
+                llm_functions={},
+                errors=[],
+                warnings=[],
+            )
+            return PipelineResult(
+                module=empty_module,
+                success=False,
+                errors=[error],
+            )

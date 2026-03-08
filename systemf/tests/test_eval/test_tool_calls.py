@@ -6,6 +6,7 @@ Tests tool call syntax: @tool_name arg1 arg2 ...
 import pytest
 
 from systemf.core.ast import Lit, ToolCall as CoreToolCall
+from systemf.core.types import TypeForall, TypeArrow, TypeVar
 from systemf.eval.machine import Evaluator
 from systemf.eval.tools import (
     EchoTool,
@@ -22,7 +23,7 @@ from systemf.surface.types import (
     SurfaceToolCall,
     SurfaceVar,
 )
-from systemf.surface.inference import elaborate_term
+from systemf.surface.inference import BidiInference, TypeContext
 from systemf.surface.parser import Lexer
 from systemf.surface.parser import parse_expression
 
@@ -99,7 +100,9 @@ class TestToolCallElaboration:
     def test_elaborate_simple_tool_call(self):
         """Elaborate simple tool call."""
         surface_term = parse_expression("@identity")
-        core_term = elaborate_term(surface_term)
+        inference = BidiInference()
+        ctx = TypeContext()
+        core_term, ty = inference.infer(surface_term, ctx)
 
         assert isinstance(core_term, CoreToolCall)
         assert core_term.tool_name == "identity"
@@ -108,7 +111,9 @@ class TestToolCallElaboration:
     def test_elaborate_tool_call_with_args(self):
         """Elaborate tool call with arguments."""
         surface_term = parse_expression("@identity 42")
-        core_term = elaborate_term(surface_term)
+        inference = BidiInference()
+        ctx = TypeContext()
+        core_term, ty = inference.infer(surface_term, ctx)
 
         assert isinstance(core_term, CoreToolCall)
         assert core_term.tool_name == "identity"
@@ -120,7 +125,10 @@ class TestToolCallElaboration:
     def test_elaborate_tool_call_with_variable(self):
         """Elaborate tool call with variable argument."""
         surface_term = parse_expression(r"@identity x")
-        core_term = elaborate_term(surface_term, context=["x"])
+        inference = BidiInference()
+        ctx = TypeContext()
+        ctx.extend_term_type(TypeForall(["a"], TypeArrow(TypeVar("a"), TypeVar("a"))))
+        core_term, ty = inference.infer(surface_term, ctx)
 
         assert isinstance(core_term, CoreToolCall)
         assert core_term.tool_name == "identity"
@@ -310,7 +318,9 @@ class TestToolCallIntegration:
         surface_term = parse_expression("@identity 42")
 
         # Elaborate
-        core_term = elaborate_term(surface_term)
+        inference = BidiInference()
+        ctx = TypeContext()
+        core_term, ty = inference.infer(surface_term, ctx)
 
         # Evaluate
         evaluator = Evaluator()

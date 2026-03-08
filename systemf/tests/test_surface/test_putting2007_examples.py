@@ -46,8 +46,7 @@ from systemf.surface.types import (
     SurfaceTypeForall,
 )
 from systemf.surface.inference import (
-    TypeElaborator,
-    elaborate_term,
+    BidiInference,
     TypeContext,
     TMeta,
 )
@@ -94,7 +93,7 @@ class TestIntroductionExample:
         # Build: f = λx:(∀a. a→a). (x 3, x True)
         # where x has type ∀a. a→a (rank-2 in argument position)
 
-        elab = TypeElaborator()
+        elab = BidiInference()
         ctx = TypeContext()
 
         # Type: ∀a. a → a (polymorphic identity)
@@ -867,8 +866,8 @@ class TestPutting2007Integration:
 
 @pytest.fixture
 def elab():
-    r"""Create a fresh TypeElaborator for each test."""
-    return TypeElaborator()
+    r"""Create a fresh BidiInference for each test."""
+    return BidiInference()
 
 
 @pytest.fixture

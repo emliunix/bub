@@ -12,7 +12,8 @@ from systemf.surface.types import (
     SurfaceOp,
     SurfaceVar,
 )
-from systemf.surface.desugar import desugar, OPERATOR_TO_PRIM
+from systemf.surface.desugar import desugar_term
+from systemf.surface.desugar.operator_pass import OPERATOR_TO_PRIM
 from systemf.surface.parser import parse_expression
 
 
@@ -62,7 +63,9 @@ class TestOperatorDesugaring:
     def test_desugar_addition(self):
         """Desugar + to int_plus application."""
         term = parse_expression("1 + 2")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_plus 1) 2)
         # Structure: SurfaceApp(SurfaceApp(SurfaceVar("int_plus"), left), right)
@@ -78,7 +81,9 @@ class TestOperatorDesugaring:
     def test_desugar_subtraction(self):
         """Desugar - to int_minus application."""
         term = parse_expression("5 - 3")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_minus 5) 3)
         assert isinstance(desugared, SurfaceApp)
@@ -93,7 +98,9 @@ class TestOperatorDesugaring:
     def test_desugar_multiplication(self):
         """Desugar * to int_multiply application."""
         term = parse_expression("4 * 5")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_multiply 4) 5)
         assert isinstance(desugared, SurfaceApp)
@@ -104,7 +111,9 @@ class TestOperatorDesugaring:
     def test_desugar_division(self):
         """Desugar / to int_divide application."""
         term = parse_expression("10 / 2")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_divide 10) 2)
         assert isinstance(desugared, SurfaceApp)
@@ -115,7 +124,9 @@ class TestOperatorDesugaring:
     def test_desugar_equality(self):
         """Desugar == to int_eq application."""
         term = parse_expression("x == y")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_eq x) y)
         assert isinstance(desugared, SurfaceApp)
@@ -130,7 +141,9 @@ class TestOperatorDesugaring:
     def test_desugar_less_than(self):
         """Desugar < to int_lt application."""
         term = parse_expression("x < y")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_lt x) y)
         assert isinstance(desugared, SurfaceApp)
@@ -141,7 +154,9 @@ class TestOperatorDesugaring:
     def test_desugar_greater_than(self):
         """Desugar > to int_gt application."""
         term = parse_expression("x > y")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_gt x) y)
         assert isinstance(desugared, SurfaceApp)
@@ -152,7 +167,9 @@ class TestOperatorDesugaring:
     def test_desugar_less_than_equal(self):
         """Desugar <= to int_le application."""
         term = parse_expression("x <= y")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_le x) y)
         assert isinstance(desugared, SurfaceApp)
@@ -163,7 +180,9 @@ class TestOperatorDesugaring:
     def test_desugar_greater_than_equal(self):
         """Desugar >= to int_ge application."""
         term = parse_expression("x >= y")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_ge x) y)
         assert isinstance(desugared, SurfaceApp)
@@ -175,7 +194,9 @@ class TestOperatorDesugaring:
         """Desugaring preserves operator precedence."""
         # 1 + 2 * 3 should desugar with proper nesting
         term = parse_expression("1 + 2 * 3")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_plus 1) ((int_multiply 2) 3))
         # So desugared is the outer + application
@@ -195,7 +216,9 @@ class TestOperatorDesugaring:
     def test_desugar_complex_expression(self):
         """Desugar complex expression with multiple operators."""
         term = parse_expression("1 + 2 + 3")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Left-associative: ((1 + 2) + 3)
         # Should be: ((int_plus ((int_plus 1) 2)) 3)
@@ -207,7 +230,9 @@ class TestOperatorDesugaring:
     def test_desugar_preserves_location(self):
         """Desugaring preserves source location information."""
         term = parse_expression("1 + 2")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Check that the location is preserved
         assert hasattr(desugared, "location")
@@ -230,10 +255,9 @@ class TestDesugarInContext:
         assert body.op == "+"
 
         # Desugar the declaration
-        from systemf.surface.desugar import Desugarer
-
-        desugarer = Desugarer()
-        desugared_body = desugarer.desugar(body)
+        result = desugar_term(body)
+        assert result.is_ok()
+        desugared_body = result.unwrap()
 
         # Should be desugared to SurfaceApp
         assert isinstance(desugared_body, SurfaceApp)
@@ -244,7 +268,9 @@ class TestDesugarInContext:
     def test_operator_in_lambda(self):
         """Operators in lambda bodies are desugared."""
         term = parse_expression(r"\x -> x + 1")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Lambda body should be desugared to SurfaceApp
         assert isinstance(desugared.body, SurfaceApp)
@@ -273,7 +299,9 @@ class TestDesugarInContext:
     def test_nested_operators(self):
         """Nested operator expressions are fully desugared."""
         term = parse_expression("(1 + 2) * (3 + 4)")
-        desugared = desugar(term)
+        result = desugar_term(term)
+        assert result.is_ok()
+        desugared = result.unwrap()
 
         # Should be: ((int_multiply ((int_plus 1) 2)) ((int_plus 3) 4))
         assert isinstance(desugared, SurfaceApp)

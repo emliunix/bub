@@ -1,34 +1,37 @@
-"""Type elaborator for System F surface language.
+"""Bidirectional type inference algorithm for System F surface language.
 
-This module implements Phase 2 of the elaboration pipeline: bidirectional
-type checking that transforms Scoped AST (with de Bruijn indices) to
-typed Core AST.
+This module provides the core bidirectional type inference algorithm used by
+the term elaboration pass. It is a UTILITY CLASS, not a PipelinePass.
+
+The algorithm implements the "Putting2007" paper (Complete and Decidable Type
+Inference for GADTs) with bidirectional checking (infer/check modes).
 
 Key features:
-- Bidirectional type checking (infer/check modes)
-- Robinson-style unification for type equality
-- Type inference for polymorphic types
-- Complete handling of all System F term types
+- Synthesis mode (infer): Given a term, compute its type
+- Checking mode (check): Given a term and a type, verify they match
+- Polymorphic type generalization (infer_sigma/check_sigma)
+- Subsumption checking for polymorphic types
+- Skolemization for polymorphic type checking
 
 Example:
-    >>> from systemf.surface.types import ScopedVar, ScopedAbs, SurfaceTypeConstructor
+    >>> from systemf.surface.inference.bidi_inference import BidiInference
     >>> from systemf.surface.inference.context import TypeContext
     >>> from systemf.utils.location import Location
     >>>
-    >>> # Create elaborator
-    >>> elab = TypeElaborator()
+    >>> bidi = BidiInference()
     >>> ctx = TypeContext()
     >>> loc = Location("test", 1, 1)
     >>>
-    >>> # \\x -> x with annotation
-    >>> abs_term = ScopedAbs("x", SurfaceTypeConstructor(name="Int", args=[], location=loc),
-    ...                      ScopedVar(0, "x", loc), loc)
-    >>> core_term, ty = elab.infer(abs_term, ctx)
+    >>> # Infer type of a term
+    >>> core_term, ty = bidi.infer(scoped_term, ctx)
+    >>>
+    >>> # Check term against expected type
+    >>> core_term = bidi.check(scoped_term, expected_type, ctx)
 """
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Optional
 
 from systemf.core import ast as core
 from systemf.core.types import (
@@ -37,7 +40,6 @@ from systemf.core.types import (
     TypeArrow,
     TypeForall,
     TypeConstructor,
-    PrimitiveType,
     TypeSkolem,
 )
 from systemf.surface.types import (
@@ -57,31 +59,22 @@ from systemf.surface.types import (
     SurfaceConstructor,
     SurfaceCase,
     SurfaceBranch,
-    SurfacePattern,
     SurfaceIf,
     SurfaceTuple,
     SurfaceLit,
     SurfaceOp,
     SurfaceToolCall,
-    SurfaceDeclaration,
 )
 from systemf.surface.inference.context import TypeContext
 from systemf.surface.inference.errors import (
-    TypeError,
     TypeMismatchError,
     UnificationError,
-    UndefinedTypeError,
 )
 from systemf.surface.inference.unification import (
     TMeta,
     Substitution,
     unify,
-    resolve_type,
 )
-from systemf.surface.scoped.checker import ScopeChecker
-from systemf.surface.scoped.context import ScopeContext
-from systemf.utils.location import Location
-from systemf.elaborator.scc import SCCAnalyzer, SCCNode, analyze_type_dependencies
 
 
 def _fresh_binder_names(count: int, ty: Type) -> list[str]:
@@ -97,27 +90,27 @@ def _fresh_binder_names(count: int, ty: Type) -> list[str]:
     return result
 
 
-class TypeElaborator:
-    """Bidirectional type elaborator for System F surface language.
+class BidiInference:
+    """Bidirectional type inference engine.
 
-    Transforms Scoped AST (with de Bruijn indices) to typed Core AST
-    using bidirectional type checking and unification-based inference.
+    This class implements the core bidirectional type inference algorithm
+    for System F surface terms. It operates on scoped terms (with de Bruijn
+    indices) and produces typed core terms.
 
-    The elaborator maintains:
-    - TypeContext: Tracks variable types, constructors, and globals
+    The inference maintains:
     - Substitution: Accumulates unification results during inference
-    - Counter: Generates fresh meta type variables
+    - Meta counter: Generates fresh meta type variables
+    - Skolem counter: Generates fresh skolem constants for polymorphism
 
     Example:
-        >>> elab = TypeElaborator()
+        >>> bidi = BidiInference()
         >>> ctx = TypeContext()
         >>> # Infer type of identity function
-        >>> # \\x -> x
-        >>> core_term, ty = elab.infer(scoped_term, ctx)
+        >>> core_term, ty = bidi.infer(scoped_term, ctx)
     """
 
     def __init__(self):
-        """Initialize the type elaborator."""
+        """Initialize the bidirectional inference engine."""
         self.subst: Substitution = Substitution.empty()
         self._meta_counter: int = 0
         self._skolem_counter: int = 0
@@ -244,15 +237,6 @@ class TypeElaborator:
 
         Raises:
             TypeError: If type inference fails
-
-        Example:
-            >>> elab = TypeElaborator()
-            >>> ctx = TypeContext()
-            >>> # Infer type of variable x0 (bound to Int)
-            >>> var = ScopedVar(0, "x", loc)
-            >>> ctx = ctx.extend_term(TypeConstructor("Int", []))
-            >>> core_term, ty = elab.infer(var, ctx)
-            >>> assert str(ty) == "Int"
         """
         match term:
             case ScopedVar(location=location, index=index, debug_name=debug_name):
@@ -285,22 +269,22 @@ class TypeElaborator:
                     core_term = core.Constructor(location, name, [])
                     return (core_term, con_type)
                 except NameError:
-                    pass
-
-                # Not a constructor, try global variable lookup
-                try:
-                    var_type = ctx.lookup_global(name)
-                    # Apply current substitution
-                    var_type = self._apply_subst(var_type)
-                    # Create Global node for global variables
-                    core_term = core.Global(location, name)
-                    return (core_term, var_type)
-                except NameError:
-                    raise TypeError(
-                        f"Undefined variable '{name}'",
-                        location,
-                        term,
-                    )
+                    # Not a constructor - must be a global term
+                    # Look up in globals
+                    if name in ctx.globals:
+                        global_type = ctx.globals[name]
+                        global_type = self._apply_subst(global_type)
+                        global_type = self._instantiate(global_type)
+                        global_type = self._apply_subst(global_type)
+                        # Global terms are represented as Global in core
+                        core_term = core.Global(location, name)
+                        return (core_term, global_type)
+                    else:
+                        raise TypeError(
+                            f"Undefined global variable: {name}",
+                            location,
+                            term,
+                        )
 
             case ScopedAbs(location=location, var_name=var_name, var_type=var_type, body=body):
                 # Lambda abstraction: type depends on annotation or inference
@@ -549,10 +533,6 @@ class TypeElaborator:
             case SurfaceIf(
                 location=location, cond=cond, then_branch=then_branch, else_branch=else_branch
             ):
-                # Desugar to case: if c then t else f  ==>  case c of True -> t | False -> f
-                # First, check condition is Bool-like
-                core_cond, cond_type = self.infer(cond, ctx)
-
                 # Infer branches
                 core_then, then_type = self.infer(then_branch, ctx)
                 core_else, else_type = self.infer(else_branch, ctx)
@@ -574,9 +554,10 @@ class TypeElaborator:
 
                 final_type = self._apply_subst(then_type)
 
+                # Infer condition (for completeness)
+                core_cond, _ = self.infer(cond, ctx)
+
                 # Build if as a case expression
-                # For now, create a simple conditional structure
-                # In practice, this would use Bool constructors
                 core_term = core.Case(
                     location,
                     core_cond,
@@ -590,11 +571,10 @@ class TypeElaborator:
 
             case SurfaceTuple(location=location, elements=elements):
                 # Tuple desugars to nested Pairs
-                # (a, b, c) -> Pair a (Pair b c)
                 if not elements:
                     raise TypeError("Empty tuples not supported", location, term)
 
-                # Infer first element
+                # Infer all elements
                 core_elems = []
                 elem_types = []
 
@@ -603,24 +583,6 @@ class TypeElaborator:
                     core_elems.append(core_elem)
                     elem_types.append(elem_type)
 
-                # Build Pair type: Pair t1 (Pair t2 (... tn))
-                # Start from the last element
-                result_type = elem_types[-1]
-                result_term = core_elems[-1]
-
-                # Build nested pairs from right to left
-                for core_elem, elem_type in reversed(list(zip(core_elems[:-1], elem_types[:-1]))):
-                    result_type = TypeArrow(
-                        elem_type,
-                        TypeArrow(result_type, result_type),  # Simplified
-                    )
-                    result_term = core.App(
-                        location,
-                        core.App(location, core.Constructor(location, "Pair", []), core_elem),
-                        result_term,
-                    )
-
-                # Actually, let's just use a simpler representation for now
                 # Store as constructor with all elements
                 result_type = TypeConstructor("Tuple", elem_types)
                 core_term = core.Constructor(location, "Tuple", core_elems)
@@ -635,7 +597,6 @@ class TypeElaborator:
 
             case SurfaceOp(location=location, left=left, op=op, right=right):
                 # Operator: desugar to primitive application
-                # For now, treat as function application with primitive
                 core_left, left_type = self.infer(left, ctx)
                 core_right, right_type = self.infer(right, ctx)
 
@@ -647,7 +608,6 @@ class TypeElaborator:
                 result_type = self._apply_subst(left_type)
 
                 # Create primitive operation application
-                # This is simplified - full implementation would desugar properly
                 core_term = core.App(
                     location,
                     core.App(location, core.PrimOp(location, f"op_{op}"), core_left),
@@ -706,14 +666,6 @@ class TypeElaborator:
 
         Raises:
             TypeMismatchError: If the term doesn't have the expected type
-
-        Example:
-            >>> elab = TypeElaborator()
-            >>> ctx = TypeContext()
-            >>> ctx = ctx.extend_term(TypeConstructor("Int", []))
-            >>> # Check that x0 has type Int
-            >>> var = ScopedVar(0, "x", loc)
-            >>> core_term = elab.check(var, TypeConstructor("Int", []), ctx)
         """
         # Apply current substitution to expected type
         expected = self._apply_subst(expected)
@@ -739,9 +691,6 @@ class TypeElaborator:
 
                     case TypeForall(_, _) as forall_type:
                         # Lambda against forall: skolemize and check (GEN2)
-                        # Example: checking `λx → x` against `∀a. a → a`
-                        # Skolemize to get `$a_0 → $a_0` (rigid skolem), then check lambda
-                        # This prevents unification with concrete types
                         return self.check_sigma(term, forall_type, ctx)
 
                     case TMeta() as meta:
@@ -907,7 +856,6 @@ class TypeElaborator:
             constr_type = self._apply_subst(constr_type)
 
             # Extract argument types and result type from constructor
-            # Constructor type is: arg1 -> arg2 -> ... -> ResultType
             current = constr_type
             while isinstance(current, TypeArrow):
                 arg_types.append(current.arg)
@@ -929,7 +877,6 @@ class TypeElaborator:
             branch_ctx = branch_ctx.extend_term(var_type)
 
         # Check or infer body type based on bidirectional typing
-        # According to Pierce & Turner, case branches should CHECK against expected type
         if expected_result is not None:
             core_body = self.check(branch.body, expected_result, branch_ctx)
             body_type = expected_result
@@ -952,9 +899,6 @@ class TypeElaborator:
     ) -> core.Branch:
         """Check a case branch against scrutinee and expected result types.
 
-        This is used in checking mode (bidirectional type checking) where we
-        know the expected result type and check branches against it.
-
         Args:
             branch: The branch to check
             scrut_type: Type of the scrutinee
@@ -975,7 +919,6 @@ class TypeElaborator:
             constr_type = self._apply_subst(constr_type)
 
             # Extract argument types and result type from constructor
-            # Constructor type is: arg1 -> arg2 -> ... -> ResultType
             current = constr_type
             while isinstance(current, TypeArrow):
                 arg_types.append(current.arg)
@@ -1051,8 +994,6 @@ class TypeElaborator:
                 return TypeConstructor(name, [self._instantiate_free_vars(arg) for arg in args])
             case TypeForall(var, body):
                 # Don't instantiate bound variables
-                # For simplicity, we just return the forall as-is
-                # A full implementation would handle this properly
                 return ty
             case _:
                 return ty
@@ -1091,8 +1032,6 @@ class TypeElaborator:
                 return TypeConstructor(
                     name, [self._subst_type_var(arg, var, replacement) for arg in args]
                 )
-            case PrimitiveType(_):
-                return ty
             case _:
                 return ty
 
@@ -1117,11 +1056,6 @@ class TypeElaborator:
             pr(σ₂) = ∀ā.ρ    ā ∉ ftv(σ₁)    ⊢^dsk* σ₁ ≤ ρ
             ----------------------------------------------
             ⊢^dsk σ₁ ≤ σ₂
-
-        This is used for checking that one type is "more polymorphic than" another,
-        which is essential for:
-        - Function argument checking (contravariant in argument position)
-        - Multi-branch construct typing (if/case with polymorphic branches)
 
         Args:
             sigma1: The type that should be more polymorphic (actual)
@@ -1224,356 +1158,6 @@ class TypeElaborator:
                     break
 
         return skolems, current
-
-    def elaborate_declarations(
-        self,
-        decls: list[SurfaceDeclaration],
-        constructors: dict[str, Type] | None = None,
-        global_types: dict[str, Type] | None = None,
-        global_terms: set[str] | None = None,
-    ) -> tuple[list[core.Declaration], TypeContext, dict[str, Type], dict[str, Type]]:
-        """Elaborate multiple declarations with mutual recursion support.
-
-        This method implements the three-phase elaboration pipeline required for
-        mutual recursion:
-
-        Phase 1 - Signature Collection:
-            - Collect type signatures from all term declarations
-            - Add all signatures to TypeContext as globals
-            - Build complete typing environment
-
-        Phase 2 - Scope Checking (NEW):
-            - Use ScopeChecker to convert Surface AST to Scoped AST
-            - Resolve names to de Bruijn indices
-            - Enable mutual recursion by making all globals visible
-
-        Phase 3 - Body Elaboration:
-            - Elaborate each scoped declaration body with full type context
-            - All globals are visible to all bodies
-            - Enables mutually recursive definitions
-
-        Pipeline flow: Surface AST -> Scoped AST -> Core AST
-
-        Example:
-            # even and odd can reference each other
-            even : Int -> Bool
-            even n = if n == 0 then True else odd (n - 1)
-
-            odd : Int -> Bool
-            odd n = if n == 0 then False else even (n - 1)
-
-        Args:
-            decls: List of surface declarations to elaborate
-            constructors: Optional dict of data constructor types
-
-        Returns:
-            Tuple of (core declarations, final context, global types dict)
-
-        Example:
-            >>> elab = TypeElaborator()
-            >>> decls = [even_decl, odd_decl]
-            >>> core_decls, ctx, types = elab.elaborate_declarations(decls)
-            >>> # Both even and odd can call each other
-        """
-        from systemf.surface.types import (
-            SurfaceDataDeclaration,
-            SurfacePrimOpDecl,
-            SurfacePrimTypeDecl,
-            SurfaceTermDeclaration,
-        )
-
-        # Phase 1: Collect all type signatures first
-        # Start with existing global context from REPL (accumulated style)
-        global_types: dict[str, Type] = dict(global_types) if global_types else {}
-        existing_terms: set[str] = set(global_terms) if global_terms else set()
-
-        term_decls: list[SurfaceTermDeclaration] = []
-        other_decls: list[tuple[int, SurfaceDeclaration]] = []
-
-        for i, decl in enumerate(decls):
-            match decl:
-                case SurfaceTermDeclaration():
-                    # Convert surface type to core type
-                    core_type = self._surface_to_core_type(decl.type_annotation, TypeContext())
-                    global_types[decl.name] = core_type
-                    term_decls.append(decl)
-                case SurfacePrimOpDecl():
-                    # Convert surface type to core type
-                    core_type = self._surface_to_core_type(decl.type_annotation, TypeContext())
-                    global_types[decl.name] = core_type
-                    other_decls.append((i, decl))
-                case _:
-                    other_decls.append((i, decl))
-
-        # Add constructors if provided
-        if constructors:
-            for name, ty in constructors.items():
-                global_types[name] = ty
-
-        # Phase 2: Elaborate data declarations FIRST to get constructor types
-        # This must happen before term declarations so constructors are available
-        # Create initial context with globals AND input constructors
-        ctx = TypeContext(globals=global_types, constructors=constructors or {})
-
-        core_decls: list[core.Declaration] = []
-        all_constructor_types: dict[str, Type] = {}
-
-        for _, decl in other_decls:
-            core_decl, con_types = self._elaborate_other_declaration(decl, ctx)
-            core_decls.append(core_decl)
-            # Collect constructor types from data declarations
-            all_constructor_types.update(con_types)
-            # Add constructors to global_types and context
-            for name, ty in con_types.items():
-                global_types[name] = ty
-                ctx = ctx.add_constructor(name, ty)
-
-        # Phase 3: Add input constructors to context as well
-        if constructors:
-            for name, ty in constructors.items():
-                ctx = ctx.add_constructor(name, ty)
-
-        # Phase 4: Elaborate each term declaration body with full context
-        elaborated_terms: dict[str, core.TermDeclaration] = {}
-
-        # Initialize ScopeChecker for converting Surface AST to Scoped AST
-        scope_checker = ScopeChecker()
-
-        for decl in term_decls:
-            # Get the expected type (may have been refined during elaboration)
-            expected_type = global_types.get(decl.name)
-
-            # Step 1: Scope-check the body to convert Surface AST -> Scoped AST
-            # Build scope context with all global names for mutual recursion
-            scope_ctx = ScopeContext(globals=set(global_types.keys()))
-            scoped_body = scope_checker.check_term(decl.body, scope_ctx)
-
-            # Step 2: Elaborate the scoped body
-            # Use bidirectional checking: if we have expected type, check against it
-            # Otherwise infer the type
-            if expected_type is not None:
-                core_body = self.check(scoped_body, expected_type, ctx)
-                inferred_type = expected_type
-            else:
-                core_body, inferred_type = self.infer(scoped_body, ctx)
-
-            # Unify expected type with inferred type
-            if expected_type is not None:
-                expected_type = self._apply_subst(expected_type)
-                inferred_type = self._apply_subst(inferred_type)
-                self._unify(expected_type, inferred_type, decl.location)
-
-            # Extract pragma params
-            pragma_params = None
-            if decl.pragma and "LLM" in decl.pragma:
-                pragma_params = decl.pragma["LLM"].strip() or None
-
-            # Create Core declaration
-            core_decl = core.TermDeclaration(
-                name=decl.name,
-                type_annotation=self._apply_subst(expected_type) if expected_type else None,
-                body=core_body,
-                pragma=pragma_params,
-                docstring=decl.docstring,
-                param_docstrings=None,  # Extracted separately if needed
-            )
-
-            elaborated_terms[decl.name] = core_decl
-            core_decls.append(core_decl)
-
-        return (core_decls, ctx, global_types, all_constructor_types)
-
-    def _elaborate_other_declaration(
-        self,
-        decl: SurfaceDeclaration,
-        ctx: TypeContext,
-    ) -> tuple[core.Declaration, dict[str, Type]]:
-        """Elaborate non-term declarations.
-
-        Args:
-            decl: The surface declaration
-            ctx: Current type context
-
-        Returns:
-            Tuple of (Core declaration, constructor types dict)
-        """
-        from systemf.surface.types import (
-            SurfaceDataDeclaration,
-            SurfacePrimOpDecl,
-            SurfacePrimTypeDecl,
-        )
-
-        match decl:
-            case SurfaceDataDeclaration():
-                return self._elaborate_data_decl(decl)
-            case SurfacePrimOpDecl():
-                core_decl = self._elaborate_prim_op_decl(
-                    decl.name, decl.type_annotation, decl.location, decl.pragma
-                )
-                return (core_decl, {})
-            case SurfacePrimTypeDecl():
-                core_decl = self._elaborate_prim_type_decl(decl.name, decl.location)
-                return (core_decl, {})
-            case _:
-                raise TypeError(f"Unknown declaration type: {type(decl)}")
-
-    def _elaborate_data_decl(
-        self,
-        decl,
-    ) -> tuple[core.DataDeclaration, dict[str, Type]]:
-        """Elaborate a data type declaration.
-
-        Args:
-            decl: Surface data declaration
-
-        Returns:
-            Tuple of (Core DataDeclaration, constructor types dict)
-        """
-        from systemf.surface.types import SurfaceDataDeclaration
-        from systemf.core.types import TypeForall, TypeArrow, TypeVar, TypeConstructor
-
-        # Build the result type constructor
-        # For "data Maybe a = ...", this is "Maybe a"
-        result_type = TypeConstructor(decl.name, [TypeVar(p) for p in decl.params])
-
-        # Create a context with type parameters bound
-        # This ensures type variables in constructor args are properly resolved
-        type_ctx = TypeContext()
-        for param in decl.params:
-            type_ctx = type_ctx.extend_type(param)
-
-        # Convert constructors and build their types
-        core_constructors: list[tuple[str, list[Type]]] = []
-        constructor_types: dict[str, Type] = {}
-
-        for con_info in decl.constructors:
-            core_args = [self._surface_to_core_type(arg, type_ctx) for arg in con_info.args]
-            core_constructors.append((con_info.name, core_args))
-
-            # Build constructor type: args -> result
-            con_type: Type = result_type
-            for arg in reversed(core_args):
-                con_type = TypeArrow(arg, con_type)
-
-            # Add forall for each type parameter
-            for param in reversed(decl.params):
-                con_type = TypeForall(param, con_type)
-
-            constructor_types[con_info.name] = con_type
-
-        data_decl = core.DataDeclaration(
-            name=decl.name,
-            params=decl.params,
-            constructors=core_constructors,
-        )
-
-        return (data_decl, constructor_types)
-
-    def _elaborate_prim_op_decl(
-        self,
-        name: str,
-        type_annotation: SurfaceType,
-        location: Location,
-        pragma: dict[str, str] | None = None,
-    ) -> core.TermDeclaration:
-        """Elaborate a primitive operation declaration.
-
-        Args:
-            name: Operation name
-            type_annotation: Surface type annotation
-            location: Source location
-            pragma: Optional pragma dict
-
-        Returns:
-            Core TermDeclaration
-        """
-        core_type = self._surface_to_core_type(type_annotation, TypeContext())
-
-        # Determine if LLM function
-        if pragma and "LLM" in pragma:
-            full_name = f"llm.{name}"
-            pragma_str = pragma.get("LLM")
-        else:
-            full_name = name
-            pragma_str = None
-
-        return core.TermDeclaration(
-            name=name,
-            type_annotation=core_type,
-            body=core.PrimOp(location, full_name),
-            pragma=pragma_str,
-        )
-
-    def _elaborate_prim_type_decl(
-        self,
-        name: str,
-        location: Location,
-    ) -> core.DataDeclaration:
-        """Elaborate a primitive type declaration.
-
-        Args:
-            name: Type name
-            location: Source location
-
-        Returns:
-            Core DataDeclaration (placeholder)
-        """
-        return core.DataDeclaration(
-            name=name,
-            params=[],
-            constructors=[],
-        )
-
-    def _convert_surface_to_core_data_decl(
-        self,
-        decl: SurfaceDataDeclaration,
-    ) -> core.DataDeclaration:
-        """Convert a surface data declaration to core data declaration.
-
-        Args:
-            decl: Surface data declaration
-
-        Returns:
-            Core data declaration
-        """
-        core_constructors: list[tuple[str, list[Type]]] = []
-
-        for con_info in decl.constructors:
-            core_args = [self._surface_to_core_type(arg, TypeContext()) for arg in con_info.args]
-            core_constructors.append((con_info.name, core_args))
-
-        return core.DataDeclaration(
-            name=decl.name,
-            params=decl.params,
-            constructors=core_constructors,
-        )
-
-    def typecheck(
-        self,
-        term: ScopedVar
-        | ScopedAbs
-        | SurfaceApp
-        | SurfaceTypeAbs
-        | SurfaceTypeApp
-        | SurfaceLet
-        | SurfaceAnn
-        | SurfaceConstructor
-        | SurfaceCase
-        | SurfaceIf
-        | SurfaceTuple
-        | SurfaceLit
-        | SurfaceOp
-        | SurfaceToolCall,
-        ctx: TypeContext,
-    ) -> tuple[core.Term, Type]:
-        """Top-level type checking entry point.
-
-        Like Haskell's 'typecheck' - infers the type and generalizes
-        over free meta variables (GEN1).
-
-        Returns generalized sigma types suitable for top-level declarations.
-        """
-        return self.infer_sigma(term, ctx)
 
     def infer_sigma(self, term, ctx: TypeContext) -> tuple[core.Term, Type]:
         """Infer a term's type and generalize over free metas (GEN1).
@@ -1680,43 +1264,33 @@ class TypeElaborator:
             case _:
                 return set()
 
+    def typecheck(
+        self,
+        term: ScopedVar
+        | ScopedAbs
+        | SurfaceApp
+        | SurfaceTypeAbs
+        | SurfaceTypeApp
+        | SurfaceLet
+        | SurfaceAnn
+        | SurfaceConstructor
+        | SurfaceCase
+        | SurfaceIf
+        | SurfaceTuple
+        | SurfaceLit
+        | SurfaceOp
+        | SurfaceToolCall,
+        ctx: TypeContext,
+    ) -> tuple[core.Term, Type]:
+        """Top-level type checking entry point.
 
-def elaborate_term(
-    term: ScopedVar
-    | ScopedAbs
-    | SurfaceApp
-    | SurfaceTypeAbs
-    | SurfaceTypeApp
-    | SurfaceLet
-    | SurfaceAnn
-    | SurfaceConstructor
-    | SurfaceCase
-    | SurfaceIf
-    | SurfaceTuple
-    | SurfaceLit
-    | SurfaceOp
-    | SurfaceToolCall,
-    ctx: Optional[TypeContext] = None,
-) -> tuple[core.Term, Type]:
-    """Elaborate a scoped term and infer its type.
+        Like Haskell's 'typecheck' - infers the type and generalizes
+        over free meta variables (GEN1).
 
-    Convenience function that creates a TypeElaborator and runs inference.
+        Returns generalized sigma types suitable for top-level declarations.
+        """
+        return self.infer_sigma(term, ctx)
 
-    Args:
-        term: The scoped term to elaborate
-        ctx: Optional type context (creates empty context if None)
 
-    Returns:
-        Tuple of (core term, inferred type)
-
-    Example:
-        >>> from systemf.surface.types import ScopedVar, ScopedAbs
-        >>> loc = Location("test", 1, 1)
-        >>> ctx = TypeContext().extend_term(TypeConstructor("Int", []))
-        >>> var = ScopedVar(0, "x", loc)
-        >>> core_term, ty = elaborate_term(var, ctx)
-    """
-    elab = TypeElaborator()
-    if ctx is None:
-        ctx = TypeContext()
-    return elab.typecheck(term, ctx)
+# Import Location here to avoid circular imports
+from systemf.utils.location import Location
