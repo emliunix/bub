@@ -89,14 +89,30 @@ class TypeForall(Type):
 
 @dataclass(frozen=True)
 class TypeConstructor(Type):
-    """Data type constructor: T τ₁...τₙ."""
+    """Data type constructor: T τ₁...τₙ.
+
+    Supports versioning for shadowed type definitions. When a type is redefined,
+    each definition gets a unique version number starting from 0.
+
+    Example:
+        >>> t1 = TypeConstructor("T", [], version=0)  # First definition
+        >>> t2 = TypeConstructor("T", [], version=1)  # Redefinition
+        >>> str(t1)
+        'T'
+        >>> str(t2)
+        'T#v1'
+        >>> t1 == t2
+        False  # Different versions don't unify
+    """
 
     name: str
     args: list[Type]
+    version: int = 0  # Version counter for shadowed types
 
     def __str__(self) -> str:
+        name_str = self.name if self.version == 0 else f"{self.name}#v{self.version}"
         if not self.args:
-            return self.name
+            return name_str
         args_strs = []
         for arg in self.args:
             match arg:
@@ -105,7 +121,7 @@ class TypeConstructor(Type):
                 case _:
                     args_strs.append(str(arg))
         args_str = " ".join(args_strs)
-        return f"{self.name} {args_str}"
+        return f"{name_str} {args_str}"
 
     def free_vars(self) -> set[str]:
         result: set[str] = set()
@@ -114,7 +130,9 @@ class TypeConstructor(Type):
         return result
 
     def substitute(self, subst: dict[str, Type]) -> Type:
-        return TypeConstructor(self.name, [arg.substitute(subst) for arg in self.args])
+        return TypeConstructor(
+            self.name, [arg.substitute(subst) for arg in self.args], self.version
+        )
 
 
 @dataclass(frozen=True)

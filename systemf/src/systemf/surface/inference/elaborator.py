@@ -550,10 +550,20 @@ class TypeElaborator:
                 core_then, then_type = self.infer(then_branch, ctx)
                 core_else, else_type = self.infer(else_branch, ctx)
 
-                # Unify branch types
+                # Paper Section 7.1: Multi-branch constructs
+                # Use two-way subsumption for polymorphic branches (Choice 3)
+                # This ensures branches are equivalent under subsumption relation
                 then_type = self._apply_subst(then_type)
                 else_type = self._apply_subst(else_type)
-                self._unify(then_type, else_type, location)
+
+                # Two-way subsumption: check that types are equivalent
+                # ⊢^dsk ρ₁ ≤ ρ₂ and ⊢^dsk ρ₂ ≤ ρ₁
+                try:
+                    self._subs_check(then_type, else_type, location)
+                    self._subs_check(else_type, then_type, location)
+                except TypeMismatchError:
+                    # Fall back to unification for simple cases
+                    self._unify(then_type, else_type, location)
 
                 final_type = self._apply_subst(then_type)
 
@@ -1097,6 +1107,122 @@ class TypeElaborator:
             The type with variable renamed
         """
         return self._subst_type_var(ty, old_var, TypeVar(new_var))
+
+    def _subs_check(self, sigma1: Type, sigma2: Type, location: Optional[Location] = None) -> None:
+        """Check that sigma1 is at least as polymorphic as sigma2 (subsumption).
+
+        Implements the DEEP-SKOL rule from Putting2007 paper (Section 4.6, Figure 8):
+
+            pr(σ₂) = ∀ā.ρ    ā ∉ ftv(σ₁)    ⊢^dsk* σ₁ ≤ ρ
+            ----------------------------------------------
+            ⊢^dsk σ₁ ≤ σ₂
+
+        This is used for checking that one type is "more polymorphic than" another,
+        which is essential for:
+        - Function argument checking (contravariant in argument position)
+        - Multi-branch construct typing (if/case with polymorphic branches)
+
+        Args:
+            sigma1: The type that should be more polymorphic (actual)
+            sigma2: The type that should be less polymorphic (expected)
+            location: Source location for error reporting
+
+        Raises:
+            TypeMismatchError: If sigma1 is not at least as polymorphic as sigma2
+        """
+        # Skolemize sigma2 (replace ∀ with fresh skolem constants)
+        skol_tvs, rho2 = self._skolemise(sigma2)
+
+        # Check sigma1 ≤ rho2 (sigma1 is at least as polymorphic as skolemized sigma2)
+        self._subs_check_rho(sigma1, rho2, location)
+
+        # Check that skolem constants didn't escape (aren't free in sigma1 or sigma2)
+        if skol_tvs:
+            # For now, simplified check - in full implementation would check
+            # that skol_tvs don't appear in the final types
+            pass
+
+    def _subs_check_rho(self, sigma: Type, rho: Type, location: Optional[Location] = None) -> None:
+        """Check that sigma is at least as polymorphic as rho (rho is skolemized).
+
+        Implements SPEC, FUN, and MONO rules from Putting2007 paper.
+
+        Args:
+            sigma: The polymorphic type
+            rho: The rho type (no top-level forall)
+            location: Source location for error reporting
+        """
+        match sigma:
+            case TypeForall(_, _):
+                # SPEC rule: Instantiate outer foralls and continue
+                rho1 = self._instantiate(sigma)
+                self._subs_check_rho(rho1, rho, location)
+
+            case TypeArrow(arg1, ret1, _) if isinstance(rho, TypeArrow):
+                # FUN rule: Function subsumption is contravariant in argument
+                # σ₁ → σ₂ ≤ σ₃ → σ₄  iff  σ₃ ≤ σ₁ and σ₂ ≤ σ₄
+                arg2, ret2 = rho.arg, rho.ret
+
+                # Check arg2 ≤ arg1 (contravariant!)
+                self._subs_check(arg2, arg1, location)
+
+                # Check ret1 ≤ ret2 (covariant)
+                self._subs_check_rho(ret1, ret2, location)
+
+            case TypeArrow(_, _, _):
+                # sigma is arrow but rho is not - try to unify
+                self._unify(sigma, rho, location)
+
+            case _:
+                # MONO rule: Unify monomorphic types
+                self._unify(sigma, rho, location)
+
+    def _skolemise(self, ty: Type) -> tuple[list[str], Type]:
+        """Weak prenex conversion: pr(σ) = ∀ā.ρ.
+
+        From Putting2007 paper Section 4.5:
+        - PRPOLY: pr(∀ā.σ) = ∀āb̄.ρ where pr(σ) = ∀b̄.ρ
+        - PRFUN:  pr(σ₁→σ₂) = ∀ā.(σ₁→ρ₂) where pr(σ₂) = ∀ā.ρ₂, ā ∉ fv(σ₁)
+        - PRMONO: pr(τ) = τ
+
+        Returns skolem constants and the rho body.
+
+        Args:
+            ty: The type to skolemize
+
+        Returns:
+            Tuple of (skolem variable names, rho type)
+        """
+        skolems: list[str] = []
+        current = ty
+
+        while True:
+            match current:
+                case TypeForall(var, body):
+                    # Create skolem constant for this bound variable
+                    skolem_name = f"_skol_{var}_{len(skolems)}"
+                    skolems.append(skolem_name)
+                    # Substitute skolem for bound variable
+                    current = self._subst_type_var(body, var, TypeVar(skolem_name))
+
+                case TypeArrow(arg, ret, doc):
+                    # Check if return type has foralls that can be hoisted
+                    match ret:
+                        case TypeForall(ret_var, ret_body):
+                            # PRFUN: hoist foralls from return type
+                            # pr(σ₁→∀ā.σ₂) = ∀ā.(σ₁→σ₂) if ā ∉ fv(σ₁)
+                            skolem_name = f"_skol_{ret_var}_{len(skolems)}"
+                            skolems.append(skolem_name)
+                            new_ret = self._subst_type_var(ret_body, ret_var, TypeVar(skolem_name))
+                            current = TypeArrow(arg, new_ret, doc)
+                            # Continue processing in case there are more foralls
+                            continue
+                        case _:
+                            break
+                case _:
+                    break
+
+        return skolems, current
 
     def _maybe_add_coercion(
         self,

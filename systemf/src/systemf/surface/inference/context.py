@@ -4,7 +4,7 @@ The TypeContext maintains the type checking environment during Phase 2
 (type elaboration). It tracks:
 - Term variable types (indexed by de Bruijn index)
 - Type variable kinds (for polymorphic types)
-- Type constructor signatures
+- Type constructor signatures (with versioning for shadowing)
 - Global type signatures
 """
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from systemf.core.types import Type, TypeArrow, TypeForall
+from systemf.core.types import Type, TypeArrow, TypeForall, TypeConstructor
 from systemf.core.coercion import CoercionAxiom
 
 
@@ -25,12 +25,17 @@ class TypeContext:
     but for type checking. It uses de Bruijn indices for term variables and
     tracks type variable kinds.
 
+    Supports shadowed type definitions through versioning. When a type is
+    redefined, the new definition gets a unique version number, preventing
+    accidental unification between old and new definitions.
+
     Attributes:
         term_types: Types of bound term variables, index 0 = most recent
         type_vars: Bound type variable names with their kinds (or None for *)
         constructors: Type constructor signatures (name -> type scheme)
         globals: Global name -> type signature mapping
         metas: Meta type variables (for unification)
+        type_versions: Maps type name -> current version number
 
     Example:
         >>> ctx = TypeContext()
@@ -48,6 +53,7 @@ class TypeContext:
     globals: dict[str, Type] = field(default_factory=dict)
     metas: list[Type] = field(default_factory=list)
     coercion_axioms: dict[str, CoercionAxiom] = field(default_factory=dict)
+    type_versions: dict[str, int] = field(default_factory=dict)
 
     def lookup_term_type(self, index: int) -> Type:
         """Get the type of a term variable by de Bruijn index.
@@ -189,6 +195,7 @@ class TypeContext:
             globals=self.globals,
             metas=self.metas,
             coercion_axioms=self.coercion_axioms,
+            type_versions=self.type_versions,
         )
 
     def extend_type(self, name: str, kind: Optional[Type] = None) -> TypeContext:
@@ -219,6 +226,7 @@ class TypeContext:
             globals=self.globals,
             metas=self.metas,
             coercion_axioms=self.coercion_axioms,
+            type_versions=self.type_versions,
         )
 
     def add_constructor(self, name: str, ty: Type) -> TypeContext:
@@ -240,6 +248,7 @@ class TypeContext:
             globals=self.globals,
             metas=self.metas,
             coercion_axioms=self.coercion_axioms,
+            type_versions=self.type_versions,
         )
 
     def add_global(self, name: str, ty: Type) -> TypeContext:
@@ -261,6 +270,7 @@ class TypeContext:
             globals=new_globals,
             metas=self.metas,
             coercion_axioms=self.coercion_axioms,
+            type_versions=self.type_versions,
         )
 
     def add_meta(self, meta: Type) -> TypeContext:
@@ -281,6 +291,7 @@ class TypeContext:
             globals=self.globals,
             metas=self.metas + [meta],
             coercion_axioms=self.coercion_axioms,
+            type_versions=self.type_versions,
         )
 
     def lookup_coercion_axiom(self, name: str) -> CoercionAxiom:
@@ -329,6 +340,7 @@ class TypeContext:
             globals=self.globals,
             metas=self.metas,
             coercion_axioms=new_axioms,
+            type_versions=self.type_versions,
         )
 
     def is_coercion_axiom(self, name: str) -> bool:
@@ -417,6 +429,138 @@ class TypeContext:
         """
         return len(self.type_vars)
 
+    # -------------------------------------------------------------------------
+    # Type versioning methods (for shadowed type definitions)
+    # -------------------------------------------------------------------------
+
+    def get_type_version(self, name: str) -> int:
+        """Get the current version number for a type.
+
+        Returns 0 if the type has never been defined.
+
+        Args:
+            name: Type name
+
+        Returns:
+            Current version number (0 = never defined)
+
+        Example:
+            >>> ctx = TypeContext()
+            >>> ctx.get_type_version("T")
+            0
+            >>> ctx = ctx.increment_type_version("T")
+            >>> ctx.get_type_version("T")
+            1
+        """
+        return self.type_versions.get(name, 0)
+
+    def increment_type_version(self, name: str) -> "TypeContext":
+        """Increment the version number for a type.
+
+        Called when a type is redefined to create a new version.
+
+        Args:
+            name: Type name
+
+        Returns:
+            New TypeContext with incremented version
+
+        Example:
+            >>> ctx = TypeContext()
+            >>> ctx = ctx.increment_type_version("T")  # First definition
+            >>> ctx.get_type_version("T")
+            1
+            >>> ctx = ctx.increment_type_version("T")  # Redefinition
+            >>> ctx.get_type_version("T")
+            2
+        """
+        new_versions = dict(self.type_versions)
+        new_versions[name] = new_versions.get(name, 0) + 1
+        return TypeContext(
+            term_types=self.term_types,
+            type_vars=self.type_vars,
+            constructors=self.constructors,
+            globals=self.globals,
+            metas=self.metas,
+            coercion_axioms=self.coercion_axioms,
+            type_versions=new_versions,
+        )
+
+    def set_type_version(self, name: str, version: int) -> "TypeContext":
+        """Set a specific version number for a type.
+
+        Args:
+            name: Type name
+            version: Version number to set
+
+        Returns:
+            New TypeContext with set version
+        """
+        new_versions = dict(self.type_versions)
+        new_versions[name] = version
+        return TypeContext(
+            term_types=self.term_types,
+            type_vars=self.type_vars,
+            constructors=self.constructors,
+            globals=self.globals,
+            metas=self.metas,
+            coercion_axioms=self.coercion_axioms,
+            type_versions=new_versions,
+        )
+
+    def is_current_type_version(self, type_con: TypeConstructor) -> bool:
+        """Check if a TypeConstructor uses the current version.
+
+        Args:
+            type_con: Type constructor to check
+
+        Returns:
+            True if this is the current version of the type
+
+        Example:
+            >>> ctx = TypeContext()
+            >>> ctx = ctx.increment_type_version("T")
+            >>> t1 = TypeConstructor("T", [], version=1)
+            >>> ctx.is_current_type_version(t1)
+            True
+            >>> ctx = ctx.increment_type_version("T")
+            >>> ctx.is_current_type_version(t1)
+            False
+        """
+        current = self.get_type_version(type_con.name)
+        return type_con.version == current
+
+    def check_type_version_mismatch(
+        self, expected: TypeConstructor, actual: TypeConstructor
+    ) -> Optional[tuple[str, int, int]]:
+        """Check if two type constructors have a version mismatch.
+
+        Returns information about the mismatch if both types have the same
+        name but different versions.
+
+        Args:
+            expected: Expected type
+            actual: Actual type
+
+        Returns:
+            Tuple of (type_name, expected_version, actual_version) if mismatch,
+            None otherwise
+
+        Example:
+            >>> ctx = TypeContext()
+            >>> ctx = ctx.increment_type_version("T")  # v1
+            >>> ctx = ctx.increment_type_version("T")  # v2
+            >>> t1 = TypeConstructor("T", [], version=1)
+            >>> t2 = TypeConstructor("T", [], version=2)
+            >>> ctx.check_type_version_mismatch(t1, t2)
+            ('T', 1, 2)
+        """
+        if expected.name != actual.name:
+            return None
+        if expected.version == actual.version:
+            return None
+        return (expected.name, expected.version, actual.version)
+
     def __repr__(self) -> str:
         """Return a string representation for debugging."""
         return (
@@ -426,6 +570,7 @@ class TypeContext:
             f"constructors={set(self.constructors.keys())}, "
             f"globals={set(self.globals.keys())}, "
             f"metas={len(self.metas)}, "
-            f"coercion_axioms={set(self.coercion_axioms.keys())}"
+            f"coercion_axioms={set(self.coercion_axioms.keys())}, "
+            f"type_versions={self.type_versions}"
             f")"
         )

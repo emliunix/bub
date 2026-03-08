@@ -1,0 +1,203 @@
+% Bidirectional Higher-Rank Type System
+% From Practical Type Inference for Higher-Rank Types (2007)
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathpartir}
+\usepackage{geometry}
+
+\geometry{margin=1in}
+
+\begin{document}
+
+\title{Bidirectional Type System: Lambda Rules}
+\date{}
+\maketitle
+
+\section{Overview}
+
+These rules define a \textbf{bidirectional type system} that \textbf{elaborates} (translates) source language terms to System F, a polymorphic lambda calculus. The judgment $t \mapsto e$ indicates that source term $t$ translates to System F term $e$. This elaboration makes implicit type instantiation and generalization explicit.
+
+\section{System F: Target Language}
+
+System F is the polymorphic lambda calculus that serves as the target of elaboration.
+
+\subsection{System F Types}
+\[
+\begin{array}{rcl}
+\sigma & ::= & a \mid \sigma_1 \rightarrow \sigma_2 \mid \forall a.\,\sigma \quad \text{(Polymorphic types)}
+\end{array}
+\]
+
+\subsection{System F Terms}
+\[
+\begin{array}{rcl}
+e & ::= & x \mid n \mid \lambda x:\sigma.\,e \mid e_1\,e_2 \mid \Lambda a.\,e \mid e\,\sigma \mid \textsf{let}\;x:\sigma = e_1\;\textsf{in}\;e_2
+\end{array}
+\]
+
+Where:
+\begin{itemize}
+\item $\lambda x:\sigma.\,e$ is term abstraction (function)
+\item $e_1\,e_2$ is term application
+\item $\Lambda a.\,e$ is type abstraction (polymorphic introduction)
+\item $e\,\sigma$ is type application (polymorphic elimination)
+\end{itemize}
+
+\section{Source Language Syntax}
+
+\subsection{Source Terms}
+\[
+t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid \textsf{let}\;x = t\;\textsf{in}\;u \mid (t :: \sigma)
+\]
+
+\subsection{Types}
+\[
+\sigma ::= \forall \overline{a}.\,\rho \quad \text{(Polymorphic)}
+\]
+\[
+\rho ::= \tau \mid \sigma_1 \rightarrow \sigma_2 \quad \text{(Rho types)}
+\]
+\[
+\tau ::= a \mid \tau_1 \rightarrow \tau_2 \quad \text{(Monomorphic)}
+\]
+
+\subsection{Directions}
+\[
+\delta ::= \Downarrow \mid \Uparrow \quad \text{(check vs synth)}
+\]
+
+\section{Conventions}
+
+\begin{itemize}
+\item The direction $\delta$ is placed as a subscript on the turnstile: $\Gamma \vdash_\delta t : \rho \mapsto e$
+\item $\vdash_\Downarrow$ denotes \textbf{checking} mode (type is given, check term against it)
+\item $\vdash_\Uparrow$ denotes \textbf{synthesis} mode (term is given, synthesize its type)
+\item $\mapsto$ denotes \textbf{elaboration}: source term $t$ translates to System F term $e$
+\item Superscripts on the turnstile indicate specific judgment variants:
+\begin{itemize}
+\item $\vdash^{\text{poly}}$ for polymorphic generalization
+\item $\vdash^{\text{inst}}$ for instantiation
+\end{itemize}
+\item $\overline{a}$ denotes a sequence of type variables $a_1, a_2, \ldots, a_n$ (possibly empty)
+\end{itemize}
+
+\section{$\Gamma \vdash_\delta t : \rho \mapsto e$}
+
+\begin{mathpar}
+\inferrule*[right=INT]
+{ }
+{\Gamma \vdash_\delta n : \textsf{Int} \mapsto n}
+
+\inferrule*[right=VAR]
+{\vdash^{\text{inst}}_\delta \sigma \leq \rho \mapsto f}
+{\Gamma, (x:\sigma) \vdash_\delta x : \rho \mapsto f\,x}
+
+\inferrule*[right=ABS1]
+{\Gamma, x:\tau \vdash_\Uparrow t : \rho \mapsto e}
+{\Gamma \vdash_\Uparrow \lambda x.\,t : \tau \rightarrow \rho \mapsto \lambda x:\tau.\,e}
+
+\inferrule*[right=ABS2]
+{\Gamma, x:\sigma_a \vdash^{\text{poly}}_\Downarrow t : \sigma_r \mapsto e}
+{\Gamma \vdash_\Downarrow \lambda x.\,t : \sigma_a \rightarrow \sigma_r \mapsto \lambda x:\sigma_a.\,e}
+
+\inferrule*[right=AABS1]
+{\Gamma, x:\sigma \vdash_\Uparrow t : \rho \mapsto e}
+{\Gamma \vdash_\Uparrow \lambda x\!::\!\sigma.\,t : \sigma \rightarrow \rho \mapsto \lambda x:\sigma.\,e}
+
+\inferrule*[right=AABS2]
+{\vdash^{\text{dsk}} \sigma_a \leq \sigma_x \mapsto f \\
+ \Gamma, x:\sigma_x \vdash^{\text{poly}}_\Downarrow t : \sigma_r \mapsto e}
+{\Gamma \vdash_\Downarrow \lambda x\!::\!\sigma_x.\,t : \sigma_a \rightarrow \sigma_r \mapsto \lambda x:\sigma_a.\,[x \mapsto (f\,x)]e}
+
+\inferrule*[right=APP]
+{\Gamma \vdash_\Uparrow t : \sigma \rightarrow \sigma' \mapsto e_1 \\
+ \Gamma \vdash^{\text{poly}}_\Downarrow u : \sigma \mapsto e_2 \\
+ \vdash^{\text{inst}}_\delta \sigma' \leq \rho \mapsto f}
+{\Gamma \vdash_\delta t\,u : \rho \mapsto f\,(e_1\,e_2)}
+
+\inferrule*[right=ANNOT]
+{\Gamma \vdash^{\text{poly}}_\Downarrow t : \sigma \mapsto e \\
+ \vdash^{\text{inst}}_\delta \sigma \leq \rho \mapsto f}
+{\Gamma \vdash_\delta (t :: \sigma) : \rho \mapsto f\,e}
+
+\inferrule*[right=LET]
+{\Gamma \vdash^{\text{poly}}_\Uparrow \mu : \sigma \mapsto e_1 \\
+ \Gamma, x:\sigma \vdash_\delta t : \rho \mapsto e_2}
+{\Gamma \vdash_\delta \textsf{let}\;x = \mu\;\textsf{in}\;t : \rho \mapsto \textsf{let}\;x:\sigma = e_1\;\textsf{in}\;e_2}
+\end{mathpar}
+
+\section{$\Gamma \vdash^{\text{poly}}_\delta t : \sigma \mapsto e$}
+
+\begin{mathpar}
+\inferrule*[right=GEN1]
+{\overline{a} = \text{ftv}(\rho) - \text{ftv}(\Gamma) \\
+ \Gamma \vdash_\Uparrow t : \rho \mapsto e}
+{\Gamma \vdash^{\text{poly}}_\Uparrow t : \forall\overline{a}.\,\rho \mapsto \Lambda\overline{a}.\,e}
+
+\inferrule*[right=GEN2]
+{pr(\sigma) = \forall\overline{a}.\,\rho \mapsto f \\
+ \overline{a} \notin \text{ftv}(\Gamma) \\
+ \Gamma \vdash_\Downarrow t : \rho \mapsto e}
+{\Gamma \vdash^{\text{poly}}_\Downarrow t : \sigma \mapsto f\,(\Lambda\overline{a}.\,e)}
+\end{mathpar}
+
+\section{$\vdash^{\text{inst}}_\delta \sigma \leq \rho \mapsto f$}
+
+\begin{mathpar}
+\inferrule*[right=INST1]
+{ }
+{\vdash^{\text{inst}}_\Uparrow \forall\overline{a}.\,\rho \leq [\overline{a \mapsto \tau}]\rho \mapsto \lambda x:\forall\overline{a}.\,\rho.\,x\,\overline{\tau}}
+
+\inferrule*[right=INST2]
+{\vdash^{\text{dsk}} \sigma \leq \rho \mapsto f}
+{\vdash^{\text{inst}}_\Downarrow \sigma \leq \rho \mapsto f}
+\end{mathpar}
+
+\section{$pr(\sigma) = \forall\overline{a}.\,\rho \mapsto f$}
+
+\begin{mathpar}
+\inferrule*[right=PRPOLY]
+{pr(\rho_1) = \forall\overline{b}.\,\rho_2 \mapsto f \\
+ \overline{a} \notin \overline{b}}
+{pr(\forall\overline{a}.\,\rho_1) = \forall\overline{a}\overline{b}.\,\rho_2 \mapsto \lambda x:\forall\overline{a}\overline{b}.\,\rho_2.\,\Lambda\overline{a}.\,f\,(x\,\overline{a})}
+
+\inferrule*[right=PRFUN]
+{pr(\sigma_2) = \forall\overline{a}.\,\rho_2 \mapsto f \\
+ \overline{a} \notin \text{ftv}(\sigma_1)}
+{pr(\sigma_1 \rightarrow \sigma_2) = \forall\overline{a}.\,(\sigma_1 \rightarrow \rho_2) \mapsto \lambda x:(\forall\overline{a}.\,\sigma_1 \rightarrow \rho_2).\,\lambda y:\sigma_1.\,f\,(\Lambda\overline{a}.\,x\,\overline{a}\,y)}
+
+\inferrule*[right=PRMONO]
+{ }
+{pr(\tau) = \tau \mapsto \lambda x:\tau.\,x}
+\end{mathpar}
+
+\section{$\vdash^{\text{dsk}} \sigma \leq \sigma' \mapsto f$}
+
+\begin{mathpar}
+\inferrule*[right=DEEP-SKOL]
+{pr(\sigma_2) = \forall\overline{a}.\,\rho \mapsto f_1 \\
+ \overline{a} \notin \text{fv}(\sigma_1) \\
+ \vdash^{\text{dsk}*} \sigma_1 \leq \rho \mapsto f_2}
+{\vdash^{\text{dsk}} \sigma_1 \leq \sigma_2 \mapsto \lambda x:\sigma_1.\,f_1\,(\Lambda\overline{a}.\,f_2\,x)}
+\end{mathpar}
+
+\section{$\vdash^{\text{dsk}*} \sigma \leq \rho \mapsto f$}
+
+\begin{mathpar}
+\inferrule*[right=SPEC]
+{\vdash^{\text{dsk}*} [\overline{a \mapsto \tau}]\rho_1 \leq \rho_2 \mapsto f}
+{\vdash^{\text{dsk}*} \forall\overline{a}.\,\rho_1 \leq \rho_2 \mapsto \lambda x:\forall\overline{a}.\,\rho_1.\,f\,(x\,\overline{\tau})}
+
+\inferrule*[right=FUN]
+{\vdash^{\text{dsk}} \sigma_3 \leq \sigma_1 \mapsto f_1 \\
+ \vdash^{\text{dsk}*} \sigma_2 \leq \sigma_4 \mapsto f_2}
+{\vdash^{\text{dsk}*} (\sigma_1 \rightarrow \sigma_2) \leq (\sigma_3 \rightarrow \sigma_4) \mapsto \lambda x:\sigma_1 \rightarrow \sigma_2.\,\lambda y:\sigma_3.\,f_2\,(x\,(f_1\,y))}
+
+\inferrule*[right=MONO]
+{ }
+{\vdash^{\text{dsk}*} \tau \leq \tau \mapsto \lambda x:\tau.\,x}
+\end{mathpar}
+
+\end{document}
