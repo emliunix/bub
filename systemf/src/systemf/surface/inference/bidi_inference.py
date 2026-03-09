@@ -379,10 +379,23 @@ class BidiInference:
 
             case SurfaceTypeApp(location=location, func=func, type_arg=type_arg):
                 # Type application: func @type_arg
-                core_func, func_type = self.infer(func, ctx)
-
-                # Function type should be a forall
-                func_type = self._apply_subst(func_type)
+                # Special case: if func is a GlobalVar, don't instantiate - keep the forall
+                match func:
+                    case GlobalVar(name=name):
+                        # Look up global without instantiating - we need the forall for type app
+                        if name in ctx.globals:
+                            func_type = ctx.globals[name]
+                            func_type = self._apply_subst(func_type)
+                            core_func = core.Global(location, name)
+                        else:
+                            raise TypeError(
+                                f"Undefined global variable: {name}",
+                                location,
+                                term,
+                            )
+                    case _:
+                        core_func, func_type = self.infer(func, ctx)
+                        func_type = self._apply_subst(func_type)
 
                 match func_type:
                     case TypeForall(var, body_type):
