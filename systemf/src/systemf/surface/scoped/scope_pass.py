@@ -25,6 +25,9 @@ from systemf.surface.types import (
     SurfaceLet,
     SurfaceLit,
     SurfaceOp,
+    SurfacePattern,
+    SurfacePatternCons,
+    SurfacePatternTuple,
     SurfaceTerm,
     SurfaceTermDeclaration,
     SurfaceToolCall,
@@ -33,6 +36,29 @@ from systemf.surface.types import (
     SurfaceTypeApp,
     SurfaceVar,
 )
+
+
+def _collect_pattern_vars(
+    pattern: SurfacePattern | SurfacePatternTuple | SurfacePatternCons,
+) -> list[str]:
+    """Collect all variable names from a pattern recursively."""
+    match pattern:
+        case SurfacePattern(vars=vars):
+            return vars
+        case SurfacePatternTuple(elements=elements):
+            result = []
+            for elem in elements:
+                result.extend(_collect_pattern_vars(elem))
+            return result
+        case SurfacePatternCons(head=head, tail=tail):
+            result = []
+            if head is not None:
+                result.extend(_collect_pattern_vars(head))
+            if tail is not None:
+                result.extend(_collect_pattern_vars(tail))
+            return result
+        case _:
+            return []
 
 
 def _suggest_similar_names(name: str, ctx: ScopeContext) -> list[str]:
@@ -212,8 +238,10 @@ def _check_term(term: SurfaceTerm, ctx: ScopeContext) -> Result[SurfaceTerm, Sco
                     scoped_branches = []
                     for branch in branches:
                         branch_ctx = ctx
-                        for var_name in branch.pattern.vars:
-                            branch_ctx = branch_ctx.extend_term(var_name)
+                        if branch.pattern is not None:
+                            pattern_vars = _collect_pattern_vars(branch.pattern)
+                            for var_name in pattern_vars:
+                                branch_ctx = branch_ctx.extend_term(var_name)
 
                         body_result = _check_term(branch.body, branch_ctx)
                         match body_result:

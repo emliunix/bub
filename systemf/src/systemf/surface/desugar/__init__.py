@@ -13,6 +13,7 @@ from systemf.surface.desugar.passes import (
     multi_arg_lambda_pass,
     multi_var_type_abs_pass,
     implicit_type_abs_pass,
+    cons_pattern_pass,
     desugar_term,
     desugar_declaration,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "multi_arg_lambda_pass",
     "multi_var_type_abs_pass",
     "implicit_type_abs_pass",
+    "cons_pattern_pass",
     # Composite passes
     "desugar_term",
     "desugar_declaration",

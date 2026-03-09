@@ -9,24 +9,24 @@ prim_type Int
 prim_type Float
 prim_type String
 
-prim_op int_plus : Int → Int → Int
-prim_op int_minus : Int → Int → Int
-prim_op int_multiply : Int → Int → Int
-prim_op int_divide : Int → Int → Int
-prim_op int_negate : Int → Int
+prim_op int_plus :: Int → Int → Int
+prim_op int_minus :: Int → Int → Int
+prim_op int_multiply :: Int → Int → Int
+prim_op int_divide :: Int → Int → Int
+prim_op int_negate :: Int → Int
 
-prim_op int_eq : Int → Int → Bool
-prim_op int_neq : Int → Int → Bool
-prim_op int_lt : Int → Int → Bool
-prim_op int_gt : Int → Int → Bool
-prim_op int_le : Int → Int → Bool
-prim_op int_ge : Int → Int → Bool
+prim_op int_eq :: Int → Int → Bool
+prim_op int_neq :: Int → Int → Bool
+prim_op int_lt :: Int → Int → Bool
+prim_op int_gt :: Int → Int → Bool
+prim_op int_le :: Int → Int → Bool
+prim_op int_ge :: Int → Int → Bool
 
-prim_op bool_and : Bool → Bool → Bool
-prim_op bool_or : Bool → Bool → Bool
+prim_op bool_and :: Bool → Bool → Bool
+prim_op bool_or :: Bool → Bool → Bool
 
-prim_op string_concat : String → String → String
-prim_op string_length : String → Int
+prim_op string_concat :: String → String → String
+prim_op string_length :: String → Int
 
 -- ============================================================================
 -- Boolean Type
@@ -35,20 +35,20 @@ prim_op string_length : String → Int
 data Bool = True | False
 
 -- Short patterns use {| style
-not : Bool → Bool = λb → case b of { True → False | False → True }
+not :: Bool → Bool = λb → case b of { True → False | False → True }
 
 -- Longer patterns use indented style
-and : Bool → Bool → Bool = λx y →
+and :: Bool → Bool → Bool = λx y →
   case x of
     True → y
     False → False
 
-or : Bool → Bool → Bool = λx y →
+or :: Bool → Bool → Bool = λx y →
   case x of
     True → True
     False → y
 
-xor : Bool → Bool → Bool = λx y →
+xor :: Bool → Bool → Bool = λx y →
   case x of
     True → case y of
       True → False
@@ -61,22 +61,22 @@ xor : Bool → Bool → Bool = λx y →
 
 data Maybe a = Nothing | Just a
 
-isJust : ∀a. Maybe a → Bool = λm →
+isJust :: ∀a. Maybe a → Bool = λm →
   case m of { Nothing → False | Just x → True }
 
-isNothing : ∀a. Maybe a → Bool = λm →
+isNothing :: ∀a. Maybe a → Bool = λm →
   case m of { Nothing → True | Just x → False }
 
-fromMaybe : ∀a. a → Maybe a → a = λdefault m →
+fromMaybe :: ∀a. a → Maybe a → a = λdefault m →
   case m of { Nothing → default | Just x → x }
 
-just : ∀a. a → Maybe a = λx → Just x
+just :: ∀a. a → Maybe a = λx → Just x
 
-mapMaybe : ∀a. ∀b. (a → b) → Maybe a → Maybe b =
+mapMaybe :: ∀a. ∀b. (a → b) → Maybe a → Maybe b =
   λf m →
     case m of { Nothing → Nothing | Just x → Just (f x) }
 
-bindMaybe : ∀a. ∀b. Maybe a → (a → Maybe b) → Maybe b =
+bindMaybe :: ∀a. ∀b. Maybe a → (a → Maybe b) → Maybe b =
   λm f →
     case m of { Nothing → Nothing | Just x → f x }
 
@@ -86,23 +86,23 @@ bindMaybe : ∀a. ∀b. Maybe a → (a → Maybe b) → Maybe b =
 
 data Either a b = Left a | Right b
 
-isLeft : ∀a. ∀b. Either a b → Bool = λe →
+isLeft :: ∀a. ∀b. Either a b → Bool = λe →
   case e of { Left x → True | Right y → False }
 
-isRight : ∀a. ∀b. Either a b → Bool = λe →
+isRight :: ∀a. ∀b. Either a b → Bool = λe →
   case e of { Left x → False | Right y → True }
 
-fromRight : ∀a. ∀b. b → Either a b → b = λdefault e →
+fromRight :: ∀a. ∀b. b → Either a b → b = λdefault e →
   case e of { Left x → default | Right y → y }
 
-fromLeft : ∀a. ∀b. a → Either a b → a = λdefault e →
+fromLeft :: ∀a. ∀b. a → Either a b → a = λdefault e →
   case e of { Left x → x | Right y → default }
 
-mapRight : ∀a. ∀b. ∀c. (b → c) → Either a b → Either a c =
+mapRight :: ∀a. ∀b. ∀c. (b → c) → Either a b → Either a c =
   λf e →
     case e of { Left x → Left x | Right y → Right (f y) }
 
-mapLeft : ∀a. ∀b. ∀c. (a → c) → Either a b → Either c b =
+mapLeft :: ∀a. ∀b. ∀c. (a → c) → Either a b → Either c b =
   λf e →
     case e of { Left x → Left (f x) | Right y → Right y }
 
@@ -113,24 +113,24 @@ mapLeft : ∀a. ∀b. ∀c. (a → c) → Either a b → Either c b =
 data List a = Nil | Cons a (List a)
 
 -- Using new operators
-length : ∀a. List a → Int = λxs →
+length :: ∀a. List a → Int = λxs →
   case xs of
     Nil → 0
     Cons y ys → 1 + length ys
 
-map : ∀a. ∀b. (a → b) → List a → List b =
+map :: ∀a. ∀b. (a → b) → List a → List b =
   λf xs →
     case xs of
       Nil → Nil
       Cons y ys → Cons (f y) (map f ys)
 
-append : ∀a. List a → List a → List a =
+append :: ∀a. List a → List a → List a =
   λxs ys →
     case xs of
       Nil → ys
       Cons z zs → Cons z (append zs ys)
 
-filter : ∀a. (a → Bool) → List a → List a =
+filter :: ∀a. (a → Bool) → List a → List a =
   λp xs →
     case xs of
       Nil → Nil
@@ -139,37 +139,37 @@ filter : ∀a. (a → Bool) → List a → List a =
           then Cons y (filter p ys)
           else filter p ys
 
-foldl : ∀a. ∀b. (b → a → b) → b → List a → b =
+foldl :: ∀a. ∀b. (b → a → b) → b → List a → b =
   λf acc xs →
     case xs of
       Nil → acc
       Cons y ys → foldl f (f acc y) ys
 
-foldr : ∀a. ∀b. (a → b → b) → b → List a → b =
+foldr :: ∀a. ∀b. (a → b → b) → b → List a → b =
   λf acc xs →
     case xs of
       Nil → acc
       Cons y ys → f y (foldr f acc ys)
 
-head : ∀a. List a → Maybe a = λxs →
+head :: ∀a. List a → Maybe a = λxs →
   case xs of { Nil → Nothing | Cons y ys → Just y }
 
-tail : ∀a. List a → Maybe (List a) = λxs →
+tail :: ∀a. List a → Maybe (List a) = λxs →
   case xs of { Nil → Nothing | Cons y ys → Just ys }
 
-null : ∀a. List a → Bool = λxs →
+null :: ∀a. List a → Bool = λxs →
   case xs of { Nil → True | Cons y ys → False }
 
 -- Reverse using tail-recursive helper
-treverse : ∀a. List a → List a → List a =
+treverse :: ∀a. List a → List a → List a =
   λacc xs →
     case xs of
       Nil → acc
       Cons y ys → treverse (Cons y acc) ys
 
-reverse : ∀a. List a → List a = λxs → treverse Nil xs
+reverse :: ∀a. List a → List a = λxs → treverse Nil xs
 
-take : ∀a. Int → List a → List a =
+take :: ∀a. Int → List a → List a =
   λn xs →
     if n == 0
       then Nil
@@ -177,7 +177,7 @@ take : ∀a. Int → List a → List a =
         Nil → Nil
         Cons y ys → Cons y (take (n - 1) ys)
 
-drop : ∀a. Int → List a → List a =
+drop :: ∀a. Int → List a → List a =
   λn xs →
     if n == 0
       then xs
@@ -185,7 +185,7 @@ drop : ∀a. Int → List a → List a =
         Nil → Nil
         Cons y ys → drop (n - 1) ys
 
-elem : ∀a. (a → a → Bool) → a → List a → Bool =
+elem :: ∀a. (a → a → Bool) → a → List a → Bool =
   λeq x xs →
     case xs of
       Nil → False
@@ -194,7 +194,7 @@ elem : ∀a. (a → a → Bool) → a → List a → Bool =
           then True
           else elem eq x ys
 
-find : ∀a. (a → Bool) → List a → Maybe a =
+find :: ∀a. (a → Bool) → List a → Maybe a =
   λp xs →
     case xs of
       Nil → Nothing
@@ -209,20 +209,20 @@ find : ∀a. (a → Bool) → List a → Maybe a =
 
 data Pair a b = Pair a b
 
-fst : ∀a. ∀b. Pair a b → a = λp →
+fst :: ∀a. ∀b. Pair a b → a = λp →
   case p of Pair x y → x
 
-snd : ∀a. ∀b. Pair a b → b = λp →
+snd :: ∀a. ∀b. Pair a b → b = λp →
   case p of Pair x y → y
 
-swap : ∀a. ∀b. Pair a b → Pair b a = λp →
+swap :: ∀a. ∀b. Pair a b → Pair b a = λp →
   case p of Pair x y → Pair y x
 
-mapFst : ∀a. ∀b. ∀c. (a → c) → Pair a b → Pair c b =
+mapFst :: ∀a. ∀b. ∀c. (a → c) → Pair a b → Pair c b =
   λf p →
     case p of Pair x y → Pair (f x) y
 
-mapSnd : ∀a. ∀b. ∀c. (b → c) → Pair a b → Pair a c =
+mapSnd :: ∀a. ∀b. ∀c. (b → c) → Pair a b → Pair a c =
   λf p →
     case p of Pair x y → Pair x (f y)
 
@@ -230,25 +230,25 @@ mapSnd : ∀a. ∀b. ∀c. (b → c) → Pair a b → Pair a c =
 -- Function Utilities
 -- ============================================================================
 
-id : ∀a. a → a = λx → x
+id :: ∀a. a → a = λx → x
 
-const : ∀a. ∀b. a → b → a = λx y → x
+const :: ∀a. ∀b. a → b → a = λx y → x
 
-compose : ∀a. ∀b. ∀c. (b → c) → (a → b) → a → c =
+compose :: ∀a. ∀b. ∀c. (b → c) → (a → b) → a → c =
   λf g x → f (g x)
 
-pipe : ∀a. ∀b. ∀c. (a → b) → (b → c) → a → c =
+pipe :: ∀a. ∀b. ∀c. (a → b) → (b → c) → a → c =
   λf g x → g (f x)
 
-flip : ∀a. ∀b. ∀c. (a → b → c) → b → a → c =
+flip :: ∀a. ∀b. ∀c. (a → b → c) → b → a → c =
   λf y x → f x y
 
-apply : ∀a. ∀b. (a → b) → a → b = λf x → f x
+apply :: ∀a. ∀b. (a → b) → a → b = λf x → f x
 
-curry : ∀a. ∀b. ∀c. (Pair a b → c) → a → b → c =
+curry :: ∀a. ∀b. ∀c. (Pair a b → c) → a → b → c =
   λf x y → f (Pair x y)
 
-uncurry : ∀a. ∀b. ∀c. (a → b → c) → Pair a b → c =
+uncurry :: ∀a. ∀b. ∀c. (a → b → c) → Pair a b → c =
   λf p →
     case p of Pair x y → f x y
 

@@ -965,7 +965,7 @@ class TestPolymorphicConstructors:
 
         source = """
         data Maybe a = Nothing | Just a
-        x : Maybe Int = Just 42
+        x :: Maybe Int = Just 42
         """
 
         tokens = Lexer(source).tokenize()
@@ -983,7 +983,7 @@ class TestPolymorphicConstructors:
         source = """
         data Maybe a = Nothing | Just a
         
-        f : Maybe Int → Maybe Int = λm:Maybe Int →
+        f :: Maybe Int → Maybe Int = λ(m :: Maybe Int) →
           case m of { Nothing → Nothing | Just x → Just x }
         """
 
@@ -1001,7 +1001,7 @@ class TestPolymorphicConstructors:
         source = """
         data Maybe a = Nothing | Just a
         
-        f : ∀a. Maybe a → Maybe a = Λa. λm:Maybe a →
+        f :: ∀a. Maybe a → Maybe a = λ(m :: Maybe a) →
           case m of { Nothing → Nothing | Just x → Just x }
         """
 
@@ -1019,8 +1019,8 @@ class TestPolymorphicConstructors:
         source = """
         data Maybe a = Nothing | Just a
         
-        mapMaybe : ∀a. ∀b. (a → b) → Maybe a → Maybe b =
-          Λa. Λb. λf:(a → b) → λm:Maybe a →
+        mapMaybe :: ∀a. ∀b. (a → b) → Maybe a → Maybe b =
+          λ(f :: a → b) → λ(m :: Maybe a) →
             case m of { Nothing → Nothing | Just x → Nothing }
         """
 
@@ -1045,8 +1045,8 @@ class TestPolymorphicConstructors:
         source = """
         data Maybe a = Nothing | Just a
         
-        mapMaybe : ∀a. ∀b. (a → b) → Maybe a → Maybe b =
-          Λa. Λb. λf:(a → b) → λm:Maybe a →
+        mapMaybe :: ∀a. ∀b. (a → b) → Maybe a → Maybe b =
+          λ(f :: a → b) → λ(m :: Maybe a) →
             case m of { Nothing → Nothing | Just x → Just (f x) }
         """
 
@@ -1070,8 +1070,8 @@ class TestPolymorphicConstructors:
         source = """
         data Either a b = Left a | Right b
         
-        mapRight : ∀a. ∀b. ∀c. (b → c) → Either a b → Either a c =
-          Λa. Λb. Λc. λf:(b → c) → λe:Either a b →
+        mapRight :: ∀a. ∀b. ∀c. (b → c) → Either a b → Either a c =
+          λ(f :: b → c) → λ(e :: Either a b) →
             case e of { Left x → Left x | Right y → Right (f y) }
         """
 
@@ -1089,8 +1089,8 @@ class TestPolymorphicConstructors:
         source = """
         data List a = Nil | Cons a (List a)
         
-        map : ∀a. ∀b. (a → b) → List a → List b =
-          Λa. Λb. λf:(a → b) → λxs:List a →
+        map :: ∀a. ∀b. (a → b) → List a → List b =
+          λ(f :: a → b) → λ(xs :: List a) →
             case xs of {
               Nil → Nil
             | Cons x xs' → Cons (f x) xs'

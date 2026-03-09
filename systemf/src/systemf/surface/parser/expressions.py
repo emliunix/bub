@@ -29,7 +29,14 @@ from systemf.surface.parser.helpers import (
     match_token,
     must_continue,
 )
-from systemf.surface.parser.type_parser import type_app_parser, type_parser
+from systemf.surface.parser.type_parser import type_app_parser, type_atom_parser, type_parser
+
+
+def match_ident() -> P[IdentifierToken]:
+    """Match an identifier token."""
+    return match_token(IdentifierToken)
+
+
 from systemf.surface.parser.types import (
     AndToken,
     AppendToken,
@@ -43,6 +50,7 @@ from systemf.surface.parser.types import (
     EqToken,
     GeToken,
     GtToken,
+    DoubleColonToken,
     IdentifierToken,
     IfToken,
     InToken,
@@ -65,7 +73,6 @@ from systemf.surface.parser.types import (
     StringToken,
     ThenToken,
     TokenBase,
-    TypeLambdaToken,
 )
 from systemf.surface.types import (
     SurfaceAbs,
@@ -78,6 +85,7 @@ from systemf.surface.types import (
     SurfaceLit,
     SurfaceOp,
     SurfacePattern,
+    SurfacePatternCons,
     SurfacePatternTuple,
     SurfaceTerm,
     SurfaceTuple,
@@ -164,6 +172,9 @@ OR = match_token(OrToken)  # ||
 
 # String concatenation
 APPEND = match_token(AppendToken)  # ++
+
+# Cons operator
+COLON = match_token(ColonToken)  # :
 
 
 # =============================================================================
@@ -333,10 +344,12 @@ def atom_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
         # Apply post-fix operators greedily
         while True:
             # Type application with @ (only syntax supported)
+            # Use type_atom_parser to only consume simple types
+            # Complex types like (Maybe Int) require parentheses
             type_app = yield (
                 match_token(OperatorToken).bind(
                     lambda tok: (
-                        type_parser() if tok.operator == "@" else fail("expected operator '@'")
+                        type_atom_parser() if tok.operator == "@" else fail("expected operator '@'")
                     )
                 )
             ).optional()
@@ -344,8 +357,8 @@ def atom_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
                 atom = SurfaceTypeApp(func=atom, type_arg=type_app, location=atom.location)
                 continue
 
-            # Type annotation
-            type_ann = yield (match_token(ColonToken) >> type_parser()).optional()
+            # Type annotation (using :: not :)
+            type_ann = yield (match_token(DoubleColonToken) >> type_parser()).optional()
             if type_ann is not None:
                 atom = SurfaceAnn(term=atom, type=type_ann, location=atom.location)
                 continue
@@ -504,10 +517,42 @@ def additive_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     return parser
 
 
+def cons_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
+    """Parse cons expressions: left : right (right-associative).
+
+    Precedence 5 in Haskell, between additive (6) and comparison (4).
+    Right-associative: 1 : 2 : Nil parses as 1 : (2 : Nil)
+
+    Args:
+        constraint: Layout constraint (passed through to operands)
+
+    Returns:
+        SurfaceOp tree for cons operations or a single term
+    """
+
+    @generate
+    def parser():
+        # Parse left operand (additive level - tighter)
+        left = yield additive_parser(constraint)
+        loc = left.location
+
+        # Try to parse : right-operand
+        colon = yield COLON.optional()
+        if colon is None:
+            return left
+
+        # Right side uses cons_parser for right-associativity
+        right = yield cons_parser(constraint)
+
+        return SurfaceOp(left=left, op=":", right=right, location=loc)
+
+    return parser
+
+
 def comparison_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     """Parse comparison expressions: left (==|/=|<|>|<=|>=) right.
 
-    Lower precedence than additive, higher than logical.
+    Lower precedence than cons, higher than logical.
 
     Args:
         constraint: Layout constraint (passed through to operands)
@@ -518,8 +563,8 @@ def comparison_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 
     @generate
     def parser():
-        # Parse left operand (additive level)
-        left = yield additive_parser(constraint)
+        # Parse left operand (cons level)
+        left = yield cons_parser(constraint)
         loc = left.location
 
         # Parse zero or more comparison-operator right-operand pairs
@@ -636,11 +681,46 @@ def op_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
 # =============================================================================
 
 
+def lambda_param_parser() -> P[tuple[str, SurfaceType | None]]:
+    """Parse a single lambda parameter.
+
+    Supports:
+    - x (unannotated)
+    - (x :: T) (annotated with parentheses)
+
+    Returns:
+        Tuple of (parameter_name, optional_type)
+    """
+
+    @generate
+    def parser():
+        # Try parenthesized annotated parameter first: (x :: T)
+        paren_param = (
+            yield (match_token(LeftParenToken) >> match_ident() << match_token(DoubleColonToken))
+            .bind(
+                lambda name_token: (
+                    type_parser().map(lambda ty: (name_token.name, ty))
+                    << match_token(RightParenToken)
+                )
+            )
+            .optional()
+        )
+
+        if paren_param is not None:
+            return paren_param
+
+        # Otherwise parse simple identifier: x
+        ident = yield match_ident()
+        return (ident.name, None)
+
+    return parser
+
+
 def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
     """Parse a lambda abstraction: λx → e or \\x → e.
 
-    Supports optional type annotation: λx:T → e
-    Supports Haddock-style docstrings: λx -- ^ doc → e
+    Supports optional type annotation: λ(x :: T) → e
+    Supports mixed annotated and unannotated params: λ(x :: Int) y → e
 
     Args:
         constraint: Layout constraint (passed through to body parser)
@@ -655,18 +735,17 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
         lam_token = yield match_token(LambdaToken)
         loc = lam_token.location
 
-        # Parse one or more parameter names
-        var_tokens = yield match_token(IdentifierToken).at_least(1)
-
-        # For each parameter, try to parse optional type annotation
-        # Build annotated_params: [(name, type_annotation), ...]
+        # Parse one or more parameters (each can be annotated or not)
         annotated_params: list[tuple[str, SurfaceType | None]] = []
-        for var_token in var_tokens:
-            var_name = var_token.value
-            # Optional type annotation for this parameter
-            # Use type_app_parser to handle type applications like "Maybe a"
-            var_type = yield (match_token(ColonToken) >> type_app_parser).optional()
-            annotated_params.append((var_name, var_type))
+        while True:
+            # Try to parse a parameter
+            param = yield lambda_param_parser().optional()
+            if param is None:
+                break
+            annotated_params.append(param)
+
+        if not annotated_params:
+            yield fail("lambda must have at least one parameter")
 
         # Parse arrow
         yield match_token(ArrowToken)
@@ -685,58 +764,67 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
     return parser
 
 
-def type_abs_parser(constraint: ValidIndent) -> P[SurfaceTypeAbs]:
-    """Parse a type abstraction: Λa. e or /\\a. e.
-
-    Args:
-        constraint: Layout constraint (passed through to body parser)
-
-    Returns:
-        SurfaceTypeAbs with the type abstraction
-    """
-
-    @generate
-    def parser():
-        # Match type lambda symbol (TYPELAMBDA token represents Λ or /\)
-        lam_token = yield match_token(TypeLambdaToken)
-        loc = lam_token.location
-
-        # Parse type variable name(s)
-        var_tokens = yield match_token(IdentifierToken).at_least(1)
-        type_vars = [t.value for t in var_tokens]
-
-        # Parse dot
-        yield match_token(DotToken)
-
-        # Parse body (respecting layout constraint)
-        body = yield expr_parser(constraint)
-
-        # Return multi-var type abstraction (desugar pass will handle nesting)
-        return SurfaceTypeAbs(vars=type_vars, body=body, location=loc)
-
-    return parser
-
-
 # =============================================================================
 # Pattern Parser (for case alternatives)
 # =============================================================================
 
 
+def pattern_atom_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePatternCons]:
+    """Parse atomic patterns: identifier, tuple, or grouped pattern.
+
+    Used as constructor arguments or standalone patterns.
+    Does NOT handle cons operator - that's done at higher level.
+
+    Returns:
+        SurfacePattern, SurfacePatternTuple, or SurfacePatternCons (for grouped cons)
+    """
+
+    @generate
+    def parser():
+        # Try tuple first: (x, y)
+        tuple_result = yield pattern_tuple_parser().optional()
+        if tuple_result is not None:
+            return tuple_result
+
+        # Try grouped pattern: (pattern)
+        open_paren = yield match_token(LeftParenToken).optional()
+        if open_paren is not None:
+            # Parse inner pattern (can include cons)
+            inner = yield pattern_cons_parser()
+            yield match_token(RightParenToken)
+            return inner
+
+        # Fall back to simple identifier
+        name_token = yield match_token(IdentifierToken).optional()
+        if name_token is None:
+            yield fail("expected pattern")
+
+        return SurfacePattern(constructor=name_token.value, vars=[], location=name_token.location)
+
+    return parser
+
+
 def pattern_base_parser() -> P[SurfacePattern]:
-    """Parse a base pattern (variable or constructor).
+    """Parse a base pattern (variable or constructor with pattern args).
 
     A base pattern is either:
     - A variable pattern: just an identifier
-    - A constructor pattern: Constructor [var1 var2 ...]
+    - A constructor pattern: Constructor [arg1 arg2 ...]
+      where each arg can be: identifier, tuple, or grouped pattern
+
+    Examples:
+        x                    -> SurfacePattern(constructor="x", vars=[])
+        Cons x xs           -> SurfacePattern(constructor="Cons", vars=["x", "xs"])
+        Cons (x, y) zs      -> SurfacePattern(constructor="Cons", vars=[tuple, "zs"])
+        Pair (Cons x xs) y  -> SurfacePattern(constructor="Pair", vars=[cons, "y"])
 
     Returns:
-        SurfacePattern for constructor or SurfacePattern for variable
+        SurfacePattern for constructor or variable
     """
 
     @generate
     def parser():
         # Parse pattern name (constructor or variable)
-        # All names use IDENT token - elaborator determines if it's a constructor
         name_token = yield match_token(IdentifierToken).optional()
         if name_token is None:
             yield fail("expected pattern")
@@ -744,15 +832,30 @@ def pattern_base_parser() -> P[SurfacePattern]:
         name = name_token.value
         loc = name_token.location
 
-        # Parse variable bindings (identifiers)
-        vars = []
+        # Parse pattern arguments (atoms: identifiers, tuples, grouped patterns)
+        args: list[SurfacePattern | SurfacePatternTuple | SurfacePatternCons] = []
         while True:
-            var_result = yield match_token(IdentifierToken).optional()
-            if var_result is None:
+            # Try to parse an atomic pattern
+            arg = yield pattern_atom_parser().optional()
+            if arg is None:
                 break
-            vars.append(var_result.value)
+            args.append(arg)
 
-        return SurfacePattern(constructor=name, vars=vars, location=loc)
+        # Convert args to SurfacePattern representation
+        # For simple identifier args, we store them as strings in vars
+        # For complex args (tuple, cons), we'd need a different representation
+        # For now, flatten to string representation for backwards compatibility
+        arg_strs = []
+        for arg in args:
+            if isinstance(arg, SurfacePattern) and not arg.vars:
+                # Simple identifier
+                arg_strs.append(arg.constructor)
+            else:
+                # Complex pattern - we need to handle this differently
+                # For now, represent as string (will need desugaring pass)
+                arg_strs.append(str(arg))
+
+        return SurfacePattern(constructor=name, vars=arg_strs, location=loc)
 
     return parser
 
@@ -793,22 +896,69 @@ def pattern_tuple_parser() -> P[SurfacePattern]:
     return parser
 
 
-def pattern_parser() -> P[SurfacePattern]:
-    """Parse a pattern: CONSTRUCTOR [ident*], variable, or tuple pattern.
+def pattern_cons_parser() -> P[SurfacePattern | SurfacePatternCons]:
+    """Parse a cons pattern: head : tail (right-associative).
+
+    Examples:
+        x : xs                -> SurfacePatternCons(head=x, tail=xs)
+        x : y : zs           -> SurfacePatternCons(head=x, tail=SurfacePatternCons(head=y, tail=zs))
+        Cons x xs            -> SurfacePattern(constructor="Cons", vars=["x", "xs"])
+        x                    -> SurfacePattern(constructor="x", vars=[])
+        (x)                  -> SurfacePattern(constructor="x", vars=[])
+        (Cons x xs)          -> SurfacePattern(constructor="Cons", vars=["x", "xs"])
+        (x : xs)             -> SurfacePatternCons(head=x, tail=xs)
+        x : (y : zs)         -> SurfacePatternCons(head=x, tail=SurfacePatternCons(head=y, tail=zs))
 
     Returns:
-        SurfacePattern with constructor name and variable bindings, or tuple pattern
+        SurfacePatternCons if cons pattern, otherwise base pattern
+    """
+    from systemf.surface.types import SurfacePatternCons
+
+    @generate
+    def parser():
+        # Parse left side (try grouping first, then base pattern)
+        # Check if starts with '(' for grouping
+        open_paren = yield match_token(LeftParenToken).optional()
+        if open_paren is not None:
+            # Parse inner pattern (cons allowed inside parens)
+            inner = yield pattern_cons_parser()
+            yield match_token(RightParenToken)
+            left = inner
+        else:
+            # Regular base pattern (Constructor vars... or variable)
+            left = yield pattern_base_parser()
+
+        loc = left.location
+
+        # Try to parse : tail
+        colon = yield COLON.optional()
+        if colon is None:
+            return left
+
+        # Right side uses pattern_cons_parser for right-associativity
+        right = yield pattern_cons_parser()
+
+        return SurfacePatternCons(head=left, tail=right, location=loc)
+
+    return parser
+
+
+def pattern_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePatternCons]:
+    """Parse a pattern: tuple, cons, constructor, or variable pattern.
+
+    Returns:
+        SurfacePattern, SurfacePatternTuple, or SurfacePatternCons
     """
 
     @generate
     def parser():
-        # Try tuple pattern first (starts with '(')
+        # Try tuple pattern first (must have commas: (x, y))
         tuple_result = yield pattern_tuple_parser().optional()
         if tuple_result is not None:
             return tuple_result
 
-        # Try base pattern (constructor or variable)
-        return (yield pattern_base_parser())
+        # Try cons pattern (handles x : xs and falls back to base pattern)
+        return (yield pattern_cons_parser())
 
     return parser
 
@@ -936,7 +1086,7 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, SurfaceType | None, Sur
             params.append(param_token.value)
 
         # Optional type annotation (applies to the whole function if params present)
-        var_type = yield (match_token(ColonToken) >> type_parser()).optional()
+        var_type = yield (match_token(DoubleColonToken) >> type_parser()).optional()
 
         yield match_operator("=")
 
@@ -1049,7 +1199,6 @@ def expr_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     """
     return alt(
         lambda_parser(constraint),
-        type_abs_parser(constraint),
         if_parser(constraint),
         case_parser(constraint),
         let_parser(constraint),
@@ -1076,7 +1225,6 @@ __all__ = [
     # Expression parsers
     "app_parser",
     "lambda_parser",
-    "type_abs_parser",
     "if_parser",
     "case_parser",
     "let_parser",

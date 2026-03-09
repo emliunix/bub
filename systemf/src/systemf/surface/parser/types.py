@@ -182,20 +182,6 @@ class LambdaToken(TokenBase):
 
 
 @dataclass(frozen=True, kw_only=True)
-class TypeLambdaToken(TokenBase):
-    """Type lambda token (big lambda)."""
-
-    symbol: str
-
-    @property
-    def value(self) -> str:
-        return self.symbol
-
-    def __str__(self) -> str:
-        return self.symbol
-
-
-@dataclass(frozen=True, kw_only=True)
 class DataToken(KeywordToken):
     """Data declaration keyword: data"""
 
@@ -291,7 +277,6 @@ class TokenType:
 
     PRAGMA = "PRAGMA"
     LAMBDA = "LAMBDA"
-    TYPELAMBDA = "TYPELAMBDA"
 
 
 class OperatorToken(TokenBase):
@@ -391,6 +376,11 @@ class EqualsToken(OperatorToken):
 @dataclass(frozen=True, kw_only=True)
 class ColonToken(OperatorToken):
     operator: str = ":"
+
+
+@dataclass(frozen=True, kw_only=True)
+class DoubleColonToken(OperatorToken):
+    operator: str = "::"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -560,7 +550,6 @@ __all__ = [
     # Keyword tokens
     "KeywordToken",
     "LambdaToken",
-    "TypeLambdaToken",
     "DataToken",
     "LetToken",
     "InToken",
@@ -592,6 +581,7 @@ __all__ = [
     "AppendToken",
     "EqualsToken",
     "ColonToken",
+    "DoubleColonToken",
     "BarToken",
     "AtToken",
     "DotToken",

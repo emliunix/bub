@@ -323,7 +323,7 @@ def block_entry(
         item_result = item(constraint)(tokens, index)
 
         if not item_result.status:
-            return cast(Result[Tuple[T, ValidIndent]], item_result)
+            return cast(Any, item_result)
 
         # Get the next index after parsing the item
         next_index = item_result.index

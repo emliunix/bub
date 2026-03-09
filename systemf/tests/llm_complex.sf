@@ -18,7 +18,7 @@ data Either a b = Left a | Right b
 -- Example 1: LLM with Custom Return Type (Maybe)
 {-# LLM model=gpt-4 temperature=0.2 #-}
 -- | Extract structured data from unstructured text
-prim_op extractName : String
+prim_op extractName :: String
   -- ^ Text containing a person's name
   -> Maybe String
   -- Just the name if found, Nothing otherwise
@@ -26,7 +26,7 @@ prim_op extractName : String
 -- Example 2: LLM with Either for Error Handling
 {-# LLM model=claude temperature=0.1 #-}
 -- | Parse and validate a date string
-prim_op parseDate : String
+prim_op parseDate :: String
   -- ^ Date string in any common format
   -> Either String String
   -- Left error message or Right normalized date (YYYY-MM-DD)
@@ -34,7 +34,7 @@ prim_op parseDate : String
 -- Example 3: Higher-Order Function Pattern
 {-# LLM model=gpt-4 temperature=0.7 #-}
 -- | Apply an LLM transformation to text
-prim_op transform : String
+prim_op transform :: String
   -- ^ Transformation instruction (e.g., "make it formal", "simplify")
   -> String
   -- ^ Input text to transform
@@ -44,7 +44,7 @@ prim_op transform : String
 -- Example 4: Polymorphic LLM Function
 {-# LLM model=gpt-4 #-}
 -- | Describe the structure of a type
-prim_op describeType : String
+prim_op describeType :: String
   -- ^ Type name or description
   -> String
   -- ^ Human-readable type description
@@ -52,7 +52,7 @@ prim_op describeType : String
 -- Example 5: Multi-Step Processing Chain
 {-# LLM model=gpt-4 temperature=0.4 #-}
 -- | Process raw input through normalization
-prim_op normalize : String
+prim_op normalize :: String
   -- ^ Raw input text with possible formatting issues
   -> String
   -- ^ Clean, normalized text

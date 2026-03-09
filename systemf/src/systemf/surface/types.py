@@ -485,10 +485,25 @@ class SurfacePatternTuple(SurfaceNode):
 
 
 @dataclass(frozen=True, kw_only=True)
+class SurfacePatternCons(SurfaceNode):
+    """Cons pattern: head : tail - desugars to Cons head tail.
+
+    Sugar for: Cons head tail
+    Right-associative: x : y : zs parses as x : (y : zs)
+    """
+
+    head: Optional[SurfacePattern] = None
+    tail: Optional[SurfacePattern] = None
+
+    def __str__(self) -> str:
+        return f"{self.head} : {self.tail}"
+
+
+@dataclass(frozen=True, kw_only=True)
 class SurfaceBranch(SurfaceNode):
     """Case branch: pattern -> body."""
 
-    pattern: Optional[SurfacePattern] = None
+    pattern: Optional[SurfacePattern | SurfacePatternTuple | SurfacePatternCons] = None
     body: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:

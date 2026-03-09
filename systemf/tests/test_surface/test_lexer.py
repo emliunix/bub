@@ -21,7 +21,6 @@ from systemf.surface.parser.types import (
     LetToken,
     NumberToken,
     OfToken,
-    TypeLambdaToken,
 )
 
 
@@ -250,21 +249,7 @@ def test_column_tracking():
 
 
 class TestUnicodeTokens:
-    """Tests for unicode token recognition (TYPELAMBDA, LAMBDA, ARROW)."""
-
-    def test_type_lambda_ascii(self):
-        """Tokenize /\\ as TYPELAMBDA."""
-        tokens = lex("/\\")
-        assert len(tokens) == 1  # TYPELAMBDA only (no EOF)
-        assert isinstance(tokens[0], TypeLambdaToken)
-        assert tokens[0].value == "/\\"
-
-    def test_type_lambda_unicode(self):
-        """Tokenize Λ as TYPELAMBDA."""
-        tokens = lex("Λ")
-        assert len(tokens) == 1  # TYPELAMBDA only (no EOF)
-        assert isinstance(tokens[0], TypeLambdaToken)
-        assert tokens[0].value == "Λ"
+    """Tests for unicode token recognition (LAMBDA, ARROW)."""
 
     def test_lambda_ascii(self):
         """Tokenize \\ as LambdaToken."""
@@ -303,9 +288,6 @@ class TestUnicodeTokens:
 
     def test_type_abstraction_tokens(self):
         """Tokenize complete type abstraction."""
-        tokens = lex("Λa. x")
-        types = [type(t).__name__ for t in tokens]
-        assert types == ["TypeLambdaToken", "IdentifierToken", "DotToken", "IdentifierToken"]
 
     def test_lambda_with_type_annotation_tokens(self):
         """Tokenize lambda with type annotation."""
@@ -340,8 +322,6 @@ class TestTokenIdentity:
         """Critical tokens should have specific types, not generic OPERATOR."""
         # These should NOT be tokenized as generic OPERATOR
         critical_tokens = [
-            ("Λ", TypeLambdaToken),
-            ("/\\", TypeLambdaToken),
             ("λ", LambdaToken),
             ("\\", LambdaToken),
             ("->", ArrowToken),
@@ -354,15 +334,6 @@ class TestTokenIdentity:
             assert isinstance(tokens[0], expected_type), (
                 f"Expected {expected_type.__name__} for '{source}', got {type(tokens[0]).__name__}"
             )
-
-    def test_lambda_doesnt_match_type_lambda(self):
-        """λ and Λ should be different token types."""
-        lambda_token = lex("λ")[0]
-        type_lambda_token = lex("Λ")[0]
-
-        assert isinstance(lambda_token, LambdaToken)
-        assert isinstance(type_lambda_token, TypeLambdaToken)
-        assert type(lambda_token) != type(type_lambda_token)
 
     def test_arrow_variants_equivalent(self):
         """-> and → should both be ARROW type."""

@@ -174,44 +174,44 @@ class TestTermDeclaration:
     """Test term (function) declaration parser."""
 
     def test_simple_function(self):
-        """Parse x : Int = 42."""
-        tokens = lex("x : Int = 42")
+        """Parse x :: Int = 42."""
+        tokens = lex("x :: Int = 42")
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
         assert result.name == "x"
 
     def test_function_with_lambda(self):
-        """Parse identity : forall a. a -> a = λx → x."""
-        tokens = lex("identity : forall a. a -> a = λx → x")
+        """Parse identity :: forall a. a -> a = λx → x."""
+        tokens = lex("identity :: forall a. a -> a = λx → x")
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
         assert result.name == "identity"
 
     def test_function_with_params(self):
-        """Parse add x y : Int = x + y."""
+        """Parse add x y :: Int = x + y."""
         # Note: This syntax is shorthand for add = λx y → x + y
-        tokens = lex("add : Int -> Int -> Int = λx y → x + y")
+        tokens = lex("add :: Int -> Int -> Int = λx y → x + y")
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
         assert result.name == "add"
 
     def test_polymorphic_function(self):
         """Parse map function with higher-order type."""
-        tokens = lex("map : forall a b. (a -> b) -> List a -> List b = λf xs → xs")
+        tokens = lex("map :: forall a b. (a -> b) -> List a -> List b = λf xs → xs")
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
 
     def test_recursive_function(self):
         """Parse recursive factorial."""
-        source = """factorial : Int -> Int =
+        source = """factorial :: Int -> Int =
   λn → if n == 0 then 1 else n * factorial (n - 1)"""
         tokens = lex(source)
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
 
     def test_single_line_term_declaration(self):
-        """Parse single-line term declaration: x : Int = 42."""
-        source = "x : Int = 42"
+        """Parse single-line term declaration: x :: Int = 42."""
+        source = "x :: Int = 42"
         tokens = lex(source)
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
@@ -221,7 +221,7 @@ class TestTermDeclaration:
 
     def test_multi_line_term_declaration(self):
         """Parse multi-line term declaration with expression body on next line."""
-        source = """not : Bool -> Bool =
+        source = """not :: Bool -> Bool =
   λb -> case b of
     True -> False
     False -> True"""
@@ -231,9 +231,9 @@ class TestTermDeclaration:
         assert result.name == "not"
 
     def test_multi_line_polymorphic_term(self):
-        """Parse multi-line polymorphic term with type abstraction."""
-        source = """isJust : forall a. Maybe a -> Bool =
-  Λa. λm:Maybe a ->
+        """Parse multi-line polymorphic term."""
+        source = """isJust :: forall a. Maybe a -> Bool =
+  λm ->
     case m of { Nothing -> False | Just x -> True }"""
         tokens = lex(source)
         result = term_parser().parse(tokens)
@@ -242,8 +242,8 @@ class TestTermDeclaration:
 
     def test_term_declaration_with_nested_case(self):
         """Parse term with nested case expressions."""
-        source = """xor : Bool -> Bool -> Bool =
-  λx:Bool -> λy:Bool ->
+        source = """xor :: Bool -> Bool -> Bool =
+  λ(x :: Bool) -> λ(y :: Bool) ->
     case x of
       True -> case y of { True -> False | False -> True }
       False -> y"""
@@ -255,11 +255,11 @@ class TestTermDeclaration:
     def test_term_single_vs_multi_line_equivalence(self):
         """Verify single-line and multi-line produce same declaration type."""
         # Single line
-        single = "id : forall a. a -> a = λx -> x"
+        single = "id :: forall a. a -> a = λx -> x"
         single_result = term_parser().parse(lex(single))
 
         # Multi line (semantically equivalent)
-        multi = """id : forall a. a -> a =
+        multi = """id :: forall a. a -> a =
   λx -> x"""
         multi_result = term_parser().parse(lex(multi))
 
@@ -267,6 +267,50 @@ class TestTermDeclaration:
         assert isinstance(single_result, SurfaceTermDeclaration)
         assert isinstance(multi_result, SurfaceTermDeclaration)
         assert single_result.name == multi_result.name == "id"
+
+    def test_lambda_with_annotation_declaration(self):
+        """Parse id :: ∀a. a → a = λ(x :: a) → x."""
+        source = "id :: ∀a. a → a = λ(x :: a) → x"
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "id"
+
+    def test_let_with_type_annotation_in_declaration(self):
+        """Parse with let containing type annotation."""
+        source = """foo :: Int → Int
+foo x = let y :: Int = x + 1 in y"""
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "foo"
+
+    def test_mixed_lambda_params_declaration(self):
+        """Parse function with mixed annotated/unannotated params."""
+        source = "apply :: (Int → Int) → Int → Int = λf (x :: Int) → f x"
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "apply"
+
+    def test_higher_rank_lambda_annotation(self):
+        """Parse higher-rank function with annotation."""
+        source = "applyPoly :: (∀a. a → a) → Int → Int = λ(f :: ∀a. a → a) x → f 42 x"
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "applyPoly"
+
+    def test_nested_let_with_annotations(self):
+        """Parse nested let expressions with type annotations."""
+        source = """compute :: Int
+compute = let x :: Int = 1 in
+          let y :: Int = 2 in
+          x + y"""
+        tokens = lex(source)
+        result = term_parser().parse(tokens)
+        assert isinstance(result, SurfaceTermDeclaration)
+        assert result.name == "compute"
 
 
 class TestPrimitiveDeclarations:
@@ -286,8 +330,8 @@ class TestPrimitiveDeclarations:
         assert isinstance(result, SurfacePrimTypeDecl)
 
     def test_prim_op(self):
-        """Parse prim_op int_plus : Int -> Int -> Int."""
-        tokens = lex("prim_op int_plus : Int -> Int -> Int")
+        """Parse prim_op int_plus :: Int -> Int -> Int."""
+        tokens = lex("prim_op int_plus :: Int -> Int -> Int")
         result = prim_op_parser().parse(tokens)
         assert isinstance(result, SurfacePrimOpDecl)
         assert result.name == "int_plus"
@@ -295,9 +339,9 @@ class TestPrimitiveDeclarations:
     def test_prim_op_arithmetic(self):
         """Parse multiple arithmetic primitives."""
         ops = [
-            "prim_op int_plus : Int -> Int -> Int",
-            "prim_op int_minus : Int -> Int -> Int",
-            "prim_op int_mult : Int -> Int -> Int",
+            "prim_op int_plus :: Int -> Int -> Int",
+            "prim_op int_minus :: Int -> Int -> Int",
+            "prim_op int_mult :: Int -> Int -> Int",
         ]
         for op in ops:
             tokens = lex(op)
@@ -306,7 +350,7 @@ class TestPrimitiveDeclarations:
 
     def test_prim_op_comparison(self):
         """Parse comparison primitives."""
-        tokens = lex("prim_op int_eq : Int -> Int -> Bool")
+        tokens = lex("prim_op int_eq :: Int -> Int -> Bool")
         result = prim_op_parser().parse(tokens)
         assert isinstance(result, SurfacePrimOpDecl)
 
@@ -318,7 +362,7 @@ class TestDeclarationCombinations:
         """Parse data then function using that type."""
         # Individual declarations, not a sequence
         data_tokens = lex("data Bool = True | False")
-        term_tokens = lex("not : Bool -> Bool = λx → x")
+        term_tokens = lex("not :: Bool -> Bool = λx → x")
 
         data_result = decl_parser().parse(data_tokens)
         term_result = decl_parser().parse(term_tokens)
@@ -345,8 +389,8 @@ class TestDeclarationCombinations:
             "data Bool = True | False",
             "data Maybe a = Nothing | Just a",
             "prim_type Int",
-            "id : forall a. a -> a = λx → x",
-            "const : forall a b. a -> b -> a = λx y → x",
+            "id :: forall a. a -> a = λx → x",
+            "const :: forall a b. a -> b -> a = λx y → x",
         ]
 
         for decl in decls:

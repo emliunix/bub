@@ -27,7 +27,7 @@ class TestTermDeclarationPragmas:
     def test_term_with_llm_pragma(self):
         """Parse term declaration with LLM pragma."""
         source = """{-# LLM model=gpt-4 temperature=0.7 #-}
-translate : String -> String = \\text -> text"""
+translate :: String -> String = \\text -> text"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -39,7 +39,7 @@ translate : String -> String = \\text -> text"""
 
     def test_term_without_pragma(self):
         """Parse term declaration without pragma."""
-        tokens = lex("add : Int -> Int -> Int = \\x y -> x + y")
+        tokens = lex("add :: Int -> Int -> Int = \\x y -> x + y")
         result = term_parser().parse(tokens)
 
         assert isinstance(result, SurfaceTermDeclaration)
@@ -48,7 +48,7 @@ translate : String -> String = \\text -> text"""
     def test_term_pragma_empty_content(self):
         """Parse pragma with empty content."""
         source = """{-# LLM #-}
-identity : Int -> Int = \\x -> x"""
+identity :: Int -> Int = \\x -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -57,8 +57,8 @@ identity : Int -> Int = \\x -> x"""
 
     def test_term_pragma_whitespace_content(self):
         """Parse pragma with whitespace-only content."""
-        source = """{-# LLM   #-}
-identity : Int -> Int = \\x -> x"""
+        source = """{-# LLM #-}
+identity :: Int -> Int = \\x -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -72,7 +72,7 @@ class TestPrimOpDeclarationPragmas:
     def test_prim_op_with_llm_pragma(self):
         """Parse prim_op with LLM pragma."""
         source = """{-# LLM model=claude-3-sonnet #-}
-prim_op analyze : String -> String"""
+prim_op analyze :: String -> String"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -84,7 +84,7 @@ prim_op analyze : String -> String"""
     def test_prim_op_with_complex_pragma(self):
         """Parse prim_op with multi-parameter pragma."""
         source = """{-# LLM model=gpt-4o system="You are a helpful assistant" temperature=0.5 max_tokens=100 #-}
-prim_op chat : String -> String"""
+prim_op chat :: String -> String"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -118,7 +118,7 @@ class TestPragmaAndDocstringTogether:
         """Pragma appears before docstring."""
         source = """{-# LLM model=gpt-4 #-}
 -- | Translate English to French
-translate : String -> String = \\text -> text"""
+translate :: String -> String = \\text -> text"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -131,7 +131,7 @@ translate : String -> String = \\text -> text"""
         """Docstring appears before pragma."""
         source = """-- | Translate English to French
 {-# LLM model=gpt-4 #-}
-translate : String -> String = \\text -> text"""
+translate :: String -> String = \\text -> text"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -143,7 +143,7 @@ translate : String -> String = \\text -> text"""
     def test_only_pragma_no_docstring(self):
         """Only pragma, no docstring."""
         source = """{-# LLM #-}
-identity : Int -> Int = \\x -> x"""
+identity :: Int -> Int = \\x -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -154,7 +154,7 @@ identity : Int -> Int = \\x -> x"""
     def test_only_docstring_no_pragma(self):
         """Only docstring, no pragma."""
         source = """-- | Identity function
-identity : Int -> Int = \\x -> x"""
+identity :: Int -> Int = \\x -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -172,7 +172,7 @@ class TestPragmaEdgeCases:
   model=gpt-4
   temperature=0.7
 #-}
-translate : String -> String = \\x -> x"""
+translate :: String -> String = \\x -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -185,7 +185,7 @@ translate : String -> String = \\x -> x"""
         """Multiple pragmas before single declaration."""
         source = """{-# INLINE #-}
 {-# LLM model=gpt-4 #-}
-fastAdd : Int -> Int -> Int = \\x y -> x + y"""
+fastAdd :: Int -> Int -> Int = \\x y -> x + y"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -198,7 +198,7 @@ fastAdd : Int -> Int -> Int = \\x y -> x + y"""
     def test_pragma_special_chars(self):
         """Pragma content can have special characters."""
         source = """{-# LLM system="Use -> arrow and (parens)" #-}
-test : Int -> Int = \\x -> x"""
+test :: Int -> Int = \\x -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -209,7 +209,7 @@ test : Int -> Int = \\x -> x"""
     def test_pragma_with_unicode(self):
         """Pragma can contain unicode characters."""
         source = """{-# LLM model=GPT-4 λ-enabled #-}
-unicode : Int -> Int = \\x -> x"""
+unicode :: Int -> Int = \\x -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -226,7 +226,7 @@ class TestPragmaParsingErrors:
         from systemf.surface.parser.types import LexerError
 
         source = """{-# LLM model=gpt-4
-test : Int = 1"""
+test :: Int = 1"""
         # Lexer should fail on unclosed pragma
         with pytest.raises(LexerError):
             lex(source)
@@ -234,7 +234,7 @@ test : Int = 1"""
     def test_pragma_in_middle_of_declaration(self):
         """Pragma in middle of declaration should be parsed as separate token."""
         source = """{-# BEFORE #-}
-test : Int = 1"""
+test :: Int = 1"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -247,7 +247,7 @@ test : Int = 1"""
         from systemf.surface.parser.types import LexerError
 
         source = """{-# OUTER {-# INNER #-} #-}
-test : Int = 1"""
+test :: Int = 1"""
         # Nested pragmas are not supported - lexer fails on unmatched #-
         with pytest.raises(LexerError):
             lex(source)

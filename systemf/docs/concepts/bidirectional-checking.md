@@ -37,7 +37,7 @@ check(term, type, ctx)           (verification - top-down)
 ```haskell
 -- infer(42, ctx) = Int
 -- infer("hello", ctx) = String
--- infer(x, ctx) = Int  (if x : Int in ctx)
+-- infer(x, ctx) = Int  (if x :: Int in ctx)
 ```
 
 ### 2. Checking Mode (⇐)
@@ -47,7 +47,9 @@ check(term, type, ctx)           (verification - top-down)
 ```
 Γ ⊢ e ⇐ τ
 
-"In context Γ, term e checks against type τ"
+"To infer (e :: τ):
+ - Check e against τ
+ - Return τ"
 ```
 
 **Works for**:
@@ -57,8 +59,8 @@ check(term, type, ctx)           (verification - top-down)
 
 **Example**:
 ```haskell
--- check(\x -> x, Int -> Int)  ✓  (parameter must be Int, body returns Int)
--- check(42, String)          ✗  (42 doesn't have type String)
+-- check(λ(x :: Int) -> x, Int -> Int)  ✓  (parameter must be Int, body returns Int)
+-- check(42, String)                   ✗  (42 doesn't have type String)
 ```
 
 ## Visual Flow
@@ -137,7 +139,7 @@ Annotations let you **switch modes**: they provide the type needed for checking.
 
 ```haskell
 -- This works
-id = \x -> x          -- Inferred: forall a. a -> a
+id = λx -> x          -- Inferred: forall a. a -> a
 id 3                  -- OK
 
 -- This is hard
@@ -153,9 +155,9 @@ foo :: (forall a. a -> a) -> Int
 foo f = f 42          -- OK! Check f against (forall a. a -> a)
 
 -- Type flows down
-(\x -> x + 1) :: Int -> Int
---              ↑
---              Expected type
+(λ(x :: Int) -> x + 1) :: Int -> Int
+--                       ↑
+--                       Expected type
 ```
 
 **Benefits**:
@@ -178,20 +180,20 @@ Bidirectional checking alone **cannot handle**:
    bar :: (forall a. a -> a) -> Int
    bar f = ...
    
-   bar (\x -> x)          -- Need annotation on the lambda
+   bar (λx -> x)          -- Need annotation on the lambda
    ```
 
 ## The Gap: Why Unification is Needed
 
 Bidirectional checking works great when types flow in a consistent direction. But for polymorphism, you need to **solve constraints**.
 
-```haskell
-id :: forall a. a -> a
+```systemf
+id :: ∀a. a → a
 id 3
 ```
 
 Here:
-- `id` has type `forall a. a -> a`
+- `id` has type `∀a. a → a`
 - `3` has type `Int`
 - We need to **unify** `a` with `Int`
 
@@ -205,7 +207,7 @@ The Core checker (`core/checker.py`) is **pure** bidirectional:
 - No meta-variables
 - No unification
 - All types must be explicit
-- Requires explicit type applications: `id[Int] 3`
+- Type applications are implicit: `id 3`  -- type inferred automatically
 
 ### Surface Elaborator (Extended)
 
@@ -213,6 +215,11 @@ The Surface elaborator extends bidirectional with unification:
 - Creates meta-variables for unknown types
 - Unifies them with constraints
 - Generates explicit Core code
+- Type variables from `forall` signatures scope into the body, allowing:
+  ```systemf
+  id :: ∀a. a → a
+  id = λ(x :: a) → x  -- 'a' refers to the 'a' in the signature
+  ```
 
 See [Implicit Instantiation](./implicit-instantiation.md) for how they combine.
 

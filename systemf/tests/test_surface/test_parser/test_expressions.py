@@ -10,7 +10,6 @@ from systemf.surface.parser import (
     atom_parser,
     app_parser,
     lambda_parser,
-    type_abs_parser,
     case_parser,
     let_parser,
     if_parser,
@@ -78,8 +77,8 @@ class TestLambdaParser:
         assert result.var == "x"
 
     def test_lambda_with_type_annotation(self):
-        """Parse λx:Int → x."""
-        tokens = lex("λx:Int → x")
+        """Parse λ(x :: Int) → x."""
+        tokens = lex("λ(x :: Int) → x")
         result = lambda_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceAbs)
         assert result.var == "x"
@@ -90,22 +89,6 @@ class TestLambdaParser:
         result = lambda_parser(AnyIndent()).parse(tokens)
         # Should parse as nested abs: λx. (λy. x)
         assert isinstance(result, SurfaceAbs)
-
-
-class TestTypeAbstractionParser:
-    """Test type abstraction parser (Λ)."""
-
-    def test_simple_type_abs(self):
-        """Parse Λa. x."""
-        tokens = lex("Λa. x")
-        result = type_abs_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceTypeAbs)
-
-    def test_type_abs_with_lambda(self):
-        """Parse Λa. λx:a → x."""
-        tokens = lex("Λa. λx:a → x")
-        result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceTypeAbs)
 
 
 class TestApplicationParser:
@@ -232,6 +215,92 @@ class TestCaseParser:
         assert isinstance(result, SurfaceCase)
         assert len(result.branches) == 2
 
+    def test_case_with_cons_pattern(self):
+        """Parse case with cons pattern: x : xs."""
+        from systemf.surface.types import SurfacePatternCons
+
+        source = """case xs of
+  x : xs → x
+  Nil → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert len(result.branches) == 2
+        # First branch should have cons pattern
+        assert isinstance(result.branches[0].pattern, SurfacePatternCons)
+        assert result.branches[0].pattern.head is not None
+        assert result.branches[0].pattern.tail is not None
+
+    def test_case_with_nested_cons_pattern(self):
+        """Parse case with nested cons pattern: x : y : zs."""
+        from systemf.surface.types import SurfacePatternCons
+
+        source = """case xs of
+  x : y : zs → x + y
+  Nil → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert len(result.branches) == 2
+        # First branch should have cons pattern
+        cons_pattern = result.branches[0].pattern
+        assert isinstance(cons_pattern, SurfacePatternCons)
+        # Should be right-associative: x : (y : zs)
+        assert isinstance(cons_pattern.tail, SurfacePatternCons)
+
+    def test_case_with_grouped_pattern(self):
+        """Parse case with grouped pattern: (x)."""
+        source = """case xs of
+  (x) → x
+  Nil → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        # Grouped pattern should be equivalent to just 'x'
+        assert result.branches[0].pattern.constructor == "x"
+
+    def test_case_with_grouped_cons(self):
+        """Parse case with grouped cons pattern: (x : xs)."""
+        from systemf.surface.types import SurfacePatternCons
+
+        source = """case xs of
+  (x : xs) → x
+  Nil → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        assert isinstance(result.branches[0].pattern, SurfacePatternCons)
+
+    def test_case_with_nested_grouped_cons(self):
+        """Parse case with nested grouped cons: (x : (y : zs))."""
+        from systemf.surface.types import SurfacePatternCons
+
+        source = """case xs of
+  (x : (y : zs)) → x + y
+  Nil → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        cons_pattern = result.branches[0].pattern
+        assert isinstance(cons_pattern, SurfacePatternCons)
+        # Should be right-associative: x : (y : zs)
+        assert isinstance(cons_pattern.tail, SurfacePatternCons)
+
+    def test_case_with_constructor_tuple_arg(self):
+        """Parse case with constructor taking tuple: Pair (x, y) z."""
+        from systemf.surface.types import SurfacePatternTuple
+
+        source = """case p of
+  Pair (x, y) z → x
+  _ → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        assert isinstance(result, SurfaceCase)
+        pattern = result.branches[0].pattern
+        assert pattern.constructor == "Pair"
+        # Should have 2 args: the tuple and z
+        assert len(pattern.vars) == 2
+
     def test_nested_case_with_braces(self):
         """Parse nested case with outer layout and inner braces."""
         source = """case x of
@@ -298,7 +367,7 @@ in x + y"""
 
     def test_let_with_type_annotation(self):
         """Parse let with type annotation."""
-        tokens = lex("let x : Int = 1 in x")
+        tokens = lex("let x :: Int = 1 in x")
         result = let_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceLet)
 
@@ -359,7 +428,7 @@ class TestComplexExpressions:
 
     def test_polymorphic_identity(self):
         """Parse identity function with type."""
-        tokens = lex("λx:a → x")
+        tokens = lex("λ(x :: a) → x")
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceAbs)
 

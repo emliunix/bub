@@ -18,6 +18,8 @@ from pathlib import Path
 from systemf.surface.parser import Lexer
 from systemf.surface.parser import Parser, ParseError
 from systemf.surface.pipeline import ElaborationPipeline, PipelineResult
+from systemf.surface.scoped.context import ScopeContext
+from systemf.surface.inference.context import TypeContext
 from systemf.core.module import LLMMetadata
 from systemf.core.types import Type
 from systemf.eval.machine import Evaluator
@@ -46,10 +48,12 @@ class REPL:
 
     def __init__(self) -> None:
         # Persistent environments across REPL inputs
+        # Keep for evaluator
         self.global_values: dict[str, Value] = {}
-        self.global_types: dict[str, Type] = {}
-        self.constructor_types: dict[str, Type] = {}
-        self.global_terms: set[str] = set()
+
+        # Context objects for pipeline (immutable, updated with add_* methods)
+        self.scope_ctx = ScopeContext()
+        self.type_ctx = TypeContext()
 
         # LLM function metadata storage
         self.llm_functions: dict[str, LLMMetadata] = {}
@@ -112,7 +116,7 @@ class REPL:
         commands = [":quit", ":q", ":help", ":h", ":load", ":env", ":llm", ":{", ":}"]
 
         # Add global identifiers
-        identifiers = list(self.global_terms)
+        identifiers = list(self.scope_ctx.globals)
 
         # Filter matches
         all_options = commands + identifiers
@@ -141,20 +145,33 @@ class REPL:
             surface_decls = Parser(tokens).parse()
 
             # Use the new pipeline for elaboration
-            # Pass accumulated global context for REPL-style elaboration
             result = self.pipeline.run(
                 surface_decls,
-                constructors=self.constructor_types,
-                global_types=self.global_types,
-                global_terms=self.global_terms,
+                scope_ctx=self.scope_ctx,
+                type_ctx=self.type_ctx,
+                constructors=self.type_ctx.constructors,
             )
 
-            if not result.success:
+            if result.is_err():
                 # Handle pipeline errors
-                error_msg = "; ".join(str(e) for e in result.errors)
-                return LoadResult(success=False, count=0, error=error_msg)
+                error = result.unwrap()
+                return LoadResult(success=False, count=0, error=str(error))
 
-            module = result.module
+            module = result.unwrap()
+
+            # Update scope_ctx with new globals (terms and constructors)
+            for name in module.global_types:
+                self.scope_ctx = self.scope_ctx.add_global(name)
+            for name in module.constructor_types:
+                self.scope_ctx = self.scope_ctx.add_global(name)
+
+            # Update type_ctx with new types
+            for name, ty in module.global_types.items():
+                self.type_ctx = self.type_ctx.add_global(name, ty)
+
+            # Update type_ctx with constructors
+            for name, ty in module.constructor_types.items():
+                self.type_ctx = self.type_ctx.add_constructor(name, ty)
 
             # Register LLM functions with evaluator
             for name, metadata in module.llm_functions.items():
@@ -167,15 +184,6 @@ class REPL:
             # Update environments with definitions
             for name, value in values.items():
                 self.global_values[name] = value
-                self.global_terms.add(name)
-
-            # Update global types from module
-            for name, ty in module.global_types.items():
-                self.global_types[name] = ty
-
-            # Update constructor types from data declarations
-            for name, ty in module.constructor_types.items():
-                self.constructor_types[name] = ty
 
             # Accumulate declarations for future elaborations
             self.accumulated_decls.extend(surface_decls)
@@ -411,18 +419,32 @@ class REPL:
                 # Run the pipeline with accumulated global context
                 result = self.pipeline.run(
                     surface_decls,
-                    constructors=self.constructor_types,
-                    global_types=self.global_types,
-                    global_terms=self.global_terms,
+                    scope_ctx=self.scope_ctx,
+                    type_ctx=self.type_ctx,
+                    constructors=self.type_ctx.constructors,
                 )
 
-                if not result.success:
+                if result.is_err():
                     # Handle errors from pipeline
-                    for error in result.errors:
-                        print(f"Error: {error}")
+                    error = result.unwrap()
+                    print(f"Error: {error}")
                     return
 
-                module = result.module
+                module = result.unwrap()
+
+                # Update scope_ctx with new globals (terms and constructors)
+                for name in module.global_types:
+                    self.scope_ctx = self.scope_ctx.add_global(name)
+                for name in module.constructor_types:
+                    self.scope_ctx = self.scope_ctx.add_global(name)
+
+                # Update type_ctx with new types
+                for name, ty in module.global_types.items():
+                    self.type_ctx = self.type_ctx.add_global(name, ty)
+
+                # Update type_ctx with constructors
+                for name, ty in module.constructor_types.items():
+                    self.type_ctx = self.type_ctx.add_constructor(name, ty)
 
                 # Register LLM functions with evaluator
                 for name, metadata in module.llm_functions.items():
@@ -437,7 +459,6 @@ class REPL:
                     print(f"{name} : {ty} = {self._format_value(value)}")
                     # Update persistent environments
                     self.global_values[name] = value
-                    self.global_terms.add(name)
 
                 # Accumulate declarations
                 self.accumulated_decls.extend(surface_decls)
@@ -464,17 +485,31 @@ class REPL:
                 # Run through pipeline with accumulated global context
                 result = self.pipeline.run(
                     [temp_decl],
-                    constructors=self.constructor_types,
-                    global_types=self.global_types,
-                    global_terms=self.global_terms,
+                    scope_ctx=self.scope_ctx,
+                    type_ctx=self.type_ctx,
+                    constructors=self.type_ctx.constructors,
                 )
 
-                if not result.success:
-                    for error in result.errors:
-                        print(f"Error: {error}")
+                if result.is_err():
+                    error = result.unwrap()
+                    print(f"Error: {error}")
                     return
 
-                module = result.module
+                module = result.unwrap()
+
+                # Update scope_ctx with new globals (terms and constructors)
+                for name in module.global_types:
+                    self.scope_ctx = self.scope_ctx.add_global(name)
+                for name in module.constructor_types:
+                    self.scope_ctx = self.scope_ctx.add_global(name)
+
+                # Update type_ctx with new types
+                for name, ty in module.global_types.items():
+                    self.type_ctx = self.type_ctx.add_global(name, ty)
+
+                # Update type_ctx with constructors
+                for name, ty in module.constructor_types.items():
+                    self.type_ctx = self.type_ctx.add_constructor(name, ty)
 
                 if len(module.declarations) == 0:
                     print("Error: No declarations produced")
@@ -489,7 +524,6 @@ class REPL:
 
                     # Store as 'it'
                     self.global_values["it"] = value
-                    self.global_terms.add("it")
 
                     print(f"it :: {ty} = {self._format_value(value)}")
 

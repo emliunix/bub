@@ -11,6 +11,7 @@ from systemf.surface.desugar.operator_pass import operator_to_prim_pass
 from systemf.surface.desugar.multi_arg_lambda_pass import multi_arg_lambda_pass
 from systemf.surface.desugar.multi_var_type_abs_pass import multi_var_type_abs_pass
 from systemf.surface.desugar.implicit_type_abs_pass import implicit_type_abs_pass
+from systemf.surface.desugar.cons_pattern_pass import cons_pattern_pass
 
 from systemf.surface.types import SurfaceTerm, SurfaceTermDeclaration
 from systemf.surface.result import Result, Ok
@@ -48,8 +49,9 @@ def desugar_term(term: SurfaceTerm) -> Result[SurfaceTerm, DesugarError]:
     Passes are applied in order:
     1. Multi-var type abstractions -> nested single-var
     2. Multi-arg lambdas -> nested single-arg
-    3. If-then-else -> case
-    4. Operators -> primitive applications
+    3. Cons patterns -> constructor patterns
+    4. If-then-else -> case
+    5. Operators -> primitive applications
 
     Args:
         term: The surface term to desugar.
@@ -64,6 +66,11 @@ def desugar_term(term: SurfaceTerm) -> Result[SurfaceTerm, DesugarError]:
     term = result.unwrap()
 
     result = multi_arg_lambda_pass(term)
+    if result.is_err():
+        return result
+    term = result.unwrap()
+
+    result = cons_pattern_pass(term)
     if result.is_err():
         return result
     term = result.unwrap()

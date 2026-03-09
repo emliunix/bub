@@ -30,7 +30,6 @@ from systemf.surface.parser.types import (
     StringToken,
     ThenToken,
     TokenBase,
-    TypeLambdaToken,
     TypeToken,
     # Concrete operator tokens
     ArrowToken,
@@ -50,6 +49,7 @@ from systemf.surface.parser.types import (
     AppendToken,
     EqualsToken,
     ColonToken,
+    DoubleColonToken,
     BarToken,
     AtToken,
     DotToken,
@@ -108,7 +108,6 @@ class Lexer:
         ("OR", r"\|\|"),
         ("APPEND", r"\+\+"),
         ("LAMBDA", r"\\|λ"),
-        ("TYPELAMBDA", r"/\\|Λ"),
         # Single-character operators (after multi-char)
         ("EQ", r"=="),
         ("PLUS", r"\+"),
@@ -118,6 +117,7 @@ class Lexer:
         ("LT", r"<"),
         ("GT", r">"),
         ("EQUALS", r"="),
+        ("DOUBLECOLON", r"::"),
         ("COLON", r":"),
         ("BAR", r"\|"),
         ("AT", r"@"),
@@ -335,8 +335,6 @@ class Lexer:
             return PrimOpToken(keyword=value, location=loc)
         elif token_type == "LAMBDA":
             return LambdaToken(symbol=value, location=loc)
-        elif token_type == "TYPELAMBDA":
-            return TypeLambdaToken(symbol=value, location=loc)
         elif token_type == "ARROW":
             return ArrowToken(operator=value, location=loc)
         elif token_type == "DARROW":
@@ -369,6 +367,8 @@ class Lexer:
             return AppendToken(operator=value, location=loc)
         elif token_type == "EQUALS":
             return EqualsToken(operator=value, location=loc)
+        elif token_type == "DOUBLECOLON":
+            return DoubleColonToken(operator=value, location=loc)
         elif token_type == "COLON":
             return ColonToken(operator=value, location=loc)
         elif token_type == "BAR":

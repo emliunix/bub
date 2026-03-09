@@ -85,7 +85,7 @@ class TestTermDeclarationDocstrings:
     def test_term_with_preceding_docstring(self):
         """Parse term declaration with -- | docstring."""
         source = """-- | Add two integers
-add : Int -> Int -> Int = λx y -> x + y"""
+add :: Int -> Int -> Int = λx y -> x + y"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -95,7 +95,7 @@ add : Int -> Int -> Int = λx y -> x + y"""
 
     def test_term_without_docstring(self):
         """Parse term declaration without docstring."""
-        tokens = lex("add : Int -> Int -> Int = λx y -> x + y")
+        tokens = lex("add :: Int -> Int -> Int = λx y -> x + y")
         result = term_parser().parse(tokens)
 
         assert isinstance(result, SurfaceTermDeclaration)
@@ -105,7 +105,7 @@ add : Int -> Int -> Int = λx y -> x + y"""
         """Parse term with multiline docstring."""
         source = """-- | Compute factorial
 -- | of a natural number
-factorial : Nat -> Nat = λ n -> n"""
+factorial :: Nat -> Nat = λ n -> n"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -115,7 +115,7 @@ factorial : Nat -> Nat = λ n -> n"""
     def test_term_docstring_empty(self):
         """Parse empty docstring (just -- | with nothing after)."""
         source = """-- |
-identity : Int -> Int = λx -> x"""
+identity :: Int -> Int = λx -> x"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -152,7 +152,7 @@ class TestPrimOpDeclarationDocstrings:
     def test_prim_op_with_docstring(self):
         """Parse prim_op with -- | docstring."""
         source = """-- | Integer addition
-prim_op add : Int -> Int -> Int"""
+prim_op add :: Int -> Int -> Int"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -162,7 +162,7 @@ prim_op add : Int -> Int -> Int"""
 
     def test_prim_op_without_docstring(self):
         """Parse prim_op without docstring."""
-        tokens = lex("prim_op sub : Int -> Int -> Int")
+        tokens = lex("prim_op sub :: Int -> Int -> Int")
         result = prim_op_parser().parse(tokens)
 
         assert isinstance(result, SurfacePrimOpDecl)
@@ -172,7 +172,7 @@ prim_op add : Int -> Int -> Int"""
         """Parse prim_op with multiline docstring."""
         source = """-- | Multiplication of
 -- | two integers
-prim_op mul : Int -> Int -> Int"""
+prim_op mul :: Int -> Int -> Int"""
         tokens = lex(source)
         result = decl_parser().parse(tokens)
 
@@ -206,10 +206,10 @@ data Fun a b = Fun (a -> b)"""
     def test_multiple_declarations_with_docstrings(self):
         """Multiple declarations, each with their own docstring."""
         source = """-- | First declaration
-one : Int = 1
+one :: Int = 1
 
 -- | Second declaration
-two : Int = 2"""
+two :: Int = 2"""
         tokens = lex(source)
 
         # Use decl_parser to parse multiple declarations

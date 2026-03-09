@@ -449,8 +449,8 @@ The primitives system provides a clean separation between core language semantic
 ```systemf
 -- Prelude declares primitive types and their operations
 prim_type Int
-prim_op int_plus : Int -> Int -> Int
-prim_op int_minus : Int -> Int -> Int
+prim_op int_plus :: Int -> Int -> Int
+prim_op int_minus :: Int -> Int -> Int
 
 -- User code can shadow regular names
 plus = \x y -> x  -- Shadows 'plus'
@@ -533,7 +533,7 @@ class SurfacePrimTypeDecl:
 
 @dataclass(frozen=True)
 class SurfacePrimOpDecl:
-    """Surface: prim_op int_plus : Int -> Int -> Int"""
+    """Surface: prim_op int_plus :: Int -> Int -> Int"""
     name: str
     type_annotation: SurfaceType
 ```
@@ -622,7 +622,7 @@ class Evaluator:
 ```systemf
 -- prelude.sf
 prim_type Int
-prim_op int_plus : Int -> Int -> Int
+prim_op int_plus :: Int -> Int -> Int
 
 -- user.sf
 1 + 2
@@ -701,21 +701,21 @@ System F REPL v0.1.0
 Loading prelude... (59 definitions)
 
 > 42
-it : __ = 42
+it :: __ = 42
 
-> id : ∀a. a → a = Λa. λx:a. x
-id : ∀a. a → a = <function>
+> id :: ∀a. a → a = λx → x
+id :: ∀a. a → a = <function>
 
-> id [Int] 42
-it : Int = 42
+> id 42
+it :: Int = 42
 
 > :{
-| not : Bool → Bool = λb.
+| not :: Bool → Bool = λb →
 |   case b of
 |     True → False
 |     False → True
 | :}
-not : Bool → Bool = <function>
+not :: Bool → Bool = <function>
 ```
 
 ### Architecture

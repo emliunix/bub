@@ -189,7 +189,7 @@ data Test = A | B"""
     def test_pragma_parsed_as_dict(self):
         """Pragma should be parsed into dict[str, str]."""
         source = """{-# LLM model=gpt-4 temperature=0.7 #-}
-test : Int = 1"""
+test :: Int = 1"""
 
         result = parse_program(source)
         assert result[0].pragma == {"LLM": "model=gpt-4 temperature=0.7"}
@@ -198,7 +198,7 @@ test : Int = 1"""
         """Multiple pragmas should be merged."""
         source = """{-# INLINE #-}
 {-# LLM model=gpt-4 #-}
-test : Int = 1"""
+test :: Int = 1"""
 
         result = parse_program(source)
         assert "INLINE" in result[0].pragma
@@ -226,9 +226,9 @@ class TestMixedDeclarationStyles:
 
     def test_single_line_followed_by_multi_line(self):
         """Parse single-line term followed by multi-line term."""
-        source = """id : forall a. a -> a = λx -> x
+        source = """id :: forall a. a -> a = λx -> x
 
-not : Bool -> Bool =
+not :: Bool -> Bool =
   λb -> case b of
     True -> False
     False -> True"""
@@ -239,10 +239,10 @@ not : Bool -> Bool =
 
     def test_multi_line_followed_by_single_line(self):
         """Parse multi-line term followed by single-line term."""
-        source = """map : forall a b. (a -> b) -> List a -> List b =
+        source = """map :: forall a b. (a -> b) -> List a -> List b =
   λf xs -> xs
 
-const : forall a b. a -> b -> a = λx y -> x"""
+const :: forall a b. a -> b -> a = λx y -> x"""
         result = parse_program(source)
         assert len(result) == 2
         assert result[0].name == "map"
@@ -251,17 +251,17 @@ const : forall a b. a -> b -> a = λx y -> x"""
     def test_mixed_styles_in_sequence(self):
         """Parse sequence of mixed single-line and multi-line declarations."""
         source = """-- Single line
-x : Int = 1
+x :: Int = 1
 
 -- Multi-line
-y : Int -> Int =
+y :: Int -> Int =
   λn -> n + 1
 
 -- Single line
-z : Int = 3
+z :: Int = 3
 
 -- Multi-line
-w : Bool -> Bool =
+w :: Bool -> Bool =
   λb -> not b"""
         result = parse_program(source)
         assert len(result) == 4
@@ -273,17 +273,17 @@ w : Bool -> Bool =
     def test_polymorphic_functions_mixed_styles(self):
         """Parse polymorphic functions with both single and multi-line bodies."""
         source = """-- Single line polymorphic
-id : forall a. a -> a = λx -> x
+id :: forall a. a -> a = λx -> x
 
 -- Multi-line polymorphic
-mapMaybe : forall a b. (a -> b) -> Maybe a -> Maybe b =
+mapMaybe :: forall a b. (a -> b) -> Maybe a -> Maybe b =
   λf m ->
     case m of
       Nothing -> Nothing
       Just x -> Just (f x)
 
 -- Another single line
-const : forall a b. a -> b -> a = λx y -> x"""
+const :: forall a b. a -> b -> a = λx y -> x"""
         result = parse_program(source)
         assert len(result) == 3
         assert result[0].name == "id"
@@ -291,16 +291,16 @@ const : forall a b. a -> b -> a = λx y -> x"""
         assert result[2].name == "const"
 
     def test_multi_line_with_type_abstraction(self):
-        """Parse multi-line terms with type abstraction (Λ)."""
-        source = """isJust : forall a. Maybe a -> Bool =
-  Λa. λm:Maybe a ->
+        """Parse multi-line terms with type abstraction (removed Λ)."""
+        source = """isJust :: forall a. Maybe a -> Bool =
+  λm ->
     case m of { Nothing -> False | Just x -> True }
 
-isNothing : forall a. Maybe a -> Bool =
-  Λa. λm:Maybe a ->
+isNothing :: forall a. Maybe a -> Bool =
+  λm ->
     case m of { Nothing -> True | Just x -> False }
 
-just : forall a. a -> Maybe a = Λa. λx:a -> Just x"""
+just :: forall a. a -> Maybe a = λx -> Just x"""
         result = parse_program(source)
         assert len(result) == 3
         assert result[0].name == "isJust"

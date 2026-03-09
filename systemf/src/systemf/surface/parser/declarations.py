@@ -235,13 +235,13 @@ def constr_parser() -> P[SurfaceConstructorInfo]:
             if isinstance(tokens[i], OperatorToken) and tokens[i].operator == "|":
                 break
 
-            # Stop if this looks like a term declaration (identifier : type)
+            # Stop if this looks like a term declaration (identifier :: type)
             # This prevents consuming identifiers that are actually function names
             if isinstance(tokens[i], IdentifierToken):
-                # Check if next token is a colon - if so, this is likely a term declaration
+                # Check if next token is a double colon - if so, this is likely a term declaration
                 if i + 1 < len(tokens):
                     next_token = tokens[i + 1]
-                    if isinstance(next_token, OperatorToken) and next_token.operator == ":":
+                    if isinstance(next_token, OperatorToken) and next_token.operator == "::":
                         break
 
             # Try to parse a type atom
@@ -347,8 +347,8 @@ def term_parser() -> P[SurfaceTermDeclaration]:
         name = name_token.value
         loc = name_token.location
 
-        # Match ":" for type annotation
-        yield match_symbol(":")
+        # Match "::" for type annotation
+        yield match_symbol("::")
 
         # Parse type
         ty = yield type_parser()
@@ -415,8 +415,8 @@ def prim_op_parser() -> P[SurfacePrimOpDecl]:
         name_token = yield match_ident()
         name = name_token.value
 
-        # Match ":" for type annotation
-        yield match_symbol(":")
+        # Match "::" for type annotation
+        yield match_symbol("::")
 
         # Parse type
         ty = yield type_parser()

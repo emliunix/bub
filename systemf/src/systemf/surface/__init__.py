@@ -16,6 +16,8 @@ from systemf.surface.types import (
     SurfaceDeclaration,
     SurfaceLet,
     SurfacePattern,
+    SurfacePatternCons,
+    SurfacePatternTuple,
     SurfaceTerm,
     SurfaceTermDeclaration,
     SurfaceTypeAbs,
@@ -46,6 +48,7 @@ from systemf.surface.desugar import (
     multi_arg_lambda_pass,
     multi_var_type_abs_pass,
     implicit_type_abs_pass,
+    cons_pattern_pass,
     desugar_term,
     desugar_declaration,
 )
@@ -107,6 +110,8 @@ __all__ = [
     "SurfaceCase",
     "SurfaceBranch",
     "SurfacePattern",
+    "SurfacePatternTuple",
+    "SurfacePatternCons",
     "SurfaceDeclaration",
     "SurfaceDataDeclaration",
     "SurfaceTermDeclaration",
@@ -130,6 +135,7 @@ __all__ = [
     "multi_arg_lambda_pass",
     "multi_var_type_abs_pass",
     "implicit_type_abs_pass",
+    "cons_pattern_pass",
     "desugar_term",
     "desugar_declaration",
     # Scope checking passes

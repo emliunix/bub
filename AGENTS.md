@@ -265,7 +265,7 @@ uv run scripts/validate_system.py
 uv run pytest tests/test_bus.py
 ```
 
-Do not use `python -m` directly or set `PYTHONPATH` manually.
+**NEVER use `PYTHONPATH` directly or set it manually.** Use `uv run` for 99% of cases. If a script needs special path handling, add it to the script or use `uv run --python-path`, but never export PYTHONPATH in the shell.
 
 (See `docs/testing.md` for script/test facilities; see `docs/deployment.md` for runtime modes.)
 

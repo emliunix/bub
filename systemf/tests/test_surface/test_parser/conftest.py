@@ -13,7 +13,7 @@ def simple_multiple_decls():
 
 data Maybe a = Nothing | Just a
 
-not : Bool -> Bool = \\b ->
+not :: Bool -> Bool = \\b ->
   case b of
     True -> False
     False -> True"""
@@ -27,7 +27,7 @@ data Bool = True | False
 
 -- | Convert Bool to String
 -- | Returns "true" or "false"
-toString : Bool -> String = \\b ->
+toString :: Bool -> String = \\b ->
   case b of
     True -> "true"
     False -> "false"
@@ -39,7 +39,7 @@ def rank2_const_function():
     """Rank-2 polymorphic const function."""
     return """-- | The constant function (rank-2 polymorphic)
 -- | Returns first argument, ignores second
-const : forall a. forall b. a -> b -> a = Λa. Λb. \\x y -> x"""
+const :: forall a. forall b. a -> b -> a = \\x y -> x"""
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def maybe_type_with_frommaybe():
 data Maybe a = Nothing | Just a
 
 -- | Extract value from Maybe with default
-fromMaybe : forall a. a -> Maybe a -> a = Λa. \\default ma ->
+fromMaybe :: forall a. a -> Maybe a -> a = \\default ma ->
   case ma of
     Nothing -> default
     Just x -> x"""
@@ -62,7 +62,7 @@ def natural_numbers_with_conversion():
 data Nat = Zero | Succ Nat
 
 -- | Convert Nat to Int
-natToInt : Nat -> Int = \\n ->
+natToInt :: Nat -> Int = \\n ->
   case n of
     Zero -> 0
     Succ m -> 1 + natToInt m"""
@@ -75,7 +75,7 @@ def list_type_with_length():
 data List a = Nil | Cons a (List a)
 
 -- | Get length of list
-length : forall a. List a -> Int = Λa. \\xs ->
+length :: forall a. List a -> Int = \\xs ->
   case xs of
     Nil -> 0
     Cons y ys -> 1 + length ys"""
@@ -86,7 +86,7 @@ def llm_function_with_pragma():
     """LLM function with pragma and docstrings."""
     return """{-# LLM model=gpt-4 temperature=0.7 #-}
 -- | Translate English to French
-translate : String -> String = \\text -> text"""
+translate :: String -> String = \\text -> text"""
 
 
 @pytest.fixture
@@ -97,20 +97,20 @@ data Bool = True | False
 
 -- | Convert Bool to String
 -- | Returns "true" or "false"
-toString : Bool -> String = \\b ->
+toString :: Bool -> String = \\b ->
   case b of
     True -> "true"
     False -> "false"
 
 -- | The constant function (rank-2 polymorphic)
 -- | Returns first argument, ignores second
-const : forall a. forall b. a -> b -> a = Λa. Λb. \\x y -> x
+const :: forall a. forall b. a -> b -> a = \\x y -> x
 
 -- | Maybe type representing optional values
 data Maybe a = Nothing | Just a
 
 -- | Extract value from Maybe with default
-fromMaybe : forall a. a -> Maybe a -> a = Λa. \\default ma ->
+fromMaybe :: forall a. a -> Maybe a -> a = \\default ma ->
   case ma of
     Nothing -> default
     Just x -> x
@@ -119,7 +119,7 @@ fromMaybe : forall a. a -> Maybe a -> a = Λa. \\default ma ->
 data Nat = Zero | Succ Nat
 
 -- | Convert Nat to Int
-natToInt : Nat -> Int = \\n ->
+natToInt :: Nat -> Int = \\n ->
   case n of
     Zero -> 0
     Succ m -> 1 + natToInt m
@@ -128,7 +128,7 @@ natToInt : Nat -> Int = \\n ->
 data List a = Nil | Cons a (List a)
 
 -- | Get length of list
-length : forall a. List a -> Int = Λa. \\xs ->
+length :: forall a. List a -> Int = \\xs ->
   case xs of
     Nil -> 0
     Cons y ys -> 1 + length ys"""
@@ -138,7 +138,7 @@ length : forall a. List a -> Int = Λa. \\xs ->
 def term_without_body():
     """PrimOp declaration (signature only, no body)."""
     return """-- | Integer addition primitive
-prim_op int_plus : Int -> Int -> Int"""
+prim_op int_plus :: Int -> Int -> Int"""
 
 
 @pytest.fixture
@@ -151,10 +151,10 @@ data Bool = True | False
 prim_type Int
 
 -- | Integer addition
-prim_op int_plus : Int -> Int -> Int
+prim_op int_plus :: Int -> Int -> Int
 
 -- | Logical negation
-not : Bool -> Bool = \\b ->
+not :: Bool -> Bool = \\b ->
   case b of
     True -> False
     False -> True"""

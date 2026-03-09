@@ -25,12 +25,12 @@ class TestLLMParser:
     def test_param_docstring_in_lambda(self):
         """Parser captures -- ^ style parameter docstrings in lambdas.
 
-        NOTE: This feature is not currently supported. In the new architecture,
-        parameter docstrings should be placed in type annotations:
+                NOTE: This feature is not currently supported. In the new architecture,
+                parameter docstrings should be placed in type annotations:
 
-            translate : String -- ^ The English text to translate -> String
+        translate :: String -- ^ The English text to translate -> String
 
-        The old syntax `\text -- ^ doc -> body` is not supported.
+                The old syntax `\text -- ^ doc -> body` is not supported.
         """
         source = r"""
 translate : String -> String
@@ -52,7 +52,7 @@ translate = \text -- ^ The English text to translate -> text
         is stored in SurfaceTypeArrow.param_doc and extracted during type checking.
         """
         source = r"""
-identity : String -> String = \x -> x
+identity :: String -> String = \x -> x
 """
         decls = parse_program(source)
         assert len(decls) == 1

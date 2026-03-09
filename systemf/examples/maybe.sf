@@ -4,22 +4,22 @@ data Maybe a = Nothing | Just a
 
 -- isJust : ∀a. Maybe a -> Bool
 -- Returns true if the value is present
-isJust : ∀a. Maybe a → Bool = Λa. λm:Maybe a.
+isJust :: ∀a. Maybe a → Bool = λm →
   case m of
     Nothing → False
     Just x → True
 
 -- fromMaybe : ∀a. a -> Maybe a -> a
 -- Returns the value if present, otherwise returns default
-fromMaybe : ∀a. a → Maybe a → a = Λa. λdefault:a. λm:Maybe a.
+fromMaybe :: ∀a. a → Maybe a → a = λdefault m →
   case m of
     Nothing → default
     Just x → x
 
 -- mapMaybe : ∀a. ∀b. (a -> b) -> Maybe a -> Maybe b
 -- Maps a function over a Maybe value
-mapMaybe : ∀a. ∀b. (a → b) → Maybe a → Maybe b =
-  Λa. Λb. λf:(a → b). λm:Maybe a.
+mapMaybe :: ∀a. ∀b. (a → b) → Maybe a → Maybe b =
+  λf m →
     case m of
-      Nothing → Nothing [b]
-      Just x → Just [b] (f x)
+      Nothing → Nothing
+      Just x → Just (f x)

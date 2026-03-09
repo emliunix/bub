@@ -210,7 +210,7 @@ class TestParserShowcase:
         """Parse a simple function with type signature."""
         from systemf.surface.parser import parse_declaration
 
-        source = "identity : forall a. a -> a = λx -> x"
+        source = "identity :: forall a. a -> a = λx -> x"
         result = parse_declaration(source)
 
         # Should successfully parse as a term declaration
@@ -259,11 +259,11 @@ in z * 2"""
         result = parse_expression(source)
         assert result is not None
 
-    def test_type_abstraction(self):
-        """Parse type abstraction (Λ)."""
+    def test_lambda_with_type_annotation(self):
+        """Parse lambda with type annotation using new syntax."""
         from systemf.surface.parser import parse_expression
 
-        source = "Λa. λx:a -> x"
+        source = "λ(x :: a) -> x"
         result = parse_expression(source)
         assert result is not None
 
@@ -292,7 +292,7 @@ else
         from systemf.surface.parser import parse_declaration
 
         prim_type = "prim_type Int"
-        prim_op = "prim_op int_plus : Int -> Int -> Int"
+        prim_op = "prim_op int_plus :: Int -> Int -> Int"
 
         result1 = parse_declaration(prim_type)
         result2 = parse_declaration(prim_op)

@@ -11,7 +11,7 @@
 -- | Translate English text to French
 
 -- Declaration with parameter doc (-- ^ style)
-prim_op translate : String
+prim_op translate :: String
   -- ^ The English text to translate
   -> String
   -- Result is the French translation
@@ -22,7 +22,7 @@ prim_op translate : String
 -- Using default model configuration
 {-# LLM #-}
 -- | Generate a creative story summary
-prim_op summarize : String
+prim_op summarize :: String
   -- ^ The story text to summarize
   -> String
   -- Result is a brief summary
@@ -32,7 +32,7 @@ prim_op summarize : String
 -- ============================================================================
 {-# LLM model=claude temperature=0.5 #-}
 -- | Answer a question based on context
-prim_op answer : String
+prim_op answer :: String
   -- ^ Background context for the question
   -> String
   -- ^ The question to answer

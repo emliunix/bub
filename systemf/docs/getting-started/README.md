@@ -30,19 +30,19 @@ uv run python -m systemf.eval.repl
 
 ```systemf
 > 42
-it : __ = 42
+it :: __ = 42
 
 > True
-it : __ = True
+it :: __ = True
 
 > not True
-it : __ = False
+it :: __ = False
 
-> id : ∀a. a → a = Λa. λx:a. x
-id : ∀a. a → a = <function>
+> id :: ∀a. a → a = λx → x
+id :: ∀a. a → a = <function>
 
-> id [Int] 42
-it : Int = 42
+> id 42
+it :: Int = 42
 ```
 
 ### Running a File
@@ -66,7 +66,7 @@ List Int, Maybe a, Either a b
 Int → Int, ∀a. a → a
 
 -- Wildcard types (inferred)
-x : _ = 42
+x :: _ = 42
 ```
 
 ### Data Types
@@ -83,14 +83,14 @@ data Either a b = Left a | Right b
 
 ```systemf
 -- Lambda expressions
-id : ∀a. a → a = Λa. λx:a. x
+id :: ∀a. a → a = λx → x
 
 -- Pattern matching
-map : ∀a b. (a → b) → List a → List b
-map = Λa. Λb. λf. λxs.
+map :: ∀a b. (a → b) → List a → List b
+map = λf → λxs →
   case xs of
     Nil → Nil
-    Cons x xs' → Cons (f x) (map [a] [b] f xs')
+    Cons x xs' → Cons (f x) (map f xs')
 ```
 
 ### Operators
@@ -102,6 +102,21 @@ map = Λa. Λb. λf. λxs.
 10 / 2     -- int_divide
 x == y     -- int_eq
 x < y      -- int_lt
+```
+
+### Cons Operator
+
+System F uses `:` as the list cons operator:
+
+```systemf
+-- Lists can use cons operator
+nums = 1 : 2 : 3 : Nil  -- equivalent to Cons 1 (Cons 2 (Cons 3 Nil))
+
+-- Pattern matching with cons
+head :: ∀a. List a → a
+head = λxs →
+  case xs of
+    Cons x _ → x
 ```
 
 ## REPL Commands
@@ -168,7 +183,7 @@ See the journal entries in `/journal/` for development history and recent fixes.
 x = 42
 
 -- Correct
-x : Int = 42
+x :: Int = 42
 ```
 
 ### Type Errors

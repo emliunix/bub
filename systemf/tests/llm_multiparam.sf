@@ -6,7 +6,7 @@
 -- ============================================================================
 {-# LLM model=gpt-4 temperature=0.5 #-}
 -- | Classify text into one of the provided categories
-prim_op classify : String
+prim_op classify :: String
   -- ^ Comma-separated list of valid categories
   -> String
   -- ^ The text to classify
@@ -18,7 +18,7 @@ prim_op classify : String
 -- ============================================================================
 {-# LLM model=claude-sonnet temperature=0.9 #-}
 -- | Generate code in a specific programming language
-prim_op codegen : String
+prim_op codegen :: String
   -- ^ Programming language (e.g., Python, Haskell, Rust)
   -> String
   -- ^ Description of what the code should do
@@ -30,7 +30,7 @@ prim_op codegen : String
 -- ============================================================================
 {-# LLM #-}
 -- | Analyze sentiment of text
-prim_op sentiment : String
+prim_op sentiment :: String
   -- ^ Text to analyze
   -> String
   -- ^ Sentiment (positive, negative, or neutral)
@@ -40,7 +40,7 @@ prim_op sentiment : String
 -- ============================================================================
 {-# LLM model=gpt-4 temperature=0.3 #-}
 -- | Format text according to specifications
-prim_op formatText : String
+prim_op formatText :: String
   -- ^ The text to format
   -> String
   -- ^ Target format (e.g., markdown, html, plain)
