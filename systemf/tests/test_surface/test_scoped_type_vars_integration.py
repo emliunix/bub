@@ -12,7 +12,7 @@ Reference: docs/notes/visible-type-application.md
 import pytest
 
 from systemf.surface.parser import parse_expression, parse_program
-from systemf.surface.pipeline import Pipeline
+from systemf.surface.pipeline import ElaborationPipeline as Pipeline
 from systemf.surface.inference.errors import TypeError
 
 

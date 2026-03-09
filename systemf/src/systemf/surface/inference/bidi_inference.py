@@ -65,7 +65,11 @@ from systemf.surface.types import (
     SurfaceOp,
     SurfaceToolCall,
 )
-from systemf.surface.inference.context import TypeContext
+from systemf.surface.inference.context import (
+    TypeContext,
+    collect_forall_vars,
+    extend_with_forall_vars,
+)
 from systemf.surface.inference.errors import (
     TypeMismatchError,
     UnificationError,
@@ -88,6 +92,28 @@ def _fresh_binder_names(count: int, ty: Type) -> list[str]:
         if name not in used and len(result) < count:
             result.append(name)
     return result
+
+
+def _collect_surface_forall_vars(ty: SurfaceType) -> list[str]:
+    """Extract all forall-bound type variables from a surface type.
+
+    Traverses the surface type and collects all variables bound by forall
+    quantifiers, in order from outermost to innermost.
+
+    Args:
+        ty: The surface type to extract forall-bound variables from
+
+    Returns:
+        List of type variable names in order (outermost first)
+    """
+    vars: list[str] = []
+    current: SurfaceType = ty
+
+    while isinstance(current, SurfaceTypeForall):
+        vars.append(current.var)
+        current = current.body
+
+    return vars
 
 
 class BidiInference:
@@ -379,7 +405,8 @@ class BidiInference:
 
             case SurfaceTypeApp(location=location, func=func, type_arg=type_arg):
                 # Type application: func @type_arg
-                # Special case: if func is a GlobalVar, don't instantiate - keep the forall
+                # Special case: if func is a GlobalVar or ScopedVar with polymorphic type,
+                # don't instantiate - keep the forall for type application
                 match func:
                     case GlobalVar(name=name):
                         # Look up global without instantiating - we need the forall for type app
@@ -393,6 +420,19 @@ class BidiInference:
                                 location,
                                 term,
                             )
+                    case ScopedVar(location=_, index=index, debug_name=debug_name):
+                        # Look up local variable - may have polymorphic type from annotation
+                        try:
+                            func_type = ctx.lookup_term_type(index)
+                            func_type = self._apply_subst(func_type)
+                            # Don't instantiate - we need the forall for type app
+                            core_func = core.Var(location, index, debug_name)
+                        except IndexError:
+                            raise TypeError(
+                                f"Variable index {index} out of bounds",
+                                location,
+                                term,
+                            )
                     case _:
                         core_func, func_type = self.infer(func, ctx)
                         func_type = self._apply_subst(func_type)
@@ -400,7 +440,9 @@ class BidiInference:
                 match func_type:
                     case TypeForall(var, body_type):
                         # Substitute type argument for bound variable
-                        core_type_arg = self._surface_to_core_type(type_arg, ctx)
+                        # Extend context with the forall-bound var so type_arg can reference it
+                        app_ctx = ctx.extend_type(var)
+                        core_type_arg = self._surface_to_core_type(type_arg, app_ctx)
                         result_type = self._subst_type_var(body_type, var, core_type_arg)
                         return (core.TApp(location, core_func, core_type_arg), result_type)
 
@@ -459,9 +501,21 @@ class BidiInference:
                 return (result, body_type)
 
             case SurfaceAnn(location=location, term=term_inner, type=type_ann):
-                # Type annotation: check term against annotation
-                ann_type = self._surface_to_core_type(type_ann, ctx)
-                core_term = self.check(term_inner, ann_type, ctx)
+                # ANN-SCOPE: Extract forall-bound vars from annotation
+                # and extend context before checking annotated term
+                # Rule: Γ, ā ⊢ e ⇐ ρ where annotation is ∀ā.ρ
+                ann_vars = _collect_surface_forall_vars(type_ann)
+
+                # Extend context with annotation's forall vars
+                ann_ctx = ctx
+                for var in ann_vars:
+                    ann_ctx = ann_ctx.extend_type(var)
+
+                # Convert annotation with extended context
+                ann_type = self._surface_to_core_type(type_ann, ann_ctx)
+
+                # Check inner term with extended context
+                core_term = self.check(term_inner, ann_type, ann_ctx)
                 final_type = self._apply_subst(ann_type)
                 return (core_term, final_type)
 
@@ -688,15 +742,27 @@ class BidiInference:
                 # Lambda: expected should be an arrow type (or forall that instantiates to arrow)
                 match expected:
                     case TypeArrow(param_type, ret_type):
-                        # If there's an annotation, unify with expected
+                        # LAM-ANN-SCOPE: If there's an annotation with forall-bound vars,
+                        # extend context with those vars before checking body
+                        # Rule: Γ, ā ⊢ σ type  Γ, x:σ, ā ⊢ e ⇐ σᵣ  where σ = ∀ā.ρ
+                        # ---------------------------------------------------------
+                        # Γ ⊢ λ(x::σ). e ⇐ σ → σᵣ
+                        body_ctx = ctx
                         if var_type is not None:
+                            # Extract forall vars from param annotation
+                            param_vars = _collect_surface_forall_vars(var_type)
+                            # Extend context with param's forall vars for body checking
+                            for pv in param_vars:
+                                body_ctx = body_ctx.extend_type(pv)
+
+                            # Convert annotation with original context (param position)
                             ann_type = self._surface_to_core_type(var_type, ctx)
                             ann_type = self._apply_subst(ann_type)
                             param_type = self._apply_subst(param_type)
                             self._unify(ann_type, param_type, location)
 
-                        # Extend context and check body
-                        new_ctx = ctx.extend_term(param_type)
+                        # Extend context with parameter and check body (with forall vars in scope)
+                        new_ctx = body_ctx.extend_term(param_type)
                         core_body = self.check(body, ret_type, new_ctx)
 
                         final_param_type = self._apply_subst(param_type)
@@ -708,12 +774,17 @@ class BidiInference:
 
                     case TMeta() as meta:
                         # Unknown expected type - infer lambda type
+                        # LAM-ANN-SCOPE: Extend context with forall vars BEFORE converting annotation
+                        body_ctx = ctx
                         if var_type is not None:
-                            param_type = self._surface_to_core_type(var_type, ctx)
+                            param_vars = _collect_surface_forall_vars(var_type)
+                            for pv in param_vars:
+                                body_ctx = body_ctx.extend_type(pv)
+                            param_type = self._surface_to_core_type(var_type, body_ctx)
                         else:
                             param_type = self._fresh_meta(var_name)
 
-                        new_ctx = ctx.extend_term(param_type)
+                        new_ctx = body_ctx.extend_term(param_type)
                         core_body, body_type = self.infer(body, new_ctx)
 
                         # Build arrow and unify with meta
@@ -864,16 +935,23 @@ class BidiInference:
 
         if constr_name in ctx.constructors:
             constr_type = ctx.constructors[constr_name]
-            # Instantiate polymorphic constructor type
-            constr_type = self._instantiate(constr_type)
-            constr_type = self._apply_subst(constr_type)
+            # PAT-POLY: Don't eagerly instantiate - preserve polymorphic arg types
+            # We need the original type for arg types, instantiated type for unification
+            original_constr_type = constr_type
+            instantiated_constr_type = self._instantiate(constr_type)
+            instantiated_constr_type = self._apply_subst(instantiated_constr_type)
 
-            # Extract argument types and result type from constructor
-            current = constr_type
+            # Extract argument types from ORIGINAL constructor type (preserves foralls)
+            current = original_constr_type
             while isinstance(current, TypeArrow):
                 arg_types.append(current.arg)
                 current = current.ret
-            result_type = current
+
+            # Extract result type from INSTANTIATED type (for unification with scrutinee)
+            current_inst = instantiated_constr_type
+            while isinstance(current_inst, TypeArrow):
+                current_inst = current_inst.ret
+            result_type = current_inst
 
             # Unify constructor result with scrutinee type
             self._unify(result_type, scrut_type, branch.location)
@@ -927,16 +1005,23 @@ class BidiInference:
 
         if constr_name in ctx.constructors:
             constr_type = ctx.constructors[constr_name]
-            # Instantiate polymorphic constructor type
-            constr_type = self._instantiate(constr_type)
-            constr_type = self._apply_subst(constr_type)
+            # PAT-POLY: Don't eagerly instantiate - preserve polymorphic arg types
+            # We need the original type for arg types, instantiated type for unification
+            original_constr_type = constr_type
+            instantiated_constr_type = self._instantiate(constr_type)
+            instantiated_constr_type = self._apply_subst(instantiated_constr_type)
 
-            # Extract argument types and result type from constructor
-            current = constr_type
+            # Extract argument types from ORIGINAL constructor type (preserves foralls)
+            current = original_constr_type
             while isinstance(current, TypeArrow):
                 arg_types.append(current.arg)
                 current = current.ret
-            result_type = current
+
+            # Extract result type from INSTANTIATED type (for unification with scrutinee)
+            current_inst = instantiated_constr_type
+            while isinstance(current_inst, TypeArrow):
+                current_inst = current_inst.ret
+            result_type = current_inst
 
             # Unify constructor result with scrutinee type
             self._unify(result_type, scrut_type, branch.location)

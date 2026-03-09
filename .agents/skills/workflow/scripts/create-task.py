@@ -225,6 +225,9 @@ Examples:
 
     # Ensure tasks directory exists
     tasks_dir = Path(args.tasks_dir)
+    if tasks_dir.exists() and not tasks_dir.is_dir():
+        print(f"Error: tasks-dir '{tasks_dir}' exists but is not a directory", file=sys.stderr)
+        sys.exit(1)
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate next ID and filename

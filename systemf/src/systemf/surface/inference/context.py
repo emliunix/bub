@@ -16,6 +16,84 @@ from typing import Optional
 from systemf.core.types import Type, TypeArrow, TypeForall, TypeConstructor
 
 
+def collect_forall_vars(ty: Type) -> list[str]:
+    """Extract all forall-bound type variables from a type.
+
+    Traverses the type and collects all variables bound by forall quantifiers,
+    in order from outermost to innermost.
+
+    Args:
+        ty: The type to extract forall-bound variables from
+
+    Returns:
+        List of type variable names in order (outermost first)
+
+    Examples:
+        >>> from systemf.core.types import TypeVar
+        >>> # forall a. a -> a
+        >>> ty1 = TypeForall("a", TypeArrow(TypeVar("a"), TypeVar("a")))
+        >>> collect_forall_vars(ty1)
+        ['a']
+        >>>
+        >>> # forall a. forall b. a -> b
+        >>> ty2 = TypeForall("a", TypeForall("b", TypeArrow(TypeVar("a"), TypeVar("b"))))
+        >>> collect_forall_vars(ty2)
+        ['a', 'b']
+        >>>
+        >>> # Int -> Int (no forall)
+        >>> ty3 = TypeArrow(TypeConstructor("Int", []), TypeConstructor("Int", []))
+        >>> collect_forall_vars(ty3)
+        []
+    """
+    vars: list[str] = []
+    current: Type = ty
+
+    while isinstance(current, TypeForall):
+        vars.append(current.var)
+        current = current.body
+
+    return vars
+
+
+def extend_with_forall_vars(ctx: TypeContext, ty: Type) -> TypeContext:
+    """Extend context with all forall-bound vars in type.
+
+    Extracts all forall-bound type variables from the type and extends
+    the context with them. The outermost forall becomes index 0 in the
+    resulting context.
+
+    Args:
+        ctx: The type context to extend
+        ty: The type containing forall quantifiers
+
+    Returns:
+        A new TypeContext with forall-bound vars added to type_vars
+
+    Examples:
+        >>> from systemf.core.types import TypeVar
+        >>> ctx = TypeContext()
+        >>>
+        >>> # forall a b. a -> b
+        >>> ty = TypeForall("a", TypeForall("b", TypeArrow(TypeVar("a"), TypeVar("b"))))
+        >>> new_ctx = extend_with_forall_vars(ctx, ty)
+        >>> new_ctx.lookup_type_var_index("a")
+        0
+        >>> new_ctx.lookup_type_var_index("b")
+        1
+    """
+    vars = collect_forall_vars(ty)
+    new_ctx = ctx
+
+    # Extend in reverse order because extend_type() prepends to the list
+    # (index 0). So if vars = ["a", "b", "c"] (outer to inner), we need
+    # to extend with "c" first, then "b", then "a" so that "a" ends up
+    # at index 0.
+    for var in reversed(vars):
+        new_ctx = new_ctx.extend_type(var, None)
+
+    return new_ctx
+
+
 @dataclass(frozen=True)
 class TypeContext:
     """Tracks type bindings and constraints during type elaboration.

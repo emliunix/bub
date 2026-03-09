@@ -14,7 +14,7 @@ from __future__ import annotations
 from systemf.core import ast as core
 from systemf.core.types import Type
 from systemf.surface.inference.bidi_inference import BidiInference
-from systemf.surface.inference.context import TypeContext
+from systemf.surface.inference.context import TypeContext, extend_with_forall_vars
 from systemf.surface.inference.errors import TypeError
 from systemf.surface.result import Err, Ok, Result
 from systemf.surface.types import SurfaceTermDeclaration
@@ -78,7 +78,9 @@ def elab_bodies_pass(
 
             if expected_type is not None:
                 # Check mode: we have expected type
-                core_body = bidi.check(decl.body, expected_type, type_ctx)
+                # DECL-SCOPE: Extend context with forall-bound vars from signature
+                scoped_ctx = extend_with_forall_vars(type_ctx, expected_type)
+                core_body = bidi.check(decl.body, expected_type, scoped_ctx)
                 inferred_type = expected_type
             else:
                 # Infer mode: no expected type
