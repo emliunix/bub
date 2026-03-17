@@ -210,16 +210,17 @@ TY = TypeBuilder()
 # tagless final style surface syntax
 
 REPR = TypeVar("REPR")
+NAME = TypeVar("NAME")
 
-class SyntaxDSL(Protocol[REPR]):
+class SyntaxDSL(Protocol[NAME, REPR]):
     def lit(self, value: Lit) -> REPR: ...
     # de brujin var
-    def dbi(self, dbi: int) -> REPR: ...
-    def lam(self, name: str, body: REPR) -> REPR: ...
-    def alam(self, name: str, sigma: Ty, body: REPR) -> REPR: ...
+    def var(self, name: NAME) -> REPR: ...
+    def lam(self, name: NAME, body: REPR) -> REPR: ...
+    def alam(self, name: NAME, sigma: Ty, body: REPR) -> REPR: ...
     def annot(self, expr: REPR, sigma: Ty) -> REPR: ...
     def app(self, fun: REPR, arg: REPR) -> REPR: ...
-    def let(self, name: str, expr: REPR, body: REPR) -> REPR: ...
+    def let(self, name: NAME, expr: REPR, body: REPR) -> REPR: ...
 
 # ---
 # runtime value
@@ -289,9 +290,32 @@ class CoreLet(CoreTm):
     expr_ty: Ty
     body: CoreTm
 
-class CoreBuilder:
+@dataclass
+class Id:
+    name: str
+    ty: Ty
+    uniq: int
+
+# ---
+# Core term builder protocol and implementation
+
+OUT = TypeVar("OUT")
+
+class SyntaxCore(Protocol[OUT]):
+    """Protocol for building core terms."""
+    def lit(self, value: Lit, ty: Ty) -> OUT: ...
+    def var(self, name: str, ty: Ty) -> OUT: ...
+    def tyapp(self, fun: OUT, tyarg: Ty) -> OUT: ...
+    def tylam(self, name: str, body: OUT) -> OUT: ...
+    def lam(self, name: str, ty: Ty, body: OUT) -> OUT: ...
+    def app(self, fun: OUT, arg: OUT) -> OUT: ...
+    def let(self, name: str, expr: OUT, expr_ty: Ty, body: OUT) -> OUT: ...
+
+
+class CoreBuilder(SyntaxCore[CoreTm]):
     """
     A builder for constructing core terms, directly derived from CoreTm dataclasses.
+    Implements SyntaxCore[CoreTm].
     """
     def lit(self, value: Lit, ty: Ty) -> CoreTm:
         return CoreLit(value, ty)
@@ -311,5 +335,142 @@ class CoreBuilder:
 # A convenience variable for the core builder.
 C = CoreBuilder()
 
+# ---
+# Unit core builder for type-checking only
+
+class UnitCore:
+    """A core builder that just returns None - for type checking only."""
+    def lit(self, value: Lit, ty: Ty) -> None:
+        return None
+    def lam(self, name: str, ty: Ty, body: None) -> None:
+        return None
+    def app(self, fun: None, arg: None) -> None:
+        return None
+
+
+# ---
+# Wrapper
+#
+# like HsWrapper, the translation snippets from Surface to Core
+# produced by type inference
+#
+class Wrapper: ...
+
+@dataclass
+class WpHole(Wrapper): ...
+
+WP_HOLE = WpHole()
+
+@dataclass
+class WpCast(Wrapper):
+    """
+    A type cast wrapper.
+
+    TODO: I think it's just temporary to witness the fact that meta tv == some type.
+          which after type inference should be equivalent to WpHole. Needs confirmation.
+    """
+    ty_from: Ty
+    ty_to: Ty
+
+@dataclass
+class WpFun(Wrapper):
+    """
+    This wraps a function.
+    say it's e: a -> b, then builds: \\x:arg_ty -> wp_res (e (wp_arg x))
+    """
+    arg_ty: Ty
+    wp_arg: Wrapper
+    wp_res: Wrapper
+
+def mk_wp_eta(ty: Ty, wp_body: Wrapper) -> Wrapper:
+    """
+    Constructs Eta conversion wrapper with WpFun.
+    eg. a -> b -> c, wp_body creates \\x:a -> \\y:b -> wp_body (e x y)
+    binders are not relevant here, it's created and used all by us.
+    but should be not in fv(e)
+    """
+    # supose to be used in skolemise, but our skolemise process layer by layer
+    # so each layer it constructs it's own WpFun
+    def _go(ty: Ty) -> Wrapper:
+        match ty:
+            case TyFun(arg_ty, res_ty):
+                return WpFun(arg_ty, WP_HOLE, _go(res_ty))
+            case _:
+                return wp_body
+    return _go(ty)
+
+@dataclass
+class WpTyApp(Wrapper):
+    ty_arg: Ty
+
+@dataclass
+class WpTyLam(Wrapper):
+    ty_var: TyVar
+
+@dataclass
+class WpCompose(Wrapper):
+    """
+    apply f first, then g.
+    g . f
+    """
+    wp_g: Wrapper
+    wp_f: Wrapper
+
+def zonk_wrapper(wp: Wrapper) -> Wrapper:
+    match wp:
+        case WpCompose(wp_g, wp_f):
+            return WpCompose(zonk_wrapper(wp_g), zonk_wrapper(wp_f))
+        case WpFun(arg_ty, wp_arg, wp_res):
+            return WpFun(zonk_type(arg_ty), zonk_wrapper(wp_arg), zonk_wrapper(wp_res))
+        case WpTyApp(ty_arg):
+            return WpTyApp(zonk_type(ty_arg))
+        case WpCast(ty_from, ty_to):
+            return WpCast(zonk_type(ty_from), zonk_type(ty_to))
+        case _:
+            return wp
+
+def run_wrapper(wp: Wrapper, sytx: SyntaxCore[OUT], e: OUT) -> OUT:
+    # TODO: fix dummy names
+    def _go(wp, e):
+        match wp:
+            case WpHole():
+                return e
+            case WpCast(ty_from, ty_to):
+                 # FIX
+                return sytx.cast(e, ty_from, ty_to)
+            case WpFun(arg_ty, wp_arg, wp_res):
+                arg = _go(wp_arg, e)
+                res = _go(wp_res, sytx.app(e, arg))
+                 # FIX
+                return sytx.lam("dummy", arg_ty, res)
+            case WpTyApp(ty_arg):
+                # FIX
+                return sytx.ty_app(e, ty_arg)
+            case WpTyLam(ty_var):
+                # FIX
+                return sytx.ty_lam(ty_var, e)
+            case WpCompose(wp_g, wp_f):
+                return _go(wp_g, _go(wp_f, e))
+    return _go(wp, e)
+
+# ---
+# misc
+#
+
 class TyCkException(Exception):
     pass
+
+@dataclass
+class Cons[T]:
+    fst: T
+    snd: Cons[T] | None
+
+    def to_list(self) -> list[T]:
+        def _go(xs: Cons[T]) -> Generator[T, None, None]:
+            yield xs.fst
+            if xs.snd:
+                yield from _go(xs.snd)
+        return list(_go(self))
+
+def cons(x: T, xs: Cons[T] | None) -> Cons[T]:
+    return Cons(x, xs)

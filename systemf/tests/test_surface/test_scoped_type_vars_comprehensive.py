@@ -99,10 +99,7 @@ useBox :: PolyBox -> Int =
 class TestIntegration:
     """Integration tests."""
 
-    @pytest.mark.xfail(
-        reason="Complex integration case - let binding with polymorphic lambda needs further debugging"
-    )
-    def test_full_pipeline(self):
+    def test_full_pipeline_debug(self):
         """Complete example with all features."""
         source = """
 data PolyBox = PolyBox (forall a. a -> a)

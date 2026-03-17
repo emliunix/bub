@@ -1,8 +1,8 @@
 import itertools
 from typing import Callable
 
-from systemf.elab2.tyck import TyCk, TyCkImpl, allnames, quantify
-from systemf.elab2.types import INT, TY, Lit, LitInt, SyntaxDSL, Ty, zonk_type
+from systemf.elab2.tyck import Defer, TyCk, TyCkImpl, allnames, quantify, run_infer
+from systemf.elab2.types import C, INT, TY, CoreTm, Lit, LitInt, SyntaxDSL, Ty, zonk_type
 
 # ---
 # test subsumption check
@@ -78,10 +78,14 @@ def test_allnames():
 # - let id = \x -> x in id i => Int
 #
 
+type TyCkCore = TyCk[Defer[CoreTm]]
 
-def typecheck_entry(expr: Callable[[SyntaxDSL[TyCk]], TyCk], ty: Ty):
-    impl = TyCkImpl()
-    assert zonk_type(impl.poly(expr(impl)).infer(None)) == ty
+def typecheck_entry(expr: Callable[[SyntaxDSL[str, TyCkCore]], TyCkCore], ty: Ty):
+    impl = TyCkImpl(C)
+    # New style: poly returns a TyCk, use with_infer to get the type
+    poly_term = impl.poly(expr(impl))
+    run_infer(None, poly_term)
+    assert zonk_type() == ty
 
 
 def test_tyck_lit():
