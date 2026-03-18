@@ -6,11 +6,11 @@ import itertools
 from typing import Callable, TypeVar, cast, override
 
 from systemf.elab2.types import (
-    SyntaxCoreSubst, Ty, TY, TyForall, TyFun, TyVar, INT,
+    SyntaxCoreSubst, Ty, TY, TyCkException, TyForall, TyFun, TyVar, INT,
     BoundTv, MetaTv, OUT, Ref, SkolemTv, SyntaxCore, SyntaxDSL, WpTyApp,
     Wrapper, WpCast, WpFun, WpTyLam, WpCompose, WP_HOLE,
     Cons, cons, Lit,
-    get_free_vars, get_meta_vars, mk_wp_ty_lams, run_wrapper, subst_ty, varnames,
+    get_free_vars, get_meta_vars, mk_wp_ty_lams, run_wrapper, subst_ty, varnames, wp_compose, wp_fun,
     zonk_type, zonk_wrapper
 )
 from systemf.elab2.unify import functools, unify
@@ -63,7 +63,7 @@ def run_infer(env: Env, term: TyCk[OUT]) -> tuple[Ty, OUT]:
     out = term(env, Infer(ref))
     ty = ref.get()
     if ty is None:
-        raise TypeError("Inference failed")
+        raise TyCkException("Inference failed")
     return ty, out
 
 # ---
@@ -88,7 +88,7 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
                     ref.set(value.ty)
                 case Check(ty):
                     if ty != value.ty:
-                        raise TypeError(f"Expected {value.ty}, got {ty}")
+                        raise TyCkException(f"Expected {value.ty}, got {ty}")
                 case _:
                     raise Exception("impossible")
             return lambda: self.core.lit(value)
@@ -215,9 +215,9 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
                     # Check skolem var escape
                     env_tys = env_types(env)
                     env_tvs = get_free_vars([ty2] + env_tys)
-                    esc_tvs = set(sks).difference(env_tvs)
+                    esc_tvs = set(sks).intersection(env_tvs)
                     if esc_tvs:
-                        raise TypeError(f"Skolem var escapes: {esc_tvs}")
+                        raise TyCkException(f"Skolem var escapes: {esc_tvs}")
                     return self.with_wrapper(sk_wrap, e)
                 case _:
                     raise Exception("impossible")
@@ -250,17 +250,18 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
         sks, rho2, sks_wrap = self.skolemise(sigma2)
         subs_wrap = self.subs_check_rho(sigma1, rho2)  # sigma1 inst-to rho2
         # check skolem var escape
-        esc_tvs = set(sks).difference(get_free_vars([sigma1, sigma2]))
+        # this is more like a covering test, that skolem vars are all used
+        esc_tvs = set(sks).intersection(get_free_vars([sigma1, sigma2]))
         if esc_tvs:
-            raise TypeError(f"Skolem var  escapes: {esc_tvs}")
-        return WpCompose(sks_wrap, subs_wrap)
+            raise TyCkException(f"Skolem var  escapes: {esc_tvs}")
+        return wp_compose(sks_wrap, subs_wrap)
 
     def subs_check_rho(self, sigma: Ty, rho: Ty) -> Wrapper:
         match (sigma, rho):
             case (TyForall(), _):          # DSK/SPEC
                 in_rho, in_wrap = self.instantiate(sigma)
                 res_wrap = self.subs_check_rho(in_rho, rho)
-                return WpCompose(res_wrap, in_wrap)
+                return wp_compose(res_wrap, in_wrap)
             case (rho1, TyFun(a2, r2)):    # DSK/FUN
                 (a1, r1) = self.unify_fun(rho1)
                 return self.subs_check_fun(a1, r1, a2, r2)
@@ -277,7 +278,7 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
         # r1 -> r2
         res_wrap = self.subs_check_rho(r1, r2) # covariant
         # a2 -> r2
-        return WpFun(a2, arg_wrap, res_wrap)
+        return wp_fun(a2, arg_wrap, res_wrap)
 
     # ---
     # uniq vars
@@ -309,13 +310,13 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
                 sks1 = [self.make_skolem(name) for name in varnames(tvs)]
                 sks2, ty2, sk_wrap = self.skolemise(subst_ty(tvs, sks1, body))
                 # /\sk1. /\sk2. ... /\ skn. sk_wrap body
-                res_wrap = reduce(lambda acc, w: WpCompose(WpTyLam(w), acc), reversed(sks1), sk_wrap)
+                res_wrap = reduce(lambda acc, w: wp_compose(WpTyLam(w), acc), reversed(sks1), sk_wrap)
                 return sks1 + sks2, ty2, res_wrap
             case TyFun(arg_ty, res_ty):
                 sks, res_ty2, wrap = self.skolemise(res_ty)
                 # a -> rho
                 # => a -> sigma
-                res_wrap = WpFun(arg_ty, WP_HOLE, wrap)
+                res_wrap = wp_fun(arg_ty, WP_HOLE, wrap)
                 return sks, TY.fun(arg_ty, res_ty2), res_wrap
             case _:
                 # TODO: subst_ty _ ty for type constructor
@@ -380,6 +381,9 @@ def quantify(tvs: list[MetaTv], ty: Ty) -> tuple[list[TyVar], Ty]:
     """
     Quantify a type over a list of meta type variables.
     """
+    if not tvs:
+        return [], ty
+
     used_names = varnames(binders_of_ty(ty))
     binders: list[TyVar] = list(itertools.islice(
         (BoundTv(n) for n in allnames() if n not in used_names),

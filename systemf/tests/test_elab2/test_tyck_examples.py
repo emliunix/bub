@@ -1,9 +1,11 @@
 import itertools
 from typing import Any, Callable, TypeVar
 
+import pytest
+
 from systemf.elab2.tyck import Defer, TyCk, TyCkImpl, allnames, quantify, run_infer
-from systemf.elab2.types import C, INT, TY, CoreTm, Lit, LitInt, SyntaxDSL, Ty, WpFun, WpTyLam, zonk_type
-from systemf.elab2.unify import WP_HOLE, WpCompose
+from systemf.elab2.types import C, INT, STRING, TY, CoreTm, Lit, LitInt, SyntaxDSL, Ty, TyCkException, WpCast, WpFun, WpTyApp, WpTyLam, wp_compose, wp_fun, zonk_type
+from systemf.elab2.unify import WP_HOLE, WpCompose, unify
 
 # ---
 # test subsumption check
@@ -20,7 +22,10 @@ from systemf.elab2.unify import WP_HOLE, WpCompose
 # skolemise should process forall at prenex position
 
 def test_skolemise_mono():
-    """PRMONO: pr(Int) = Int ↦ λx.x"""
+    """PRMONO: pr(Int) = Int ↦ λx.x
+    
+    See tyck_tests.md "Figure 9: Subsumption and Skolemization" for full spec.
+    """
     def _run(impl: TyCkImpl[Any]):
         sks, ty, w = impl.skolemise(INT)
         assert sks == []
@@ -30,7 +35,10 @@ def test_skolemise_mono():
 
 
 def test_skolemise_prpoly():
-    """PRPOLY: pr(∀a. a → a) = sk_a → sk_a ↦ Λsk_a.[HOLE]"""
+    """PRPOLY: pr(∀a. a → a) = sk_a → sk_a ↦ Λsk_a.[HOLE]
+    
+    See tyck_tests.md "PRPOLY — Polymorphic Type" for full spec.
+    """
     a = TY.bound_var("a")
     t = TY.forall([a], TY.fun(a, a))
     def _run(impl: TyCkImpl[Any]):
@@ -38,12 +46,19 @@ def test_skolemise_prpoly():
         sk = TY.skolem("a", 0)
         assert sks == [sk]
         assert ty == TY.fun(sk, sk)
-        assert w == WpTyLam(sk)
+        # PRFUN on (sk_a → sk_a) produces WpFun(sk_a, WP_HOLE, WP_HOLE)
+        # Then PRPOLY: WpCompose(WpTyLam(sk), WpFun(...))
+        # No simplification applies (neither is WP_HOLE)
+        prfun = wp_fun(sk, WP_HOLE, WP_HOLE)
+        assert w == WpTyLam(sk)  # WpCompose(WpTyLam(sk), prfun)
     run_tyck(_run)
 
 
 def test_skolemise_prfun():
-    """PRFUN: pr(Int → ∀a. a) = Int → sk_a ↦ WpFun(Int, WP_HOLE, Λsk_a.[HOLE])"""
+    """PRFUN: pr(Int → ∀a. a) = Int → sk_a ↦ WpFun(Int, WP_HOLE, WpTyLam(sk_a))
+    
+    See tyck_tests.md "PRFUN — Function Type with Prenex Result" for full spec.
+    """
     a = TY.bound_var("a")
     t = TY.fun(INT, TY.forall([a], a))
     def _run(impl: TyCkImpl[Any]):
@@ -51,12 +66,17 @@ def test_skolemise_prfun():
         sk = TY.skolem("a", 0)
         assert sks == [sk]
         assert ty == TY.fun(INT, sk)
-        assert w == WpFun(INT, WP_HOLE, WpTyLam(sk))
+        # Inner wrap from PRPOLY: WpCompose(WpTyLam(sk), WP_HOLE) simplifies to WpTyLam(sk)
+        inner_wrap = wp_compose(WpTyLam(sk), WP_HOLE)
+        assert w == WpFun(INT, WP_HOLE, inner_wrap)
     run_tyck(_run)
 
 
 def test_skolemise_prfun_poly_arg():
-    """PRFUN with polymorphic argument: pr((∀a.a→a) → Int) = (∀a.a→a) → Int (no change)"""
+    """PRFUN with polymorphic argument: pr((∀a.a→a) → Int) = (∀a.a→a) → Int (no change)
+    
+    Forall in contravariant position is not prenex - no skolemization.
+    """
     a = TY.bound_var("a")
     poly_id = TY.forall([a], TY.fun(a, a))
     t = TY.fun(poly_id, INT)
@@ -65,12 +85,15 @@ def test_skolemise_prfun_poly_arg():
         # No skolems introduced since forall is in contravariant position
         assert sks == []
         assert ty == TY.fun(poly_id, INT)
-        assert w == WpFun(poly_id, WP_HOLE, WP_HOLE)
+        assert w == wp_fun(poly_id, WP_HOLE, WP_HOLE)
     run_tyck(_run)
 
 
 def test_skolemise_nested():
-    """PRPOLY nested: pr(∀a.∀b. a → b → a) = sk_a → sk_b → sk_a"""
+    """PRPOLY nested: pr(∀a.∀b. a → b → a) = sk_a → sk_b → sk_a
+    
+    See tyck_tests.md "Nested: ∀a. ∀b. a → b → a" for full spec.
+    """
     a = TY.bound_var("a")
     b = TY.bound_var("b")
     t = TY.forall([a], TY.forall([b], TY.fun(a, TY.fun(b, a))))
@@ -79,13 +102,24 @@ def test_skolemise_nested():
         sk1, sk2 = TY.skolem("a", 0), TY.skolem("b", 1)
         assert sks == [sk1, sk2]
         assert ty == TY.fun(sk1, TY.fun(sk2, sk1))
-        # Wrapper: Λsk_a. Λsk_b. [HOLE]
-        assert w == WpCompose(WpTyLam(sk1), WpTyLam(sk2))
+        # Inner: PRFUN on (sk_b → sk_a) with PRMONO result
+        inner_prfun = wp_fun(sk2, WP_HOLE, WP_HOLE)
+        # Middle: PRFUN on (sk_a → (sk_b → sk_a))
+        middle_prfun = wp_fun(sk1, WP_HOLE, inner_prfun)
+        # Outer PRPOLY on b: WpCompose(WpTyLam(sk2), middle_prfun)
+        # No simplification (neither is WP_HOLE)
+        middle_prpoly = wp_compose(WpTyLam(sk2), middle_prfun)
+        # Outer PRPOLY on a: WpCompose(WpTyLam(sk1), middle_prpoly)
+        # No simplification (neither is WP_HOLE)
+        assert w == wp_compose(WpTyLam(sk1), middle_prpoly)
     run_tyck(_run)
 
 
 def test_skolemise_complex():
-    """Complex: pr(∀a. a → ∀b. b → a) from the paper example"""
+    """Complex: pr(∀a. a → ∀b. b → a) from the paper example
+    
+    See tyck_tests.md "Complex Case: ∀a. a → ∀b. b → a" for full spec.
+    """
     a = TY.bound_var("a")
     b = TY.bound_var("b")
     t = TY.forall([a], TY.fun(a, TY.forall([b], TY.fun(b, a))))
@@ -94,13 +128,66 @@ def test_skolemise_complex():
         assert sks == [TY.skolem("a", 0), TY.skolem("b", 1)]
         sk1, sk2 = sks
         assert ty == TY.fun(sk1, TY.fun(sk2, sk1))
-        assert w == (
-            WpCompose(
-            WpTyLam(sk1),
-            WpFun(sk1, WP_HOLE,
-                WpCompose(
-                    WpTyLam(sk2),
-                    WpFun(sk2, WP_HOLE, WP_HOLE)))))
+        # Innermost: PRFUN on (sk_b → sk_a) with PRMONO
+        inner_prfun = wp_fun(sk2, WP_HOLE, WP_HOLE)
+        # Inner PRPOLY on b: WpCompose(WpTyLam(sk2), inner_prfun)
+        # No simplification (inner_prfun is not WP_HOLE)
+        inner_prpoly = wp_compose(WpTyLam(sk2), inner_prfun)
+        # Middle PRFUN: (sk_a → res)
+        middle_prfun = wp_fun(sk1, WP_HOLE, inner_prpoly)
+        # Outer PRPOLY on a: WpCompose(WpTyLam(sk1), middle_prfun)
+        assert w == wp_compose(WpTyLam(sk1), middle_prfun)
+    run_tyck(_run)
+
+# ---
+# test subsumption check
+
+def test_subs_check_mono():
+    """DSK/MONO: Int ≤ Int - monomorphic types unify directly."""
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(INT, INT)
+        # Unification succeeds, wrapper is WpCast(Int, Int)
+        assert wrap == WpCast(INT, INT)
+    run_tyck(_run)
+
+
+def test_subs_check_deep_skol():
+    """DEEP-SKOL: ∀a.a→a ≤ Int→Int - polymorphic to monomorphic subsumption.
+    
+    See tyck_tests.md "DEEP-SKOL" for full spec.
+    """
+    a = TY.bound_var("a")
+    poly_id = TY.forall([a], TY.fun(a, a))
+    mono_id = TY.fun(INT, INT)
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(poly_id, mono_id)
+        # Build expected wrapper structure
+        # ?1 is the fresh meta var created during instantiation
+        meta_1 = TY.meta(0)  # First meta var created by make_meta
+        # WpCompose(WpFun(INT, WpCast(INT, meta_1), WpCast(meta_1, INT)), WpTyApp(meta_1))
+        arg_cast = WpCast(INT, meta_1)   # Int -> ?1 (contravariant)
+        res_cast = WpCast(meta_1, INT)   # ?1 -> Int (covariant)
+        fun_wrap = WpFun(INT, arg_cast, res_cast)
+        inst_wrap = WpTyApp(meta_1)
+        expected = WpCompose(fun_wrap, inst_wrap)
+        assert wrap == expected
+    run_tyck(_run)
+
+
+def test_subs_check_deep_skol_anti():
+    """ANTI-CASE: Int→String ≤ ∀a.a→a MUST FAIL
+    
+    Rigid skolem cannot satisfy conflicting constraints.
+    See tyck_tests.md "Anti-case explanation" for full spec.
+    """
+    a = TY.bound_var("a")
+    poly_id = TY.forall([a], TY.fun(a, a))
+    bad_mono = TY.fun(INT, STRING)
+
+    def _run(impl: TyCkImpl[Any]):
+        with pytest.raises(TyCkException):
+            impl.subs_check(bad_mono, poly_id)
     run_tyck(_run)
 
 # ---

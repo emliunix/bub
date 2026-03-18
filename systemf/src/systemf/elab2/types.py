@@ -413,6 +413,11 @@ class WpFun(Wrapper):
     wp_arg: Wrapper
     wp_res: Wrapper
 
+def wp_fun(arg_ty: Ty, wp_arg: Wrapper, wp_res: Wrapper) -> Wrapper:
+    if wp_arg == WP_HOLE and wp_res == WP_HOLE:
+        return WP_HOLE
+    return WpFun(arg_ty, wp_arg, wp_res)
+
 def mk_wp_eta(ty: Ty, wp_body: Wrapper) -> Wrapper:
     """
     Constructs Eta conversion wrapper with WpFun.
@@ -425,7 +430,7 @@ def mk_wp_eta(ty: Ty, wp_body: Wrapper) -> Wrapper:
     def _go(ty: Ty) -> Wrapper:
         match ty:
             case TyFun(arg_ty, res_ty):
-                return WpFun(arg_ty, WP_HOLE, _go(res_ty))
+                return wp_fun(arg_ty, WP_HOLE, _go(res_ty))
             case _:
                 return wp_body
     return _go(ty)
@@ -451,6 +456,16 @@ class WpCompose(Wrapper):
     """
     wp_g: Wrapper
     wp_f: Wrapper
+
+def wp_compose(wp_g: Wrapper, wp_f: Wrapper) -> Wrapper:
+    """
+    Smart WpCompose that simplifies WP_HOLE cases.
+    """
+    if wp_g == WP_HOLE:
+        return wp_f
+    if wp_f == WP_HOLE:
+        return wp_g
+    return WpCompose(wp_g, wp_f)
 
 def zonk_wrapper(wp: Wrapper) -> Wrapper:
     match wp:

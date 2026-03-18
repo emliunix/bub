@@ -12,216 +12,81 @@ Based on "Practical Type Inference for Arbitrary-Rank Types" (Peyton Jones et al
 
 ---
 
-## Figure 8: Bidirectional Type Checking Rules
+## Meta Variables vs Skolem Variables
 
-### 1. INT — Integer Literal
+This is a **critical distinction** in higher-rank type inference.
 
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ ⊢↑ n : Int` |
-| **Source** | `42` |
-| **Expected Type (Infer)** | `Int` |
-| **Core Term** | `42` |
-| **Wrapper** | `WP_HOLE` |
+### Meta Variables (`?1`, `?2`, ...)
 
-#### Test Case: INT with Instantiation
-| Aspect | Value |
-|--------|-------|
-| **Context** | `Γ ⊢↑ 42 : ρ` where expectation is `?1` (mono) |
-| **Unification** | `?1 = Int` |
-| **Result** | `42 : Int` |
+| Property | Description |
+|----------|-------------|
+| **Nature** | Unification variables (unknown types to be determined) |
+| **Behavior** | Can be **unified** with any type via substitution |
+| **Use Case** | Type inference for unknown types |
+| **Example** | Inferring `λx.x` creates `?1 → ?1`, then `?1` is generalized to `∀a.a→a` |
 
----
+**Key operation**: `unify(?1, Int)` succeeds by substituting `?1 ↦ Int`.
 
-### 2. VAR — Variable
+### Skolem Variables (`sk_a`, `sk_b`, ...)
 
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `x:σ ∈ Γ,  Γ ⊢inst_↑ σ ≤ ρ  /  Γ ⊢↑ x : ρ` |
-| **Source** | `x` where `x : ∀a. a → a` in Γ |
-| **Expected Type (Infer)** | `?1 → ?1` (after instantiation) |
-| **Core Term** | `x[?1]` (type application) |
-| **Wrapper** | `WpTyApp(?1)` |
+| Property | Description |
+|----------|-------------|
+| **Nature** | Rigid type constants (represent "some specific but unknown type") |
+| **Behavior** | **Cannot be unified** — they are rigid! |
+| **Use Case** | Checking polymorphic types (subsumption, skolemization) |
+| **Example** | Checking against `∀a.a→a` creates `sk_a → sk_a` where `sk_a` is rigid |
 
-#### Test Case: VAR with skolemization context
-| Aspect | Value |
-|--------|-------|
-| **Context** | `x : ∀a. a → a ∈ Γ`, expectation `sk_x → sk_x` |
-| **Instantiation** | `a ↦ sk_x` |
-| **Core Term** | `x[sk_x]` |
-| **Wrapper Chain** | `WP_HOLE` (already at target) |
+**Key operation**: `unify(sk_a, Int)` **FAILS** — `sk_a` is rigid and cannot be substituted.
 
----
+### Why the Distinction Matters
 
-### 3. ABS1 — Lambda (Infer Mode)
+**Meta variables** are for **inference** (discovering types):
+- `λx.x` infers as `?1 → ?1`
+- Later we learn `?1 = Int` from context
+- We substitute and get `Int → Int`
 
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ, x:τ ⊢↑ t : ρ  /  Γ ⊢↑ λx.t : τ → ρ` |
-| **Source** | `λx. x` |
-| **Expected Type (Infer)** | `?1 → ?1` |
-| **Unification** | `arg = ?1`, `res = ?1` (occurs check passes) |
-| **Core Term** | `λx:?1. x` |
-| **Wrapper** | `WP_HOLE` |
+**Skolem variables** are for **checking** (verifying subsumption):
+- Checking `Int → Int ≤ ∀a.a → a`
+- Skolemize: check `Int → Int ≤ sk_a → sk_a`
+- `sk_a` is rigid — we **cannot** set `sk_a = Int`
+- Instead, we check that `Int` and `sk_a` are **compatible as types**
+- The wrapper records this relationship
 
-#### Test Case: ABS1 with nested function
-| Aspect | Value |
-|--------|-------|
-| **Source** | `λf. λx. f x` |
-| **Inference** | `f : ?1`, need `?1 = ?2 → ?3`, `x : ?2`, body `?3` |
-| **Result Type** | `(?2 → ?3) → ?2 → ?3` |
-| **Core Term** | `λf:(?2→?3). λx:?2. f x` |
+### Common Mistake
 
----
+```python
+# WRONG: Thinking skolem can be unified
+sk_a = make_skolem("a")
+unify(sk_a, Int)  # ERROR: sk_a is rigid!
 
-### 4. ABS2 — Lambda (Check Mode)
+# CORRECT: Rigid equality check
+check_equal(sk_a, Int)  # Verifies they're the same type (post-zonking)
+```
 
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ, x:τ ⊢↓ t : ρ  /  Γ ⊢↓ λx.t : τ → ρ` |
-| **Source** | `λx. x` |
-| **Check Against** | `Int → Int` |
-| **Decomposition** | `arg_ty = Int`, `res_ty = Int` |
-| **Core Term** | `λx:Int. x` |
-| **Wrapper** | `WP_HOLE` |
+### Anti-Test: `test_skolem_cannot_unify`
 
-#### Test Case: ABS2 with polymorphic expectation
-| Aspect | Value |
-|--------|-------|
-| **Source** | `λx. x` |
-| **Check Against** | `∀a. a → a` |
-| **Skolemization** | `sk_a → sk_a` |
-| **Core Term** | `Λsk_a. λx:sk_a. x` |
-| **Note** | GEN2 applies, see below |
+This test verifies that unification **fails** with skolem variables:
+
+```python
+sk_a = make_skolem("a")
+unify(sk_a, Int)  # Raises TypeError: rigid type variable
+```
+
+**Expected behavior**: The type checker must throw an error when attempting to unify a skolem. This ensures the rigidity invariant is maintained.
+
+**Why this matters**: If skolems could be unified, the distinction between `?1` (inference) and `sk_a` (checking) would collapse, breaking higher-rank type inference.
+
+### In DEEP-SKOL
+
+When checking `σ₁ ≤ σ₂`:
+1. Skolemize `σ₂` to get `ρ₂` with skolems `ā`
+2. Check `σ₁ ≤ ρ₂` with **rigid equality** (not unification)
+3. The skolems represent the "forall-bound" positions
+4. Wrapper converts the witness from `ρ₂` back to `σ₂`
 
 ---
 
-### 5. AABS1 — Annotated Lambda (Infer)
-
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ, x:σ ⊢↑ t : ρ  /  Γ ⊢↑ (λx:σ.t) : σ → ρ` |
-| **Source** | `λx:Int. x` |
-| **Annotation** | `σ = Int` |
-| **Expected Type (Infer)** | `Int → Int` |
-| **Core Term** | `λx:Int. x` |
-
----
-
-### 6. AABS2 — Annotated Lambda (Check with Subsumption)
-
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ ⊢poly_↑ σ_a ≤ σ_x,  Γ, x:σ_x ⊢↓ t : ρ  /  Γ ⊢↓ (λx:σ_x.t) : σ_a → ρ` |
-| **Source** | `λx:(∀a.a→a). x` |
-| **Check Against** | `(Int→Int) → (Int→Int)` |
-| **Subsumption** | `Int→Int ≤ ∀a.a→a` — **FAILS!** (polymorphic type not subsumed by monomorphic) |
-| **Note** | Direction matters: `∀a.a→a ≤ Int→Int` succeeds |
-
-#### Test Case: AABS2 with coercion
-| Aspect | Value |
-|--------|-------|
-| **Source** | `λx:(Int→Int). x` |
-| **Check Against** | `(∀a.a→a) → (Int→Int)` |
-| **Subsumption** | `∀a.a→a ≤ Int→Int` (instantiate `a` to `Int`) |
-| **Wrapper** | `WpFun(∀a.a→a, WpTyApp(Int), WP_HOLE)` |
-| **Core Term** | `λx:(Int→Int). let d = x[Int] in λy:Int. d y` |
-
----
-
-### 7. APP — Application
-
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ ⊢↑ t : σ → σ',  Γ ⊢poly_↓ u : σ  /  Γ ⊢↑ t u : σ'` |
-| **Source** | `(λx:Int. x) 42` |
-| **Fun Type** | `Int → Int` |
-| **Arg Check** | `42` against `Int` |
-| **Result** | `Int` |
-| **Core Term** | `(λx:Int. x) 42` |
-
-#### Test Case: APP with polymorphic function
-| Aspect | Value |
-|--------|-------|
-| **Source** | `id 42` where `id : ∀a. a → a` |
-| **Fun Type** | `?1 → ?1` (after instantiation) |
-| **Unification** | `?1 = Int` |
-| **Arg Check** | `42` against `Int` |
-| **Result** | `Int` |
-| **Core Term** | `id[Int] 42` |
-
----
-
-### 8. ANNOT — Type Annotation
-
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ ⊢poly_↓ t : σ,  Γ ⊢inst_δ σ ≤ ρ  /  Γ ⊢δ t::σ : ρ` |
-| **Source** | `42 :: Int` |
-| **Annotation** | `σ = Int` |
-| **Check** | `42` against `Int` |
-| **Instantiation** | identity (already `Int`) |
-| **Core Term** | `42` |
-
-#### Test Case: ANNOT with polymorphic type
-| Aspect | Value |
-|--------|-------|
-| **Source** | `λx. x :: ∀a. a → a` |
-| **Check** | `λx. x` against `sk_a → sk_a` |
-| **Generalization** | `Λsk_a. λx:sk_a. x` |
-| **Wrapper** | `WpTyLam(sk_a)` |
-| **Result** | `Λsk_a. λx:sk_a. x : ∀a. a → a` |
-
----
-
-### 9. LET — Let Binding
-
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ ⊢poly_δ t : σ,  Γ, x:σ ⊢δ u : ρ  /  Γ ⊢δ let x=t in u : ρ` |
-| **Source** | `let id = λx. x in id 42` |
-| **id Type** | `∀a. a → a` (generalized) |
-| **Body Check** | `id 42` with `id : ∀a. a → a` |
-| **Core Term** | `let id : ∀a.a→a = (Λa. λx:a. x) in id[Int] 42` |
-
----
-
-### 10. GEN1 — Generalization (Infer)
-
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ ⊢↑ t : ρ,  ā = ftv(ρ) - ftv(Γ)  /  Γ ⊢↑ t : ∀ā.ρ` |
-| **Source** | `λx. x` (in empty Γ) |
-| **Inferred** | `?1 → ?1` where `?1` is unsolved |
-| **Generalization** | `∀a. a → a` (promote `?1` to `a`) |
-| **Core Term** | `Λa. λx:a. x` |
-| **Wrapper** | `WpTyLam(a)` |
-
----
-
-### 11. GEN2 — Generalization (Check)
-
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `pr(σ) = ∀ā.ρ ↦ f,  ā ∉ ftv(Γ),  Γ ⊢↓ t : ρ  /  Γ ⊢↓ t : σ ↦ f(Λā.e)` |
-| **Source** | `λx. x` |
-| **Check Against** | `∀a. a → a` |
-| **Skolemization** | `pr(∀a.a→a) = sk_a → sk_a` with `f = Λsk_a. [HOLE]` |
-| **Check Body** | `λx:sk_a. x` against `sk_a → sk_a` |
-| **Core Term** | `Λsk_a. λx:sk_a. x` |
-| **Wrapper Application** | `f(Λsk_a. e)` where `e = λx:sk_a. x`, result `Λsk_a. λx:sk_a. x` |
-
-#### Test Case: GEN2 with nested foralls
-| Aspect | Value |
-|--------|-------|
-| **Source** | `λf. λx. f x` |
-| **Check Against** | `∀a. (∀b. b→b) → a → a` |
-| **Skolemization** | `(∀b. b→b) → sk_a → sk_a` |
-| **Note** | The `∀b` remains in argument position (higher-rank) |
-
----
-
-## Figure 9: Subsumption and Skolemization
+## Figure 9: Subsumption and Skolemization (PR Rules)
 
 ### PRMONO — Monomorphic Type
 
@@ -229,151 +94,189 @@ Based on "Practical Type Inference for Arbitrary-Rank Types" (Peyton Jones et al
 |--------|-------|
 | **Rule** | `pr(τ) = τ ↦ λx.x` |
 | **Input** | `Int` |
-| **Output** | `([], Int, WP_HOLE)` |
-| **Wrapper Meaning** | `λx:Int. x` |
+| **Skolems** | `[]` |
+| **Output Type** | `Int` |
+| **Wrapper** | `WP_HOLE` |
+| **Test** | `test_skolemise_mono` |
 
 ---
 
 ### PRPOLY — Polymorphic Type
 
+#### Simple Case: `∀a. a → a`
+
 | Aspect | Value |
 |--------|-------|
-| **Rule** | `pr(∀a.ρ) = ∀a.pr(ρ)` with wrapper `Λa.f` |
+| **Rule** | `pr(∀a.ρ) = ∀a.pr(ρ)` with wrapper composition |
 | **Input** | `∀a. a → a` |
-| **Skolemization** | `sk_a → sk_a` |
-| **Wrapper** | `WpTyLam(sk_a)` |
-| **Wrapper Meaning** | `λx:(∀a.a→a). Λsk_a. x[sk_a]` |
+| **Skolems** | `[sk_a]` |
+| **Output Type** | `sk_a → sk_a` |
+| **Inner (PRFUN)** | `WpFun(sk_a, WP_HOLE, WP_HOLE)` |
+| **Outer (PRPOLY)** | `WpCompose(WpTyLam(sk_a), WpFun(...))` |
+| **Test** | `test_skolemise_prpoly` |
 
-#### Test Case: Nested PRPOLY
+#### Nested: `∀a. ∀b. a → b → a`
+
 | Aspect | Value |
 |--------|-------|
 | **Input** | `∀a. ∀b. a → b → a` |
-| **Skolemization** | `sk_a → sk_b → sk_a` |
 | **Skolems** | `[sk_a, sk_b]` |
-| **Wrapper** | `WpTyLam(sk_a) ∘ WpTyLam(sk_b)` |
-| **Wrapper Meaning** | `λx:(∀a.∀b.a→b→a). Λsk_a. Λsk_b. x[sk_a][sk_b]` |
+| **Output Type** | `sk_a → sk_b → sk_a` |
+| **Innermost** | `WpFun(sk_b, WP_HOLE, WP_HOLE)` (PRFUN on `sk_b → sk_a`) |
+| **Middle** | `WpFun(sk_a, WP_HOLE, inner)` (PRFUN on `sk_a → (sk_b → sk_a)`) |
+| **Wrapper** | `WpCompose(WpTyLam(sk_a), WpCompose(WpTyLam(sk_b), middle))` |
+| **Test** | `test_skolemise_nested` |
 
 ---
 
 ### PRFUN — Function Type with Prenex Result
 
+#### Case: `Int → ∀a. a`
+
 | Aspect | Value |
 |--------|-------|
 | **Rule** | `pr(σ₂) = ∀ā.ρ₂ ↦ f  /  pr(σ₁→σ₂) = ∀ā.(σ₁→ρ₂) ↦ λx.λy.f(x[ā]y)` |
 | **Input** | `Int → ∀a. a` |
-| **Skolemization** | `Int → sk_a` |
-| **Inner (PRPOLY)** | `pr(∀a.a) = sk_a` with `f = Λsk_a. [HOLE]` |
+| **Skolems** | `[sk_a]` |
+| **Output Type** | `Int → sk_a` |
+| **Inner (PRPOLY)** | `WpTyLam(sk_a)` (simplified from `WpCompose(WpTyLam(sk_a), WP_HOLE)`) |
 | **Wrapper** | `WpFun(Int, WP_HOLE, WpTyLam(sk_a))` |
-| **Wrapper Meaning** | `λg:(Int→sk_a). λy:Int. Λsk_a. g y` |
+| **Test** | `test_skolemise_prfun` |
 
-#### Test Case: PRFUN with forall in argument
+#### Case: `(∀a. a→a) → Int` (Polymorphic Argument)
+
 | Aspect | Value |
 |--------|-------|
 | **Input** | `(∀a. a→a) → Int` |
-| **Skolemization** | `(∀a. a→a) → Int` (no change, forall stays in arg) |
-| **Wrapper** | `WpFun(∀a.a→a, WP_HOLE, WP_HOLE)` |
-| **Note** | Contravariant position preserves polymorphism |
+| **Skolems** | `[]` (forall in contravariant position, not prenex) |
+| **Output Type** | `(∀a. a→a) → Int` (unchanged) |
+| **Wrapper** | `WpFun(∀a.a→a, WP_HOLE, WP_HOLE)` (identity) |
+| **Test** | `test_skolemise_prfun_poly_arg` |
 
 ---
 
-### DEEP-SKOL — Deep Skolemization
+### Complex Case: `∀a. a → ∀b. b → a`
 
 | Aspect | Value |
 |--------|-------|
-| **Rule** | `pr(σ₂) = ∀ā.ρ₂ ↦ f,  ā ∉ ftv(σ₁),  Γ,ā ⊢sub σ₁ ≤ ρ₂ ↦ e  /  Γ ⊢sub σ₁ ≤ σ₂ ↦ f(Λā.e)` |
-| **Input** | `Int → Int ≤ ∀a. a → a` |
-| **Skolemization** | `pr(∀a.a→a) = sk_a → sk_a` with `f = Λsk_a. [HOLE]` |
-| **Subsumption Check** | `Int → Int ≤ sk_a → sk_a` |
-| **Unification** | `sk_a = Int` (succeeds, skolem = Int) |
-| **Result Wrapper** | `Λsk_a. (λx. x)` — applied to `e` gives `Λsk_a. e` |
-
-#### Test Case: DEEP-SKOL with function
-| Aspect | Value |
-|--------|-------|
-| **Input** | `(∀a. a→a) → Int ≤ (∀b. b→b) → Int` |
-| **Skolemization (right)** | `(∀b. b→b) → Int` — no skolems introduced |
-| **Subsumption** | Check `(∀a. a→a) → Int ≤ (∀b. b→b) → Int` |
-| **Contravariant arg** | `(∀b. b→b) ≤ (∀a. a→a)` — succeeds (alpha equiv) |
-| **Covariant res** | `Int ≤ Int` — succeeds |
-| **Wrapper** | `WpFun((∀b.b→b), WP_HOLE, WP_HOLE)` |
+| **Input** | `∀a. a → ∀b. b → a` |
+| **Structure** | `∀a. (a → ∀b. (b → a))` |
+| **Skolems** | `[sk_a, sk_b]` |
+| **Output Type** | `sk_a → sk_b → sk_a` |
+| **Innermost** | `WpFun(sk_b, WP_HOLE, WP_HOLE)` (PRFUN on `sk_b → sk_a`) |
+| **Inner PRPOLY** | `WpCompose(WpTyLam(sk_b), innermost)` |
+| **Middle PRFUN** | `WpFun(sk_a, WP_HOLE, inner_prpoly)` |
+| **Outer PRPOLY** | `WpCompose(WpTyLam(sk_a), middle_prfun)` |
+| **Test** | `test_skolemise_complex` |
 
 ---
 
-### FUN — Function Subsumption
+## Wrapper Structure Summary
 
-| Aspect | Value |
-|--------|-------|
-| **Rule** | `Γ ⊢sub τ₂ ≤ σ₁ ↦ e₁,  Γ ⊢sub σ₁' ≤ τ₁ ↦ e₂  /  Γ ⊢sub σ₁→σ₁' ≤ τ₂→τ₂' ↦ λx.e₂(x(e₁))` |
-| **Input** | `(Int→Int) → Int ≤ (Int→Bool) → Int` |
-| **Contravariant arg** | `Int→Bool ≤ Int→Int` — **FAILS** (`Bool` not ≤ `Int`) |
-| **Note** | Contravariance reverses the order! |
+### Construction Rules
 
-#### Test Case: FUN success
-| Aspect | Value |
-|--------|-------|
-| **Input** | `Int → (∀a.a→a) ≤ Bool → (Int→Int)` |
-| **Contravariant arg** | `Bool ≤ Int` — **FAILS** |
-| **Fixed** | `(∀a.a→a) → Int ≤ (Int→Int) → Int` |
-| **Arg check** | `Int→Int ≤ ∀a.a→a` — instantiate `a` to `Int` |
-| **Res check** | `Int ≤ Int` — ok |
-| **Wrapper** | `WpFun((Int→Int), WpTyApp(Int), WP_HOLE)` |
+```
+PRMONO(τ):     WP_HOLE
 
----
+PRPOLY(∀a.ρ):  WpCompose(WpTyLam(sk_a), inner_wrap)
+               where inner_wrap = pr(ρ)[sk_a/a]
 
-## Complex Integration Tests
+PRFUN(σ₁→σ₂):  WpFun(σ₁, WP_HOLE, inner_wrap)
+               where inner_wrap = pr(σ₂) if σ₂ has prenex foralls
+```
 
-### Higher-Rank Function Application
+### Simplification Rule
 
-| Aspect | Value |
-|--------|-------|
-| **Source** | `runInt (λx:Int. x + 1)` where `runInt : (∀a. a→a) → Int` |
-| **Fun Type** | `(∀a. a→a) → Int` |
-| **Arg Type** | `Int → Int` |
-| **Subsumption** | `Int→Int ≤ ∀a.a→a` — instantiate `a` to `Int` |
-| **Arg Wrapper** | `WpTyApp(Int)` on the forall-bound function |
-| **Core Term** | `runInt (Λa. λx:a. (λy:Int. y+1) (x[Int] (coerce...)))` |
-| **Note** | Complex coercion required |
+After construction, `WpCompose` is simplified:
+- `WpCompose(w, WP_HOLE)` → `w`
+- `WpCompose(WP_HOLE, w)` → `w`
 
-### Nested Polymorphism
+This ensures minimal wrapper representation while preserving correctness.
 
-| Aspect | Value |
-|--------|-------|
-| **Source** | `choose (λx. x) (λx. x) :: ∀a. a → a` |
-| **where** | `choose : ∀a. a → a → a` |
-| **Inference** | Both args have type `?1 → ?1`, unified |
-| **Generalization** | `∀a. a → a` for both args |
-| **Result** | `∀a. a → a` |
+### Examples with Simplification
 
-### Impredicative Instantiation
-
-| Aspect | Value |
-|--------|-------|
-| **Source** | `id (id :: ∀a. a → a)` |
-| **Outer id** | `?1 → ?1` |
-| **Arg type** | `∀a. a → a` |
-| **Unification** | `?1 = ∀a. a → a` — **higher-rank unification!** |
-| **Note** | Requires higher-rank types support |
+| Type | Before Simplification | After Simplification |
+|------|----------------------|----------------------|
+| `∀a. a` | `WpCompose(WpTyLam(sk_a), WP_HOLE)` | `WpTyLam(sk_a)` |
+| `Int → ∀a. a` | `WpFun(Int, WP_HOLE, WpCompose(WpTyLam(sk_a), WP_HOLE))` | `WpFun(Int, WP_HOLE, WpTyLam(sk_a))` |
+| `∀a. a → a` | `WpCompose(WpTyLam(sk_a), WpFun(sk_a, WP_HOLE, WP_HOLE))` | *unchanged* (no WP_HOLE)
 
 ---
 
-## Summary Table: Rules to Implement
+## Figure 8: Bidirectional Type Checking Rules (To Be Implemented)
 
-| Rule | Implementation Status | Test Coverage |
-|------|----------------------|---------------|
-| INT | ✅ | `test_int_literal` |
-| VAR | ✅ | `test_var_mono`, `test_var_poly` |
-| ABS1 | ✅ | `test_lam_infer` |
-| ABS2 | ✅ | `test_lam_check` |
-| AABS1 | ✅ | `test_ann_lam_infer` |
-| AABS2 | ✅ | `test_ann_lam_coercion` |
-| APP | ✅ | `test_app_mono`, `test_app_poly` |
-| ANNOT | ✅ | `test_annot_simple`, `test_annot_poly` |
-| LET | ✅ | `test_let_poly` |
-| GEN1 | ✅ | `test_gen_infer` |
-| GEN2 | ✅ | `test_gen_check` |
-| PRMONO | ✅ | `test_skolem_mono` |
-| PRPOLY | ✅ | `test_skolem_poly` |
-| PRFUN | ✅ | `test_skolem_fun` |
-| DEEP-SKOL | ✅ | `test_subs_poly` |
-| FUN | ✅ | `test_subs_fun_contravariant` |
-| MONO | ✅ | `test_subs_mono` |
+### INT — Integer Literal
+| Source | Expected | Core Term | Wrapper |
+|--------|----------|-----------|---------|
+| `42` | `Int` | `42` | `WP_HOLE` |
+
+### VAR — Variable
+| Context | Source | Expected | Core Term |
+|---------|--------|----------|-----------|
+| `x:∀a.a→a ∈ Γ` | `x` | `?1→?1` | `x[?1]` |
+
+### ABS1/ABS2 — Lambda
+| Mode | Source | Check Against | Core Term |
+|------|--------|---------------|-----------|
+| Infer | `λx.x` | — | `λx:?1.x` |
+| Check | `λx.x` | `Int→Int` | `λx:Int.x` |
+
+### AABS1/AABS2 — Annotated Lambda
+| Mode | Source | Annotation | Result |
+|------|--------|------------|--------|
+| Infer | `λx:Int.x` | `Int` | `Int→Int` |
+| Check | `λx:(Int→Int).x` | `Int→Int` | coercion via subsumption |
+
+### APP — Application
+| Source | Fun Type | Arg | Result |
+|--------|----------|-----|--------|
+| `id 42` | `?1→?1` | `42:Int` | `Int`, core: `id[Int] 42` |
+
+### ANNOT — Type Annotation
+| Source | Annotation | Check | Core Term |
+|--------|------------|-------|-----------|
+| `λx.x :: ∀a.a→a` | `∀a.a→a` | `sk_a→sk_a` | `Λsk_a.λx:sk_a.x` |
+
+### LET — Let Binding
+| Source | Binding | Body | Result |
+|--------|---------|------|--------|
+| `let id=λx.x in id 42` | `id:∀a.a→a` | `id 42` | `Int` |
+
+### GEN1/GEN2 — Generalization
+| Mode | Source | Context | Result |
+|------|--------|---------|--------|
+| GEN1 | `λx.x` | `ftv(Γ)=∅` | `∀a.a→a` with `Λa.λx:a.x` |
+| GEN2 | `λx.x` | Check `∀a.a→a` | `Λsk_a.λx:sk_a.x` via skolemise |
+
+---
+
+## Subsumption Rules (To Be Implemented)
+
+### DEEP-SKOL
+
+Direction: `subs_check(sigma1, sigma2)` checks if `sigma1` (more polymorphic) ≤ `sigma2` (less polymorphic).
+We **instantiate** the left to match the right, then check subsumption.
+
+| Input | Instantiation | Skolemization | Subsumption Check | Wrapper |
+|-------|---------------|---------------|-------------------|---------|
+| `∀a.a→a ≤ Int→Int` | `a ↦ ?1` | (none for RHS) | `?1→?1 ≤ Int→Int` ✓ | `WpCompose(WpFun(Int, ...), WpTyApp(Int))` |
+| `Int→String ≤ ∀a.a→a` | (none) | `sk_a→sk_a` | rigid check fails | **FAIL** |
+
+**Anti-case explanation**: For `Int→String ≤ ∀a.a→a`:
+1. Skolemize RHS: `∀a.a→a` becomes `sk_a→sk_a` (rigid skolem)
+2. Check: `Int→String ≤ sk_a→sk_a`
+3. Arg (contravariant): `sk_a ≤ Int` requires `sk_a = Int` (rigid equality)
+4. Res (covariant): `String ≤ sk_a` requires `String = sk_a` (rigid equality)
+5. But `Int ≠ String`, so `sk_a` cannot satisfy both → **FAIL**
+
+The rigid skolem correctly rejects impossible constraints.
+
+### FUN
+| Input | Arg Check (Contravariant) | Res Check (Covariant) | Result |
+|-------|---------------------------|----------------------|--------|
+| `(∀a.a→a)→Int ≤ (Int→Int)→Int` | `Int→Int ≤ ∀a.a→a` ✓ | `Int ≤ Int` ✓ | coercion wrapper |
+
+### MONO
+| Input | Unification | Wrapper |
+|-------|-------------|---------|
+| `Int ≤ Int` | `Int = Int` | `WP_HOLE` |
