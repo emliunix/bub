@@ -14,6 +14,7 @@ from systemf.elab2.types import (
     zonk_type, zonk_wrapper
 )
 from systemf.elab2.unify import functools, unify
+from systemf.utils.uniq import Uniq
 
 # ---
 # environment
@@ -76,8 +77,8 @@ type Defer[OUT] = Callable[[], OUT]
 # TyCkImpl
 
 class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
-    def __init__(self, core: SyntaxCoreSubst[OUT]):
-        self.uniq: int = 0
+    def __init__(self, core: SyntaxCoreSubst[OUT], uniq: Uniq | None = None):
+        self.uniq: Uniq = uniq if uniq else Uniq()
         self.core: SyntaxCoreSubst[OUT] = core
 
     @override
@@ -288,16 +289,11 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
     # ---
     # uniq vars
 
-    def make_uniq(self) -> int:
-        n = self.uniq
-        self.uniq += 1
-        return n
-
     def make_meta(self) -> MetaTv:
-        return TY.meta(self.make_uniq())
+        return TY.meta(self.uniq.make_uniq())
 
     def make_skolem(self, name: str) -> SkolemTv:
-        return TY.skolem(name, self.make_uniq())
+        return TY.skolem(name, self.uniq.make_uniq())
 
     # ---
     # helpers
@@ -360,11 +356,11 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
             # the defer is intended to be called after full type inference
             # finished, when all meta vars are fully unified.
             w2 = zonk_wrapper(w)
-            return run_wrapper(w2, self.make_uniq, self.core, f())
+            return run_wrapper(w2, self.uniq, self.core, f())
         return _go
 
     def make_name(self, prefix: str) -> str:
-        return f"{prefix}{self.make_uniq()}"
+        return f"{prefix}{self.uniq.make_uniq()}"
 
 def binders_of_ty(ty: Ty) -> list[TyVar]:
     """

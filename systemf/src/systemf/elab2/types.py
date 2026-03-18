@@ -3,7 +3,7 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 import functools
 from typing import Generic, Protocol, TypeVar, override
-from typing_extensions import Callable
+from systemf.utils.uniq import Uniq
 
 T = TypeVar("T")
 
@@ -487,25 +487,25 @@ def zonk_wrapper(wp: Wrapper) -> Wrapper:
         case _:
             return wp
 
-def run_wrapper(wp: Wrapper, make_uniq: Callable[[], int], sytx: SyntaxCore[OUT], e: OUT) -> OUT:
+def run_wrapper(wp: Wrapper, uniq: Uniq, sytx: SyntaxCore[OUT], e: OUT) -> OUT:
+    def _make_uniq_var():
+        return f"c{uniq.make_uniq()}"
     # TODO: fix dummy names
     def _go(wp, e) -> OUT:
         match wp:
             case WpHole():
                 return e
             case WpCast(ty_from, ty_to):
-                # FIX
                 if ty_from == ty_to:
                     return e
                 else:
                     raise TyCkException(f"type mismatch: expected {ty_from}, got {ty_to}")
             case WpFun(arg_ty, wp_arg, wp_res):
-                arg = _go(wp_arg, e)
+                var = _make_uniq_var()
+                arg = _go(wp_arg, sytx.var(var, arg_ty))
                 res = _go(wp_res, sytx.app(e, arg))
-                 # FIX
-                return sytx.lam("dummy", arg_ty, res)
+                return sytx.lam(var, arg_ty, res)
             case WpTyApp(ty_arg):
-                # FIX
                 return sytx.tyapp(e, ty_arg)
             case WpTyLam(ty_var):
                 # FIX: make core have proper type var type
