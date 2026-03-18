@@ -280,7 +280,7 @@ def test_gen2_check():
 
     def _run(t: TyCkImpl[CoreTm]):
         check(
-            lambda t: t.lam("x", t.var("x")),
+            lambda t: t.poly(t.lam("x", t.var("x"))),
             expected_ty=expected,
             cb_core=ignore_term,
         )(t)
