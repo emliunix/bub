@@ -224,21 +224,21 @@ def test_simple1():
     )
 
 def test_simple2():
-    """let id = \\x -> x in id 1 => Int
-
-    This test verifies that:
-    1. The lambda \\x -> x is inferred as ?0 -> ?0
-    2. It's generalized to id : forall a. a -> a
-    3. When applied to 1, type a is instantiated to Int
-    4. Result type is Int
-
-    Current issue: The type variable in the argument position is not being
-    unified with Int during the poly(arg)(env, Check(arg_ty)) call.
-    """
     # let id = \x -> x in id 1
+    a = TY.bound_var("a")
     run_tyck_term(
         lambda s: s.let("id", s.lam("x", s.var("x")),
             s.app(s.var("id"), s.lit(LitInt(1)))),
         check_type(INT),
-        equals_term(C.lit(LitInt(1))),
+        equals_term(
+            C.let(
+                "id",
+                TY.forall([a], TY.fun(a, a)),
+                C.tylam(a, C.lam("x", a, C.var("x", a))),
+                C.app(
+                    C.tyapp(C.var("id", TY.forall([a], TY.fun(a, a))), INT),
+                    C.lit(LitInt(1))
+                )
+            )
+        )
     )

@@ -269,7 +269,7 @@ class CoreVar(CoreTm):
 
 @dataclass
 class CoreTyLam(CoreTm):
-    name: str
+    var: TyVar
     body: CoreTm
 
 @dataclass
@@ -311,7 +311,7 @@ class SyntaxCore(Protocol[OUT]):
     def lit(self, value: Lit) -> OUT: ...
     def var(self, name: str, ty: Ty) -> OUT: ...
     def tyapp(self, fun: OUT, tyarg: Ty) -> OUT: ...
-    def tylam(self, name: str, body: OUT) -> OUT: ...
+    def tylam(self, var: TyVar, body: OUT) -> OUT: ...
     def lam(self, name: str, ty: Ty, body: OUT) -> OUT: ...
     def app(self, fun: OUT, arg: OUT) -> OUT: ...
     def let(self, name: str, expr_ty: Ty, expr: OUT, body: OUT) -> OUT: ...
@@ -332,8 +332,8 @@ class CoreBuilder(SyntaxCoreSubst[CoreTm]):
         return CoreVar(name, zonk_type(ty))
     def tyapp(self, fun: CoreTm, tyarg: Ty) -> CoreTm:
         return CoreTyApp(fun, zonk_type(tyarg))
-    def tylam(self, name: str, body: CoreTm) -> CoreTm:
-        return CoreTyLam(name, body)
+    def tylam(self, var: TyVar, body: CoreTm) -> CoreTm:
+        return CoreTyLam(var, body)
     def lam(self, name: str, ty: Ty, body: CoreTm) -> CoreTm:
         return CoreLam(name, zonk_type(ty), body)
     def app(self, fun: CoreTm, arg: CoreTm) -> CoreTm:
@@ -508,7 +508,7 @@ def run_wrapper(wp: Wrapper, make_uniq: Callable[[], int], sytx: SyntaxCore[OUT]
                 # FIX
                 return sytx.tyapp(e, ty_arg)
             case WpTyLam(ty_var):
-                # FIX
+                # FIX: make core have proper type var type
                 return sytx.tylam(ty_var, e)
             case WpCompose(wp_g, wp_f):
                 return _go(wp_g, _go(wp_f, e))
