@@ -83,8 +83,262 @@ t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid 
 \item $\overline{a}$ denotes a sequence of type variables $a_1, a_2, \ldots, a_n$ (possibly empty)
 \end{itemize}
 
-\section{$\Gamma \vdash_\delta t : \rho \mapsto e$}
+\section{Syntax-Directed Damas-Milner (Figure 4)}
 
+This section presents the syntax-directed Damas-Milner type system (Figure 4 from Section 4.3 of the paper). This is the first system implemented, serving as the foundation before extending to higher-rank types.
+
+In this system, $\rho$-types are just monotypes ($\rho = \tau$), and the main judgment $\Gamma \vdash t : \rho$ infers a monomorphic type.
+
+\begin{figure}[htbp]
+\centering
+\fbox{%
+\begin{minipage}{0.95\textwidth}
+\centering
+
+\bigskip
+\textbf{Rho-types} \quad $\rho \mathrel{::=} \tau$
+
+\bigskip
+\fbox{$\Gamma \vdash t : \rho$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=INT]{ }{\Gamma \vdash i : \text{Int}}
+\and
+\inferrule*[right=VAR]{\vdash^{inst} \sigma \le \rho}{\Gamma, (x:\sigma) \vdash x : \rho}
+\\
+\inferrule*[right=ABS]{\Gamma, (x:\tau) \vdash t : \rho}{\Gamma \vdash (\lambda x.t) : (\tau \to \rho)}
+\and
+\inferrule*[right=APP]{\Gamma \vdash t : \tau \to \rho \\ \Gamma \vdash u : \tau}{\Gamma \vdash t\,u : \rho}
+\\
+\inferrule*[right=LET]{\Gamma \vdash^{poly} u : \sigma \\ \Gamma, x:\sigma \vdash t : \rho}{\Gamma \vdash \mathtt{let}\ x = u\ \mathtt{in}\ t : \rho}
+\and
+\inferrule*[right=ANNOT]{\Gamma \vdash^{poly} t : \sigma' \\ \vdash^{sh} \sigma' \le \sigma \\ \vdash^{inst} \sigma \le \rho}{\Gamma \vdash (t::\sigma) : \rho}
+\end{mathpar}
+
+\bigskip
+
+\begin{minipage}[t]{0.45\textwidth}
+\centering
+\fbox{$\Gamma \vdash^{poly} t : \sigma$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=GEN]{\overline{a} = \mathit{ftv}(\rho) - \mathit{ftv}(\Gamma) \\ \Gamma \vdash t : \rho}{\Gamma \vdash^{poly} t : \forall \overline{a}.\rho}
+\end{mathpar}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.45\textwidth}
+\centering
+\fbox{$\vdash^{inst} \sigma \le \rho$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=INST]{ }{\vdash^{inst} \forall \overline{a}.\rho \le [\overline{a \mapsto \tau}]\rho}
+\end{mathpar}
+\end{minipage}
+
+\bigskip
+
+\fbox{$\vdash^{sh} \sigma \le \sigma'$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=SKOL]{\overline{a} \notin \mathit{ftv}(\sigma) \\ \vdash^{sh} \sigma \le \rho}{\vdash^{sh} \sigma \le \forall \overline{a}.\rho}
+\and
+\inferrule*[right=SPEC]{\vdash^{sh} [\overline{a \mapsto \tau}]\rho_1 \le \rho_2}{\vdash^{sh} \forall \overline{a}.\rho_1 \le \rho_2}
+\and
+\inferrule*[right=MONO]{ }{\vdash^{sh} \tau \le \tau}
+\end{mathpar}
+
+\bigskip
+\end{minipage}%
+}
+\caption{The syntax-directed Damas-Milner type system (Figure 4)}
+\label{fig:damas-milner}
+\end{figure}
+
+\subsection{Key Features}
+
+\begin{itemize}
+\item \textbf{Syntax-directed}: The typing rules follow term syntax exactly, making them directly implementable
+\item \textbf{Explicit generalization}: Only at \textsf{let} bindings via $\vdash^{poly}$
+\item \textbf{Explicit instantiation}: At variable occurrences via $\vdash^{inst}$
+\item \textbf{Shallow subsumption}: $\vdash^{sh}$ handles type annotations (rank-1 only)
+\item \textbf{Monomorphic}: $\rho = \tau$ (no higher-rank types yet)
+\end{itemize}
+
+\section{Odersky-Läufer Type System (Figure 5)}
+
+This section presents the Odersky-Läufer type system (Figure 5 from Section 4.5), which extends Damas-Milner to support \textbf{higher-rank polymorphism} (rank-$n$ types). Unlike the syntax-directed systems, this is a \textbf{declarative} specification where generalization and instantiation can happen anywhere.
+
+Key difference: $\rho$-types can now contain function types with polymorphic arguments ($\sigma \to \sigma'$), enabling types like $(\forall a.\,a \to a) \to \text{Int}$.
+
+\begin{figure}[htbp]
+\centering
+\fbox{%
+\begin{minipage}{0.95\textwidth}
+\centering
+
+\bigskip
+\textbf{Rho-types} \quad $\rho \mathrel{::=} \tau \mid \sigma \to \sigma'$
+
+\bigskip
+\fbox{$\Gamma \vdash t : \sigma$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=INT]{ }{\Gamma \vdash i : \text{Int}}
+\and
+\inferrule*[right=VAR]{ }{\Gamma, (x:\sigma) \vdash x : \sigma}
+\\
+\inferrule*[right=ABS]{\Gamma, x:\tau \vdash t : \sigma}{\Gamma \vdash (\lambda x.t) : (\tau \to \sigma)}
+\and
+\inferrule*[right=AABS]{\Gamma, x:\sigma \vdash t : \sigma'}{\Gamma \vdash (\lambda (x::\sigma).t) : (\sigma \to \sigma')}
+\\
+\inferrule*[right=APP]{\Gamma \vdash t : (\sigma \to \sigma') \\ \Gamma \vdash u : \sigma}{\Gamma \vdash t\,u : \sigma'}
+\and
+\inferrule*[right=ANNOT]{\Gamma \vdash t : \sigma}{\Gamma \vdash (t::\sigma) : \sigma}
+\\
+\inferrule*[right=LET]{\Gamma \vdash u : \sigma \\ \Gamma, x:\sigma \vdash t : \sigma'}{\Gamma \vdash \mathtt{let}\ x = u\ \mathtt{in}\ t : \sigma'}
+\and
+\inferrule*[right=GEN]{\overline{a} \notin \mathit{ftv}(\Gamma) \\ \Gamma \vdash t : \rho}{\Gamma \vdash t : \forall \overline{a}.\rho}
+\and
+\inferrule*[right=SUBS]{\Gamma \vdash t : \sigma \\ \vdash^{ol} \sigma \le \sigma'}{\Gamma \vdash t : \sigma'}
+\end{mathpar}
+
+\bigskip
+
+\fbox{$\vdash^{ol} \sigma \le \sigma'$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=SKOL]{\overline{a} \notin \mathit{ftv}(\sigma) \\ \vdash^{ol} \sigma \le \rho}{\vdash^{ol} \sigma \le \forall \overline{a}.\rho}
+\and
+\inferrule*[right=SPEC]{\vdash^{ol} [\overline{a \mapsto \tau}]\rho_1 \le \rho_2}{\vdash^{ol} \forall \overline{a}.\rho_1 \le \rho_2}
+\\
+\inferrule*[right=FUN]{\vdash^{ol} \sigma_3 \le \sigma_1 \\ \vdash^{ol} \sigma_2 \le \sigma_4}{\vdash^{ol} (\sigma_1 \to \sigma_2) \le (\sigma_3 \to \sigma_4)}
+\and
+\inferrule*[right=MONO]{ }{\vdash^{ol} \tau \le \tau}
+\end{mathpar}
+
+\bigskip
+\end{minipage}%
+}
+\caption{The Odersky-Läufer type system (Figure 5)}
+\label{fig:odersky-laufer}
+\end{figure}
+
+\subsection{Key Features}
+
+\begin{itemize}
+\item \textbf{Higher-rank types}: $\rho$ includes $\sigma \to \sigma'$, enabling polymorphic arguments
+\item \textbf{Non-syntax-directed}: GEN and SUBS can apply anywhere, not just at specific syntax
+\item \textbf{Contravariant function subsumption}: In FUN, argument types are reversed ($\sigma_3 \le \sigma_1$)
+\item \textbf{Annotated lambdas}: AABS rule allows explicit type annotations on binders
+\item \textbf{Declarative}: Not directly implementable (requires search), but specifies what should type-check
+\end{itemize}
+
+\subsection{Subsumption Relation ($\vdash^{ol}$)}
+
+The Odersky-Läufer subsumption handles higher-rank types with contravariance:
+\begin{itemize}
+\item \textbf{SKOL}: Skolemize universal on the right
+\item \textbf{SPEC}: Instantiate universal on the left
+\item \textbf{FUN}: Function contravariance (arguments reversed, results covariant)
+\item \textbf{MONO}: Reflexivity for monotypes
+\end{itemize}
+
+\section{Syntax-Directed Higher-Rank System (Figure 6)}
+
+This system extends the syntax-directed Damas-Milner approach (Figure 4) to higher-rank types, following the Odersky-Läufer approach but in syntax-directed form.
+
+\begin{figure}[htbp]
+\centering
+\fbox{%
+\begin{minipage}{0.95\textwidth}
+\centering
+
+\bigskip
+\textbf{Rho-types} \quad $\rho \mathrel{::=} \tau \mid \sigma \to \sigma'$
+
+\bigskip
+\fbox{$\Gamma \vdash t : \rho$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=INT]{ }{\Gamma \vdash i : \text{Int}}
+\and
+\inferrule*[right=VAR]{\vdash^{inst} \sigma \le \rho}{\Gamma, (x:\sigma) \vdash x : \rho}
+\\
+\inferrule*[right=ABS]{\Gamma, x:\tau \vdash t : \rho}{\Gamma \vdash (\lambda x.t) : (\tau \to \rho)}
+\and
+\inferrule*[right=AABS]{\Gamma, x:\sigma \vdash t : \rho}{\Gamma \vdash (\lambda (x::\sigma).t) : (\sigma \to \rho)}
+\end{mathpar}
+
+\begin{mathpar}
+\inferrule*[right=APP]{\Gamma \vdash t : (\sigma_1 \to \sigma_2) \\ \Gamma \vdash^{poly} u : \sigma' \\ \vdash^{dsk} \sigma' \le \sigma_1 \\ \vdash^{inst} \sigma_2 \le \rho}{\Gamma \vdash t\;u : \rho}
+\end{mathpar}
+
+\begin{mathpar}
+\inferrule*[right=ANNOT]{\Gamma \vdash^{poly} t : \sigma' \\ \vdash^{dsk} \sigma' \le \sigma \\ \vdash^{inst} \sigma \le \rho}{\Gamma \vdash (t :: \sigma) : \rho}
+\and
+\inferrule*[right=LET]{\Gamma \vdash^{poly} u : \sigma \\ \Gamma, x:\sigma \vdash t : \rho}{\Gamma \vdash \mathtt{let}\;x = u\;\mathtt{in}\;t : \rho}
+\end{mathpar}
+
+\bigskip
+
+\begin{minipage}[t]{0.45\textwidth}
+\centering
+\fbox{$\Gamma \vdash^{poly} t : \sigma$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=GEN]{\overline{a} = \mathit{ftv}(\rho) - \mathit{ftv}(\Gamma) \\ \Gamma \vdash t : \rho}{\Gamma \vdash^{poly} t : \forall \overline{a}.\rho}
+\end{mathpar}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.45\textwidth}
+\centering
+\fbox{$\vdash^{inst} \sigma \le \rho$}
+
+\bigskip
+
+\begin{mathpar}
+\inferrule*[right=INST]{ }{\vdash^{inst} \forall \overline{a}.\rho \le [\overline{a \mapsto \tau}]\rho}
+\end{mathpar}
+\end{minipage}
+
+\bigskip
+\end{minipage}%
+}
+\caption{Syntax-directed higher-rank type system (Figure 6)}
+\label{fig:higher-rank}
+\end{figure}
+
+\subsection{Key Features}
+
+\begin{itemize}
+\item \textbf{Higher-rank}: $\rho$ includes $\sigma \to \sigma'$, enabling polymorphic arguments
+\item \textbf{Explicit polymorphism}: Rule AABS for annotated lambdas; ABS for monomorphic
+\item \textbf{Deep skolemization}: Uses $\vdash^{dsk}$ for subsumption (forward reference; defined in Section 4.6.2)
+\item \textbf{Poly arguments}: APP uses $\vdash^{poly}$ to infer polymorphic types for arguments
+\item \textbf{Limitation}: Cannot type-check unannotated lambdas against polymorphic expected types (motivates Figure 8)
+\end{itemize}
+
+\section{Bidirectional Typing Rules}
+
+\begin{figure}[p]
+\centering
+\textbf{Main bidirectional typing:} $\boxed{\Gamma \vdash_\delta t : \rho \mapsto e}$
 \begin{mathpar}
 \inferrule*[right=INT]
 { }
@@ -128,8 +382,8 @@ t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid 
 {\Gamma \vdash_\delta \textsf{let}\;x = \mu\;\textsf{in}\;t : \rho \mapsto \textsf{let}\;x:\sigma = e_1\;\textsf{in}\;e_2}
 \end{mathpar}
 
-\section{$\Gamma \vdash^{\text{poly}}_\delta t : \sigma \mapsto e$}
-
+\vspace{1em}
+\textbf{Polymorphic generalization:} $\boxed{\Gamma \vdash^{\text{poly}}_\delta t : \sigma \mapsto e}$
 \begin{mathpar}
 \inferrule*[right=GEN1]
 {\overline{a} = \text{ftv}(\rho) - \text{ftv}(\Gamma) \\
@@ -143,8 +397,8 @@ t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid 
 {\Gamma \vdash^{\text{poly}}_\Downarrow t : \sigma \mapsto f\,(\Lambda\overline{a}.\,e)}
 \end{mathpar}
 
-\section{$\vdash^{\text{inst}}_\delta \sigma \leq \rho \mapsto f$}
-
+\vspace{1em}
+\textbf{Instantiation:} $\boxed{\vdash^{\text{inst}}_\delta \sigma \leq \rho \mapsto f}$
 \begin{mathpar}
 \inferrule*[right=INST1]
 { }
@@ -155,8 +409,13 @@ t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid 
 {\vdash^{\text{inst}}_\Downarrow \sigma \leq \rho \mapsto f}
 \end{mathpar}
 
-\section{$pr(\sigma) = \forall\overline{a}.\,\rho \mapsto f$}
+\caption{Bidirectional type system rules with elaboration to System F}
+\label{fig:typing-rules}
+\end{figure}
 
+\begin{figure}[p]
+\centering
+\textbf{Prenex conversion:} $\boxed{pr(\sigma) = \forall\overline{a}.\,\rho \mapsto f}$
 \begin{mathpar}
 \inferrule*[right=PRPOLY]
 {pr(\rho_1) = \forall\overline{b}.\,\rho_2 \mapsto f \\
@@ -173,8 +432,8 @@ t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid 
 {pr(\tau) = \tau \mapsto \lambda x:\tau.\,x}
 \end{mathpar}
 
-\section{$\vdash^{\text{dsk}} \sigma \leq \sigma' \mapsto f$}
-
+\vspace{1em}
+\textbf{Deep skolemization:} $\boxed{\vdash^{\text{dsk}} \sigma \leq \sigma' \mapsto f}$
 \begin{mathpar}
 \inferrule*[right=DEEP-SKOL]
 {pr(\sigma_2) = \forall\overline{a}.\,\rho \mapsto f_1 \\
@@ -183,8 +442,8 @@ t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid 
 {\vdash^{\text{dsk}} \sigma_1 \leq \sigma_2 \mapsto \lambda x:\sigma_1.\,f_1\,(\Lambda\overline{a}.\,f_2\,x)}
 \end{mathpar}
 
-\section{$\vdash^{\text{dsk}*} \sigma \leq \rho \mapsto f$}
-
+\vspace{1em}
+\textbf{Auxiliary subsumption:} $\boxed{\vdash^{\text{dsk}*} \sigma \leq \rho \mapsto f}$
 \begin{mathpar}
 \inferrule*[right=SPEC]
 {\vdash^{\text{dsk}*} [\overline{a \mapsto \tau}]\rho_1 \leq \rho_2 \mapsto f}
@@ -199,5 +458,8 @@ t ::= x \mid n \mid \lambda x.\,t \mid \lambda x\!::\!\sigma.\,t \mid t\,u \mid 
 { }
 {\vdash^{\text{dsk}*} \tau \leq \tau \mapsto \lambda x:\tau.\,x}
 \end{mathpar}
+\caption{Prenex conversion and deep skolemization}
+\label{fig:skolemization}
+\end{figure}
 
 \end{document}

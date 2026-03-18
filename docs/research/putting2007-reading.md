@@ -109,6 +109,10 @@ System FC specification showing the target language:
 
 Plain text extraction of the PDF for searching.
 
+**Index**: [`docs/research/putting2007-index.md`](putting2007-index.md)
+
+Quick reference for navigating the paper by line numbers.
+
 ---
 
 ## Deep Dive: Recursive Types in Real Compilers
@@ -295,6 +299,59 @@ Checking if one type is "at least as polymorphic" as another:
 
 ---
 
+## Related Papers (Research Collection)
+
+### 1. Eisenberg 2016 - Visible Type Application
+
+**Paper**: "Visible Type Application" (Extended version)  
+**Authors**: Eisenberg, Weirich, Ahmed (University of Pennsylvania)  
+**Location**: [`systemf/docs/research/`](../systemf/docs/research/)
+
+| File | Description |
+|------|-------------|
+| [`eisenberg-2016-visible-type-application.txt`](../systemf/docs/research/eisenberg-2016-visible-type-application.txt) | Plain text extraction (4,161 lines) |
+| [`eisenberg-2016-index.txt`](../systemf/docs/research/eisenberg-2016-index.txt) | Line number index |
+
+**Key contribution**: Adds explicit type application syntax (`e @τ`) to HM type system. Introduces "specified" vs "generalized" type variables distinction. Systems: HM, HMV, C, V, SB, B.
+
+**Relationship to Putting 2007**: Eisenberg builds on bidirectional checking from Putting, adds visible type application. Where Putting has implicit instantiation only, Eisenberg allows explicit `@Int` syntax.
+
+### 2. Jones & Shields 2002 - Scoped Type Variables
+
+**Paper**: "Lexically-scoped type variables"  
+**Authors**: Simon Peyton Jones, Mark Shields (Microsoft Research)  
+**Date**: April 2004 (ICFP submission)  
+**Location**: [`systemf/docs/research/`](../systemf/docs/research/)
+
+| File | Description |
+|------|-------------|
+| [`Jones and Shields - Lexically-scoped type variables.pdf`](../systemf/docs/research/Jones%20and%20Shields%20-%20Lexically-scoped%20type%20variables.pdf) | Original PDF |
+| [`jones-shields-2002-scoped-type-variables.txt`](../systemf/docs/research/jones-shields-2002-scoped-type-variables.txt) | Plain text extraction (1,173 lines) |
+| [`jones-shields-2002-index.txt`](../systemf/docs/research/jones-shields-2002-index.txt) | Line number index |
+
+**Key contribution**: Formalizes scoped type variables (the ability to use type variables from outer scope in inner type annotations). Compares "type-lambda" (SML) vs "type-sharing" (GHC) approaches.
+
+**Relationship to Putting 2007**: Foundation for scoped type variables used in higher-rank systems. The pattern signature `(x :: a)` brings `a` into scope for inner annotations.
+
+---
+
+## Paper Relationships
+
+```
+Jones & Shields 2002 (Scoped Type Variables)
+        ↓
+Putting 2007 (Higher-Rank Type Inference)  ←  You are here
+        ↓
+Eisenberg 2016 (Visible Type Application)
+```
+
+**Reading order for implementation:**
+1. **Jones & Shields** - Understand scoped type variables (HMV_Annot, SB_Annot rules)
+2. **Putting 2007** - Understand bidirectional checking and higher-rank inference
+3. **Eisenberg 2016** - Add visible type application on top of the above
+
+---
+
 ## Further Reading
 
 1. **Original Paper**: Journal of Functional Programming, 2007
@@ -302,6 +359,148 @@ Checking if one type is "at least as polymorphic" as another:
 3. **Idris2**: [Core TT module](https://github.com/idris-lang/Idris2/blob/main/src/Core/TT/Term.idr)
 4. **Coercible Paper**: "Safe Coercions" (JFP'16) - for newtype handling
 5. **Roles Paper**: "Generative Type Abstraction" (ICFP'11)
+
+---
+
+## Reference Implementation Details
+
+From [`putting-2007-implementation.hs`](putting-2007-implementation.hs) - the working Haskell code from Appendix A.
+
+### Meta Type Variable Structure
+
+```haskell
+data MetaTv = Meta Uniq (IORef (Maybe Tau))
+```
+
+- `IORef` allows **in-place mutation** for unification
+- `Nothing` = unbound/unknown meta variable
+- `Just tau` = solved (tau may itself be another MetaTv)
+- Creates a **chain** for union-find style unification
+
+### Key Functions
+
+```haskell
+-- Instantiate: replace ∀ with fresh metas
+instantiate :: Sigma -> Tc Rho
+instantiate (ForAll tvs ty) = do
+    tvs' <- mapM (\_ -> newMetaTyVar) tvs
+    return (substTy tvs (map MetaTv tvs') ty)
+
+-- Skolemise: replace ∀ with rigid skolem constants
+skolemise :: Sigma -> Tc ([TyVar], Rho)
+skolemise (ForAll tvs ty) = do
+    sks <- mapM newSkolemTyVar tvs
+    (sks2, ty') <- skolemise (substTy tvs (map TyVar sks) ty)
+    return (sks1 ++ sks2, ty')
+
+-- Quantify: bind free metas to forall
+quantify :: [MetaTv] -> Rho -> Tc Sigma
+quantify tvs ty = do
+    mapM_ bind (tvs `zip` new_bndrs)  -- Bind each meta to a bound var
+    ty' <- zonkType ty                  -- Follow chains, substitute
+    return (ForAll new_bndrs ty')
+```
+
+### Unification Chain Resolution
+
+```haskell
+zonkType :: Type -> Tc Type
+zonkType (MetaTv tv) = do
+    mb_ty <- readTv tv
+    case mb_ty of
+        Nothing -> return (MetaTv tv)  -- Unbound, return as-is
+        Just ty -> do
+            ty' <- zonkType ty          -- Follow chain recursively
+            writeTv tv ty'              -- Path compression!
+            return ty'
+```
+
+**Pattern**: When a MetaTv points to `Just ty`, recursively resolve `ty` (which may be another MetaTv). Write back the final result for path compression.
+
+### Unification with Occurs Check
+
+```haskell
+unifyVar :: MetaTv -> Tau -> Tc ()
+unifyVar tv1 ty2 = do
+    mb_ty1 <- readTv tv1
+    case mb_ty1 of
+        Just ty1 -> unify ty1 ty2     -- Already bound, unify that
+        Nothing -> unifyUnboundVar tv1 ty2
+
+unifyUnboundVar :: MetaTv -> Tau -> Tc ()
+unifyUnboundVar tv1 ty2@(MetaTv tv2) = do
+    mb_ty2 <- readTv tv2
+    case mb_ty2 of
+        Just ty2' -> unify (MetaTv tv1) ty2'  -- tv2 is alias, follow it
+        Nothing -> writeTv tv1 ty2            -- Both unbound, create link
+
+unifyUnboundVar tv1 ty2 = do
+    tvs2 <- getMetaTyVars [ty2]           -- Get all metas in ty2
+    if tv1 `elem` tvs2 then
+        occursCheckErr tv1 ty2            -- OCCURS CHECK!
+    else
+        writeTv tv1 ty2                   -- Safe to bind
+```
+
+**Key insights**:
+1. **Chain following**: If meta A points to meta B, unify with B's value
+2. **Alias chains**: If both unbound, create link A → B
+3. **Occurs check**: Before binding, ensure meta doesn't appear in target type
+4. **Path compression**: `zonkType` flattens chains after unification
+
+### The Create → Unify → Generalize Pattern
+
+```haskell
+-- In inferSigma (GEN1)
+exp_ty <- inferRho e                    -- Create metas, unify as needed
+env_tvs <- getMetaTyVars env_tys        -- What's locked in Γ?
+res_tvs <- getMetaTyVars [exp_ty]       -- What's in result?
+let forall_tvs = res_tvs \\ env_tvs    -- Subtract to find candidates
+quantify forall_tvs exp_ty              -- Bind survivors to ∀
+```
+
+**Flow**:
+1. **Create**: Fresh metas during inference
+2. **Unify**: Constrain metas through type checking
+3. **Survivors**: Metas not locked by Γ become ∀
+
+---
+
+## Critical Insight: ftv(ρ) - ftv(Γ)
+
+**What it means:** "Type variables in the result that aren't locked down by the environment"
+
+The GEN1 rule generalizes over variables that appear free in the result type but NOT in the environment:
+
+```haskell
+ā = ftv(ρ) - ftv(Γ)   -- Variables free to be polymorphic
+```
+
+### Why This Blocks Generalization
+
+```haskell
+\x -> let y = x in y
+-- ρ = _a (y's type is same as x's)
+-- Γ = {x : _a}  (x claims _a)
+-- ftv(ρ) - ftv(Γ) = {_a} - {_a} = {}
+-- Result: y : _a (MONOMORPHIC - _a is locked to x!)
+```
+
+### Why This Allows Generalization
+
+```haskell
+let id = \x -> x in ...
+-- ρ = _a -> _a
+-- Γ = {} (empty at top level)
+-- ftv(ρ) - ftv(Γ) = {_a} - {} = {_a}
+-- Result: id : ∀a. a -> a (POLYMORPHIC!)
+```
+
+### The Pattern
+
+- `extendEnv x _a` → locks `_a` to `x` → blocks generalization
+- Empty Γ at `let` → no locks → can generalize all free vars
+- This is the **Damas-Milner restriction**: polymorphism only at `let`, never at `λ`
 
 ---
 

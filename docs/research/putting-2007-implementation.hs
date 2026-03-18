@@ -201,7 +201,7 @@ instantiate ty = return ty
 -- | Weak prenex conversion: pr(σ) = ∀ā.ρ
 -- Returns skolem constants and the rho body
 -- Used in: GEN2 rule, DEEP-SKOL rule (Fig 8)
--- 
+--
 -- PRPOLY: pr(∀ā.σ) = ∀āb̄.ρ  where pr(σ) = ∀b̄.ρ
 -- PRFUN:  pr(σ₁→σ₂) = ∀ā.(σ₁→ρ₂)  where pr(σ₂) = ∀ā.ρ₂, ā ∉ fv(σ₁)
 -- PRMONO: pr(τ) = τ
@@ -371,13 +371,19 @@ freeTyVars tys = nub (concatMap freeTyVarsInType tys)
     freeTyVarsInType _ = []
 
 substTy :: [TyVar] -> [Type] -> Type -> Type
-substTy tvs tys ty = subst ty
+-- Replace the specified quantified type variables by
+-- given meta type variables
+-- No worries about capture, because the two kinds of type
+-- variable are distinct
+substTy tvs tys ty = subst_ty (tvs `zip` tys) ty
+subst_ty :: Env -> Type -> Type
+subst_ty env (Fun arg res) = Fun (subst_ty env arg) (subst_ty env res)
+subst_ty env (TyVar n) = fromMaybe (TyVar n) (lookup n env)
+subst_ty env (MetaTv tv) = MetaTv tv
+subst_ty env (TyCon tc) = TyCon tc
+subst_ty env (ForAll ns rho) = ForAll ns (subst_ty env' rho)
     where
-    env = zip tvs tys
-    subst (ForAll tvs' ty') = ForAll tvs' (subst ty')
-    subst (Fun arg res) = Fun (subst arg) (subst res)
-    subst ty@(TyVar tv) = fromMaybe ty (lookup tv env)
-    subst ty = ty
+    env' = [(n,ty') | (n,ty') <- env, not (n `elem` ns)]
 
 -- ============================================================
 -- A.1 TcTerm.hs - Type inference
@@ -627,7 +633,7 @@ instSigma t1 (Infer r) = do
 -- ============================================================
 -- End of Implementation
 -- ============================================================
--- 
+--
 -- Key design patterns from the paper:
 --
 -- 1. Bidirectional checking: synthesis (⊢⇑) vs checking (⊢⇓)

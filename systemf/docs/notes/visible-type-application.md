@@ -251,6 +251,27 @@ id :: forall a. a -> a = \x -> (x :: a)  -- 'a' not recognized in annotation
 
 3. **Pattern Type Signatures:** Not yet implemented (requires 2018 paper extensions).
 
+## Research Notes
+
+### Partial Type Signatures (Eisenberg 2016, Section 6.3)
+
+**Status:** Pleasing feature - needs investigation
+
+Eisenberg 2016 notes a pleasing synergy between visible type application and GHC's partial type signature feature (wildcards written as `_`). This allows users to write:
+
+```haskell
+f @_ @[Int] True []  -- GHC infers 'a' is Bool, but visibly instantiates 'b' to [Int]
+```
+
+**Key insight:** The combination of visible type application with type wildcards enables "partial explicit instantiation" where some type arguments are inferred and others are explicitly provided.
+
+**Investigation needed:**
+- How would this interact with our bidirectional type checking?
+- Can we support `f @_ @Int` where the first wildcard is inferred?
+- Implementation complexity vs. benefit trade-off
+
+Reference: Eisenberg et al., "Visible Type Application", ESOP 2016, Section 6.3
+
 ## Test Cases
 
 ### Working

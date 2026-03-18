@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass, field
+import functools
 from typing import Generic, Protocol, TypeVar, override
+from typing_extensions import Callable
 
 T = TypeVar("T")
 
@@ -119,8 +121,8 @@ def zonk_type(ty: Ty) -> Ty:
         case _:
             raise ValueError(f"Unknown type: {ty}")
 
-def get_free_vars(tys: list[Ty]) -> list[Ty]:
-    def _free_tv(ty: Ty) -> Generator[Ty, None, None]:
+def get_free_vars(tys: list[Ty]) -> list[TyVar]:
+    def _free_tv(ty: Ty) -> Generator[TyVar, None, None]:
         match ty:
             case TyVar(): # BoundTv | Skolem
                 yield ty
@@ -286,8 +288,8 @@ class CoreApp(CoreTm):
 @dataclass
 class CoreLet(CoreTm):
     name: str
-    expr: CoreTm
     expr_ty: Ty
+    expr: CoreTm
     body: CoreTm
 
 @dataclass
@@ -303,22 +305,26 @@ OUT = TypeVar("OUT")
 
 class SyntaxCore(Protocol[OUT]):
     """Protocol for building core terms."""
-    def lit(self, value: Lit, ty: Ty) -> OUT: ...
+    def lit(self, value: Lit) -> OUT: ...
     def var(self, name: str, ty: Ty) -> OUT: ...
     def tyapp(self, fun: OUT, tyarg: Ty) -> OUT: ...
     def tylam(self, name: str, body: OUT) -> OUT: ...
     def lam(self, name: str, ty: Ty, body: OUT) -> OUT: ...
     def app(self, fun: OUT, arg: OUT) -> OUT: ...
-    def let(self, name: str, expr: OUT, expr_ty: Ty, body: OUT) -> OUT: ...
+    def let(self, name: str, expr_ty: Ty, expr: OUT, body: OUT) -> OUT: ...
+
+class SyntaxCoreSubst(SyntaxCore[OUT], Protocol):
+    """with substituting support."""
+    def subst(self, name: str, to: OUT, expr: OUT) -> OUT: ...
 
 
-class CoreBuilder(SyntaxCore[CoreTm]):
+class CoreBuilder(SyntaxCoreSubst[CoreTm]):
     """
     A builder for constructing core terms, directly derived from CoreTm dataclasses.
     Implements SyntaxCore[CoreTm].
     """
-    def lit(self, value: Lit, ty: Ty) -> CoreTm:
-        return CoreLit(value, ty)
+    def lit(self, value: Lit) -> CoreTm:
+        return CoreLit(value)
     def var(self, name: str, ty: Ty) -> CoreTm:
         return CoreVar(name, ty)
     def tyapp(self, fun: CoreTm, tyarg: Ty) -> CoreTm:
@@ -329,8 +335,33 @@ class CoreBuilder(SyntaxCore[CoreTm]):
         return CoreLam(name, ty, body)
     def app(self, fun: CoreTm, arg: CoreTm) -> CoreTm:
         return CoreApp(fun, arg)
-    def let(self, name: str, expr: CoreTm, expr_ty: Ty, body: CoreTm) -> CoreTm:
-        return CoreLet(name, expr, expr_ty, body)
+    def let(self, name: str, expr_ty: Ty, expr: CoreTm, body: CoreTm) -> CoreTm:
+        return CoreLet(name, expr_ty, expr, body)
+    def subst(self, name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
+        return subst_coretm(name, to, expr)
+
+def subst_coretm(name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
+    def _go(expr: CoreTm) -> CoreTm:
+        match expr:
+            case CoreVar(n, _) if n == name:
+                return to
+            case CoreTyApp(fun, ty_arg):
+                return CoreTyApp(_go(fun), ty_arg)
+            case CoreTyLam(n, body):
+                return CoreTyLam(n, _go(body))
+            case CoreLam(name=n) if n == name: # otherwise
+                return expr
+            case CoreLam(n, ty, body):
+                return CoreLam(n, ty, _go(body))
+            case CoreApp(fun, arg):
+                return CoreApp(_go(fun), _go(arg))
+            case CoreLet(n, expr, expr_ty, body) if n == name:
+                return CoreLet(n, _go(expr), expr_ty, body)
+            case CoreLet(n, expr, expr_ty, body):
+                return CoreLet(n, _go(expr), expr_ty, _go(body))
+            case _:
+                return expr
+    return _go(expr)
 
 # A convenience variable for the core builder.
 C = CoreBuilder()
@@ -407,6 +438,11 @@ class WpTyApp(Wrapper):
 class WpTyLam(Wrapper):
     ty_var: TyVar
 
+def mk_wp_ty_lams(tvs: list[TyVar], w: Wrapper) -> Wrapper:
+    if tvs:
+        return functools.reduce(lambda acc, tv: WpCompose(WpTyLam(tv), acc), reversed(tvs), w)
+    return w
+
 @dataclass
 class WpCompose(Wrapper):
     """
@@ -429,15 +465,18 @@ def zonk_wrapper(wp: Wrapper) -> Wrapper:
         case _:
             return wp
 
-def run_wrapper(wp: Wrapper, sytx: SyntaxCore[OUT], e: OUT) -> OUT:
+def run_wrapper(wp: Wrapper, make_uniq: Callable[[], int], sytx: SyntaxCore[OUT], e: OUT) -> OUT:
     # TODO: fix dummy names
-    def _go(wp, e):
+    def _go(wp, e) -> OUT:
         match wp:
             case WpHole():
                 return e
             case WpCast(ty_from, ty_to):
-                 # FIX
-                return sytx.cast(e, ty_from, ty_to)
+                # FIX
+                if ty_from == ty_to:
+                    return e
+                else:
+                    raise TyCkException(f"type mismatch: expected {ty_from}, got {ty_to}")
             case WpFun(arg_ty, wp_arg, wp_res):
                 arg = _go(wp_arg, e)
                 res = _go(wp_res, sytx.app(e, arg))
@@ -445,12 +484,14 @@ def run_wrapper(wp: Wrapper, sytx: SyntaxCore[OUT], e: OUT) -> OUT:
                 return sytx.lam("dummy", arg_ty, res)
             case WpTyApp(ty_arg):
                 # FIX
-                return sytx.ty_app(e, ty_arg)
+                return sytx.tyapp(e, ty_arg)
             case WpTyLam(ty_var):
                 # FIX
-                return sytx.ty_lam(ty_var, e)
+                return sytx.tylam(ty_var, e)
             case WpCompose(wp_g, wp_f):
                 return _go(wp_g, _go(wp_f, e))
+            case _:
+                raise Exception("impossible")
     return _go(wp, e)
 
 # ---

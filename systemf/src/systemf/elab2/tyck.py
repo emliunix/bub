@@ -3,14 +3,17 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from functools import reduce
 import itertools
-from typing import Callable, TypeVar, override
+from typing import Callable, TypeVar, cast, override
 
 from systemf.elab2.types import (
-    WP_HOLE, BoundTv, Cons, Lit, INT, MetaTv, OUT, Ref, SkolemTv, SyntaxCore, SyntaxDSL,
-    Ty, TyForall, TyFun, TyVar, TY, WpCast, WpFun, WpTyLam, Wrapper, cons,
-    get_free_vars, get_meta_vars, mk_wp_eta, subst_ty, varnames, zonk_type
+    SyntaxCoreSubst, Ty, TY, TyForall, TyFun, TyVar, INT,
+    BoundTv, MetaTv, OUT, Ref, SkolemTv, SyntaxCore, SyntaxDSL, WpTyApp,
+    Wrapper, WpCast, WpFun, WpTyLam, WpCompose, WP_HOLE,
+    Cons, cons, Lit,
+    get_free_vars, get_meta_vars, mk_wp_ty_lams, run_wrapper, subst_ty, varnames,
+    zonk_type, zonk_wrapper
 )
-from systemf.elab2.unify import WpCompose, unify
+from systemf.elab2.unify import functools, unify
 
 # ---
 # environment
@@ -73,9 +76,9 @@ type Defer[OUT] = Callable[[], OUT]
 # TyCkImpl
 
 class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
-    def __init__(self, core: SyntaxCore[OUT]):
+    def __init__(self, core: SyntaxCoreSubst[OUT]):
         self.uniq: int = 0
-        self.core: SyntaxCore[OUT] = core
+        self.core: SyntaxCoreSubst[OUT] = core
 
     @override
     def lit(self, value: Lit) -> TyCk[Defer[OUT]]:
@@ -86,31 +89,39 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
                 case Check(ty):
                     if ty != value.ty:
                         raise TypeError(f"Expected {value.ty}, got {ty}")
-            return self.core.lit(value, value.ty)  # TODO use refined core later
+                case _:
+                    raise Exception("impossible")
+            return lambda: self.core.lit(value)
         return _go
 
     @override
     def var(self, name: str) -> TyCk[Defer[OUT]]:
         def _go(env: Env, exp: Expect) -> Defer[OUT]:
             ty = lookup_env(name, env)
-            return self.inst(ty)(env, exp)
+            wrap = self.inst(ty)(env, exp)
+            def _core():
+                return self.core.var(name, ty)
+            return self.with_wrapper(wrap, _core)
         return _go
 
     @override
-    def lam(self, name: str, body: TyCk[OUT]) -> TyCk[Defer[OUT]]:
+    def lam(self, name: str, body: TyCk[Defer[OUT]]) -> TyCk[Defer[OUT]]:
         def _go(env: Env, exp: Expect) -> Defer[OUT]:
             match exp:
                 case Infer(ref):
                     # Infer: create fresh meta for arg, infer body, construct fun type
                     arg_ty = self.make_meta()
-                    res_ty, res_out = run_infer(extend_env(name, arg_ty, env), body)
-                    result_ty = TyFun(arg_ty, res_ty)
+                    body_ty, e_body = run_infer(extend_env(name, arg_ty, env), body)
+                    result_ty = TyFun(arg_ty, body_ty)
                     ref.set(result_ty)
-                    return self.core.lam(name, arg_ty, body(extend_env(name, arg_ty, env), Check(res_ty)))
+                    return lambda: self.core.lam(name, arg_ty, e_body())
                 case Check(ty2):
                     # Check: decompose function type and check body against result
                     (arg_ty, res_ty) = self.unify_fun(ty2)
-                    return self.core.lam(name, arg_ty, body(extend_env(name, arg_ty, env), Check(res_ty)))
+                    e = self.poly(body)(extend_env(name, arg_ty, env), Check(res_ty))
+                    return lambda: self.core.lam(name, arg_ty, e())
+                case _:
+                    raise Exception("impossible")
         return _go
 
     @override
@@ -119,119 +130,117 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
             match exp:
                 case Infer(ref):
                     # Infer: sigma is the arg type
-                    res_ty, _ = run_infer(extend_env(name, sigma, env), body)
+                    res_ty, e_body = run_infer(extend_env(name, sigma, env), body)
                     result_ty = TyFun(sigma, res_ty)
                     ref.set(result_ty)
-                    return self.core.lam(name, sigma, body(extend_env(name, sigma, env), Check(res_ty)))
+                    return lambda: self.core.lam(name, sigma, e_body())
                 case Check(ty2):
                     # Check: decompose function type, check sigma <: arg_ty, check body
                     (arg_ty, res_ty) = self.unify_fun(ty2)
-                    self.subs_check(arg_ty, sigma)
-                    return self.core.lam(name, sigma, body(extend_env(name, sigma, env), Check(res_ty)))
+                    arg_wrap = self.subs_check(arg_ty, sigma)
+                    res_e = self.poly(body)(extend_env(name, sigma, env), Check(res_ty))
+                    def _core():
+                        fresh_var = self.make_name("d")
+                        arg_co = self.with_wrapper(arg_wrap, lambda: self.core.var(name, sigma))()
+                        body = self.core.subst(name, self.core.var(fresh_var, arg_ty), res_e())
+                        return self.core.lam(name, sigma,
+                            self.core.let(fresh_var, arg_ty, arg_co, body))
+                    return _core
+                case _:
+                    raise Exception("impossible")
         return _go
 
     @override
-    def app(self, fun: TyCk[OUT], arg: TyCk[OUT]) -> TyCk[OUT]:
-        def _go(env: Env, exp: Expect) -> OUT:
+    def app(self, fun: TyCk[Defer[OUT]], arg: TyCk[Defer[OUT]]) -> TyCk[Defer[OUT]]:
+        def _go(env: Env, exp: Expect) -> Defer[OUT]:
             # First infer the function type
             fun_ty, fun_core = run_infer(env, fun)
-
-            # Decompose to get arg and result types
+            # Decompose to arg and result types
             (arg_ty, res_ty) = self.unify_fun(fun_ty)
-
             # Check argument against expected arg type
             arg_core = self.poly(arg)(env, Check(arg_ty))
-
-            # Handle expectation for result
-            match exp:
-                case Infer(ref):
-                    ref.set(res_ty)
-                case Check(expected_ty):
-                    self.subs_check_rho(res_ty, expected_ty)
-
-            return self.core.app(fun_core, arg_core)
+            # inst res_ty
+            res_wrap = self.inst(res_ty)(env, exp)
+            return self.with_wrapper(res_wrap, lambda: self.core.app(fun_core(), arg_core()))
         return _go
 
     @override
-    def annot(self, expr: TyCk[OUT], sigma: Ty) -> TyCk[OUT]:
-        def _go(env: Env, exp: Expect) -> OUT:
+    def annot(self, expr: TyCk[Defer[OUT]], sigma: Ty) -> TyCk[Defer[OUT]]:
+        def _go(env: Env, exp: Expect) -> Defer[OUT]:
             # Check expression against annotated type
-            expr_core = self.poly(expr)(env, Check(sigma))
-
-            # Handle expectation
-            match exp:
-                case Infer(ref):
-                    ref.set(sigma)
-                case Check(expected_ty):
-                    self.subs_check(sigma, expected_ty)
-
-            return expr_core
+            e = self.poly(expr)(env, Check(sigma))
+            wrap = self.inst(sigma)(env, exp)
+            return self.with_wrapper(wrap, e)
         return _go
 
     @override
-    def let(self, name: str, expr: TyCk[OUT], body: TyCk[OUT]) -> TyCk[OUT]:
-        def _go(env: Env, exp: Expect) -> OUT:
+    def let(self, name: str, expr: TyCk[Defer[OUT]], body: TyCk[Defer[OUT]]) -> TyCk[Defer[OUT]]:
+        def _go(env: Env, exp: Expect) -> Defer[OUT]:
             # Infer polymorphic type for expr
-            sigma = self.poly_infer(expr, env)
-
+            sigma, e_expr = run_infer(env, self.poly(expr))
             # Extend environment and continue with body
             env_ = extend_env(name, sigma, env)
-            return body(env_, exp)
+            e_body = body(env_, exp)
+            return lambda: self.core.let(name, sigma, e_expr(), e_body())
         return _go
 
     # ---
     # poly (GEN1, GEN2)
 
-    def poly(self, term: TyCk[OUT]) -> TyCk[OUT]:
+    def poly(self, term: TyCk[Defer[OUT]]) -> TyCk[Defer[OUT]]:
         """
         The poly judgment - for checking polymorphic types.
         """
-        def _go(env: Env, exp: Expect) -> OUT:
+        def _go(env: Env, exp: Expect) -> Defer[OUT]:
             match exp:
                 case Infer(ref):
-                    ty = self.poly_infer(term, env)
-                    ref.set(ty)
-                    # Need to rebuild term with the inferred type
-                    # This is a bit tricky - we call term again to get the core term
-                    # But we need to do poly inference first
-                    return term(env, Check(ty))
+                    ty, e = run_infer(env, term)
+                    env_tys = env_types(env)
+                    env_tvs = get_meta_vars(env_tys)
+                    res_tvs = get_meta_vars([ty])
+                    # ftv(ρ) - ftv(Γ)
+                    # it's metavars cause it's metavars that are created
+                    # when encountering unknown type during infer
+                    # not in Gamma means they are local to ty
+                    # and get_meta_vars call zonk so we're not fooled by linked metas
+                    forall_tvs = [tv for tv in res_tvs if tv not in env_tvs]
+                    binders, sigma_ty = quantify(forall_tvs, ty)
+                    ref.set(sigma_ty)
+                    return self.with_wrapper(mk_wp_ty_lams(binders, WP_HOLE), e)
                 case Check(ty2):
                     # Skolemise and check
-                    sks, rho2 = self.skolemise(ty2)
-                    term(env, Check(rho2))
+                    sks, rho2, sk_wrap = self.skolemise(ty2)
+                    # sk_wrap: rho ~~> sigma
+                    e = term(env, Check(rho2))
                     # Check skolem var escape
                     env_tys = env_types(env)
-                    esc_tvs = get_free_vars([ty2] + env_tys)
-                    for sk in sks:
-                        if sk in esc_tvs:
-                            raise TypeError(f"Skolem var {sk} escapes")
-                    return term(env, Check(rho2))
+                    env_tvs = get_free_vars([ty2] + env_tys)
+                    esc_tvs = set(sks).difference(env_tvs)
+                    if esc_tvs:
+                        raise TypeError(f"Skolem var escapes: {esc_tvs}")
+                    return self.with_wrapper(sk_wrap, e)
+                case _:
+                    raise Exception("impossible")
         return _go
-
-    def poly_infer(self, term: TyCk[OUT], env: Env) -> Ty:
-        """
-        Infer a polymorphic type for term.
-        """
-        ty, _ = run_infer(env, term)
-        env_tys = get_meta_vars(env_types(env))
-        mvs = [m for m in get_meta_vars([ty]) if m not in env_tys]
-        return quantify(mvs, ty)
 
     # ---
     # inst (INST1, INST2)
 
-    def inst(self, ty: Ty) -> TyCk[OUT]:
+    def inst(self, ty: Ty) -> TyCk[Wrapper]:
         """
         The inst judgment - instantiate a polymorphic type.
         """
-        def _go(env: Env, exp: Expect) -> OUT:
-            instantiated = self.instantiate(ty)
+        def _go(env: Env, exp: Expect) -> Wrapper:
             match exp:
                 case Infer(ref):
+                    instantiated, wrap = self.instantiate(ty)
                     ref.set(instantiated)
+                    return wrap
                 case Check(ty2):
-                    self.subs_check_rho(instantiated, ty2)
-            return None  # type: ignore
+                    wrap = self.subs_check_rho(ty, ty2)
+                    return wrap
+                case _:
+                    raise Exception("impossible")
         return _go
 
     # ---
@@ -241,10 +250,9 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
         sks, rho2, sks_wrap = self.skolemise(sigma2)
         subs_wrap = self.subs_check_rho(sigma1, rho2)  # sigma1 inst-to rho2
         # check skolem var escape
-        esc_tvs = get_free_vars([sigma1, sigma2])
-        for sk in sks:
-            if sk in esc_tvs:
-                raise TypeError(f"Skolem var {sk} escapes")
+        esc_tvs = set(sks).difference(get_free_vars([sigma1, sigma2]))
+        if esc_tvs:
+            raise TypeError(f"Skolem var  escapes: {esc_tvs}")
         return WpCompose(sks_wrap, subs_wrap)
 
     def subs_check_rho(self, sigma: Ty, rho: Ty) -> Wrapper:
@@ -265,7 +273,7 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
 
     def subs_check_fun(self, a1: Ty, r1: Ty, a2: Ty, r2: Ty) -> Wrapper:
         # a2 -> a1
-        arg_wrap =self.subs_check(a2, a1)     # contravariant
+        arg_wrap =self.subs_check(a2, a1)      # contravariant
         # r1 -> r2
         res_wrap = self.subs_check_rho(r1, r2) # covariant
         # a2 -> r2
@@ -291,16 +299,22 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
     def skolemise(self, ty: Ty) -> tuple[list[SkolemTv], Ty, Wrapper]:
         """
         Create weak prenex formed rho type with skolemise type vars filled
+
+        The wrapper created is the witness of rho to sigma.
+        eg. sa → sb → sa ~~> ∀a. a → ∀b. b → a
+        where sa, sb are skolem vars
         """
         match ty:
             case TyForall(tvs, body):
                 sks1 = [self.make_skolem(name) for name in varnames(tvs)]
                 sks2, ty2, sk_wrap = self.skolemise(subst_ty(tvs, sks1, body))
+                # /\sk1. /\sk2. ... /\ skn. sk_wrap body
                 res_wrap = reduce(lambda acc, w: WpCompose(WpTyLam(w), acc), reversed(sks1), sk_wrap)
                 return sks1 + sks2, ty2, res_wrap
             case TyFun(arg_ty, res_ty):
                 sks, res_ty2, wrap = self.skolemise(res_ty)
-                # a -> rho to a -> sigma
+                # a -> rho
+                # => a -> sigma
                 res_wrap = WpFun(arg_ty, WP_HOLE, wrap)
                 return sks, TY.fun(arg_ty, res_ty2), res_wrap
             case _:
@@ -316,8 +330,9 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
             case TyForall(vars, ty):
                 mvs = [self.make_meta() for _ in vars]
                 inst_ty = subst_ty(vars, mvs, ty)
-                return inst_ty, WP_HOLE
-            case _:
+                wrap = functools.reduce(lambda acc, ty: WpCompose(WpTyApp(ty), acc), mvs, WP_HOLE)
+                return inst_ty, wrap
+            case _:  # not a forall type
                 return sigma, WP_HOLE
 
     def unify_fun(self, ty: Ty) -> tuple[Ty, Ty]:
@@ -333,6 +348,17 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
                 res_ty = self.make_meta()
                 unify(ty, TyFun(arg_ty, res_ty))
                 return (arg_ty, res_ty)
+
+    def with_wrapper(self, w: Wrapper, f: Defer[OUT]) -> Defer[OUT]:
+        def _go() -> OUT:
+            # the defer is intended to be called after full type inference
+            # finished, when all meta vars are fully unified.
+            w2 = zonk_wrapper(w)
+            return run_wrapper(w2, self.make_uniq, self.core, f())
+        return _go
+
+    def make_name(self, prefix: str) -> str:
+        return f"{prefix}{self.make_uniq()}"
 
 def binders_of_ty(ty: Ty) -> list[TyVar]:
     """
@@ -350,7 +376,7 @@ def binders_of_ty(ty: Ty) -> list[TyVar]:
                 return None
     return list(_go(ty))
 
-def quantify(tvs: list[MetaTv], ty: Ty) -> Ty:
+def quantify(tvs: list[MetaTv], ty: Ty) -> tuple[list[TyVar], Ty]:
     """
     Quantify a type over a list of meta type variables.
     """
@@ -364,7 +390,7 @@ def quantify(tvs: list[MetaTv], ty: Ty) -> Ty:
     for tv, n in zip(tvs, binders):
         tv.ref.set(n)
 
-    return TyForall(binders, zonk_type(ty))
+    return binders, TyForall(binders, zonk_type(ty))
 
 def allnames():
     CHARS = "abcdefghijklmnopqrstuvwxyz"
