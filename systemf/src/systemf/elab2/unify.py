@@ -3,7 +3,7 @@ from systemf.elab2.types import *
 def unify(ty1: Ty, ty2: Ty):
     match ty1, ty2:
         case (BoundTv(), _) | (_, BoundTv()):
-            raise TypeError(f"Unexpected bound type variables to unify, got {ty1} and {ty2}")
+            raise TyCkException(f"Unexpected bound type variables to unify, got {ty1} and {ty2}")
         case (SkolemTv() as sk1, SkolemTv() as sk2) if sk1 == sk2:
             pass
         case (MetaTv() as m1, MetaTv() as m2) if m1 == m2:
@@ -20,7 +20,7 @@ def unify(ty1: Ty, ty2: Ty):
             unify(a1, a2)
             unify(r1, r2)
         case _:
-            raise TypeError(f"Cannot unify types, got {ty1} and {ty2}")
+            raise TyCkException(f"Cannot unify types, got {ty1} and {ty2}")
 
 def unify_var(m: MetaTv, ty: Ty):
     """
@@ -48,5 +48,5 @@ def unify_unbound_var(m: MetaTv, ty: Ty):
             m.ref.set(ty)
         case _:
             if m in get_meta_vars([ty]):
-                raise TypeError(f"Occurrence check failed: got {m} in {ty}")
+                raise TyCkException(f"Occurrence check failed: got {m} in {ty}")
             m.ref.set(ty)

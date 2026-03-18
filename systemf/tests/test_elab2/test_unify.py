@@ -9,12 +9,12 @@ from systemf.elab2.types import *
 def test_forall_lhs_rejected():
     """forall on either side is unexpected during unification"""
     ty = TY.forall([TY.bound_var("a")], TY.bound_var("a"))
-    with pytest.raises(TypeError, match="Cannot unify"):
+    with pytest.raises(TyCkException, match="Cannot unify"):
         unify(ty, INT)
 
 def test_forall_rhs_rejected():
     ty = TY.forall([TY.bound_var("a")], TY.bound_var("a"))
-    with pytest.raises(TypeError, match="Cannot unify"):
+    with pytest.raises(TyCkException, match="Cannot unify"):
         unify(INT, ty)
 
 # ---
@@ -42,18 +42,18 @@ def test_different_skolems_fail():
     """two distinct skolems cannot unify"""
     sk1 = TY.skolem("s", 1)
     sk2 = TY.skolem("s", 2)
-    with pytest.raises(TypeError, match="Cannot unify"):
+    with pytest.raises(TyCkException, match="Cannot unify"):
         unify(sk1, sk2)
 
 def test_different_tycons_fail():
     """two distinct type constructors cannot unify"""
-    with pytest.raises(TypeError, match="Cannot unify"):
+    with pytest.raises(TyCkException, match="Cannot unify"):
         unify(TyCon("Int"), TyCon("Bool"))
 
 def test_skolem_vs_tycon_fail():
     """skolem and tycon cannot unify"""
     sk = TY.skolem("s", 1)
-    with pytest.raises(TypeError, match="Cannot unify"):
+    with pytest.raises(TyCkException, match="Cannot unify"):
         unify(sk, INT)
 
 # ---
@@ -149,7 +149,7 @@ def test_bound_meta_mismatch_fails():
     """meta bound to Int cannot unify with a different tycon"""
     m = TY.meta(1)
     m.ref.set(INT)
-    with pytest.raises(TypeError, match="Cannot unify"):
+    with pytest.raises(TyCkException, match="Cannot unify"):
         unify(m, TyCon("Bool"))
 
 # ---
@@ -158,5 +158,5 @@ def test_bound_meta_mismatch_fails():
 def test_occurrence_check():
     """meta cannot unify with a type containing itself (infinite type)"""
     m = TY.meta(1)
-    with pytest.raises(TypeError, match="Occurrence check"):
+    with pytest.raises(TyCkException, match="Occurrence check"):
         unify(m, TY.fun(m, INT))

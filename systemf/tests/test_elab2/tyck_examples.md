@@ -280,3 +280,62 @@ The rigid skolem correctly rejects impossible constraints.
 | Input | Unification | Wrapper |
 |-------|-------------|---------|
 | `Int ≤ Int` | `Int = Int` | `WP_HOLE` |
+
+---
+
+## Documentation Style Guide
+
+### Separation of Concerns
+
+This test suite uses a **two-tier documentation approach**:
+
+| Location | Purpose | Content |
+|----------|---------|---------|
+| `tyck_examples.md` (this file) | **Full specification** | Detailed rule explanations, derivation steps, wrapper constructions, rationale |
+| `test_*.py` | **Concise reference** | Rule identifier + pointer to spec |
+
+### Docstring Convention
+
+Test docstrings should be **minimal but informative**:
+
+```python
+def test_skolemise_prpoly():
+    """PRPOLY: pr(∀a. a → a) = sk_a → sk_a ↦ Λsk_a.[HOLE]
+    
+    See tyck_examples.md "PRPOLY — Polymorphic Type" for full spec.
+    """
+```
+
+**Pattern**: `<RULE>: <brief description>` followed by `See tyck_examples.md "<section>" for full spec.`
+
+### Why This Style?
+
+1. **Single source of truth**: Detailed documentation lives in one place
+2. **DRY principle**: Avoid duplicating specs across test files
+3. **Maintainability**: Update spec in one place, tests stay clean
+4. **Readability**: Tests are readable without scrolling through paragraphs
+5. **Reference integrity**: Tests link to specific sections for traceability
+
+### Adding New Tests
+
+When adding a new test:
+
+1. **Document in tyck_examples.md first**:
+   - Add a new section under the appropriate rule category
+   - Include the full derivation, wrapper structure, and rationale
+
+2. **Write minimal test docstring**:
+   - Identify the rule (e.g., PRPOLY, DEEP-SKOL)
+   - One-line description of what the test checks
+   - Reference to the spec section
+
+3. **Example**:
+   ```python
+   def test_new_case():
+       """RULE-NAME: brief description of the test case.
+       
+       See tyck_examples.md "Section Name" for full spec.
+       """
+   ```
+
+This ensures the specification is comprehensive while keeping the test code focused and maintainable.

@@ -73,16 +73,16 @@ class TyPrinter(PrettyPrinter[Ty]):
             match v:
                 case BoundTv():
                     return 1, v.name
-                case SkolemTv():
-                    return 1, f"${v.name}"
-                case TyCon():
-                    return 1, v.name
+                case SkolemTv(name, uniq):
+                    return 1, f"$s{uniq}_{name}"
+                case TyCon(name):
+                    return 1, name
                 case TyFun(arg, res):
                     return 1, f"{self.show_prec(arg, 1)} -> {self.show_prec(res, 0)}"
                 case TyForall(vars, body):
                     return 0, f"forall {' '.join(name for name in varnames(vars))}. {self.show_prec(body, 0)}"
-                case MetaTv():
-                    return 1, f"#m{v.uniq}"
+                case MetaTv(uniq):
+                    return 1, f"$m{uniq}"
                 case _:
                     raise TypeError(f"Unexpected type: {v}")
         p, s = _show()
@@ -158,11 +158,14 @@ def get_meta_vars(tys: list[Ty]) -> list[MetaTv]:
             case _:
                 pass
 
-    return [
-        v
-        for ty in tys
-        for v in _meta_tv(zonk_type(ty))
-    ]
+    seen: set[int] = set()  # for deduplication
+    result: list[MetaTv] = []
+    for ty in tys:
+        for v in _meta_tv(zonk_type(ty)):
+            if v.uniq not in seen:
+                seen.add(v.uniq)
+                result.append(v)
+    return result
 
 _CO_TY = TypeVar("_CO_TY", covariant=True, bound=Ty)
 
@@ -326,17 +329,17 @@ class CoreBuilder(SyntaxCoreSubst[CoreTm]):
     def lit(self, value: Lit) -> CoreTm:
         return CoreLit(value)
     def var(self, name: str, ty: Ty) -> CoreTm:
-        return CoreVar(name, ty)
+        return CoreVar(name, zonk_type(ty))
     def tyapp(self, fun: CoreTm, tyarg: Ty) -> CoreTm:
-        return CoreTyApp(fun, tyarg)
+        return CoreTyApp(fun, zonk_type(tyarg))
     def tylam(self, name: str, body: CoreTm) -> CoreTm:
         return CoreTyLam(name, body)
     def lam(self, name: str, ty: Ty, body: CoreTm) -> CoreTm:
-        return CoreLam(name, ty, body)
+        return CoreLam(name, zonk_type(ty), body)
     def app(self, fun: CoreTm, arg: CoreTm) -> CoreTm:
         return CoreApp(fun, arg)
     def let(self, name: str, expr_ty: Ty, expr: CoreTm, body: CoreTm) -> CoreTm:
-        return CoreLet(name, expr_ty, expr, body)
+        return CoreLet(name, zonk_type(expr_ty), expr, body)
     def subst(self, name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
         return subst_coretm(name, to, expr)
 
@@ -355,10 +358,10 @@ def subst_coretm(name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
                 return CoreLam(n, ty, _go(body))
             case CoreApp(fun, arg):
                 return CoreApp(_go(fun), _go(arg))
-            case CoreLet(n, expr, expr_ty, body) if n == name:
-                return CoreLet(n, _go(expr), expr_ty, body)
-            case CoreLet(n, expr, expr_ty, body):
-                return CoreLet(n, _go(expr), expr_ty, _go(body))
+            case CoreLet(n, expr_ty, expr, body) if n == name:
+                return CoreLet(n, expr_ty, _go(expr), body)
+            case CoreLet(n, expr_ty, expr, body):
+                return CoreLet(n, expr_ty, _go(expr), _go(body))
             case _:
                 return expr
     return _go(expr)
@@ -470,13 +473,17 @@ def wp_compose(wp_g: Wrapper, wp_f: Wrapper) -> Wrapper:
 def zonk_wrapper(wp: Wrapper) -> Wrapper:
     match wp:
         case WpCompose(wp_g, wp_f):
-            return WpCompose(zonk_wrapper(wp_g), zonk_wrapper(wp_f))
+            return wp_compose(zonk_wrapper(wp_g), zonk_wrapper(wp_f))
         case WpFun(arg_ty, wp_arg, wp_res):
-            return WpFun(zonk_type(arg_ty), zonk_wrapper(wp_arg), zonk_wrapper(wp_res))
+            return wp_fun(zonk_type(arg_ty), zonk_wrapper(wp_arg), zonk_wrapper(wp_res))
         case WpTyApp(ty_arg):
             return WpTyApp(zonk_type(ty_arg))
         case WpCast(ty_from, ty_to):
-            return WpCast(zonk_type(ty_from), zonk_type(ty_to))
+            zty_from = zonk_type(ty_from)
+            zty_to = zonk_type(ty_to)
+            if zty_from == zty_to:
+                return WP_HOLE
+            return WpCast(zty_from, zty_to)
         case _:
             return wp
 

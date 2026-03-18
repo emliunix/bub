@@ -82,13 +82,12 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
 
     @override
     def lit(self, value: Lit) -> TyCk[Defer[OUT]]:
-        def _go(_: Env, exp: Expect) -> Defer[OUT]:
+        def _go(env: Env, exp: Expect) -> Defer[OUT]:
             match exp:
                 case Infer(ref):
                     ref.set(value.ty)
                 case Check(ty):
-                    if ty != value.ty:
-                        raise TyCkException(f"Expected {value.ty}, got {ty}")
+                    unify(value.ty, ty)
                 case _:
                     raise Exception("impossible")
             return lambda: self.core.lit(value)
@@ -331,7 +330,7 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
             case TyForall(vars, ty):
                 mvs = [self.make_meta() for _ in vars]
                 inst_ty = subst_ty(vars, mvs, ty)
-                wrap = functools.reduce(lambda acc, ty: WpCompose(WpTyApp(ty), acc), mvs, WP_HOLE)
+                wrap = functools.reduce(lambda acc, ty: wp_compose(WpTyApp(ty), acc), mvs, WP_HOLE)
                 return inst_ty, wrap
             case _:  # not a forall type
                 return sigma, WP_HOLE

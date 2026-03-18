@@ -50,7 +50,7 @@ def test_show_prec():
     assert P.show_prec(INT, 0) == "Int"
     assert P.show_prec(TY.fun(INT, INT), 2) == "(Int -> Int)"
     assert P.show_prec(TY.forall([TY.bound_var("a")], TY.fun(TY.bound_var("a"), INT)), 0) == "forall a. a -> Int"
-    assert P.show_prec(TY.meta(1), 0) == "#m1"
+    assert P.show_prec(TY.meta(1), 0) == "$m1"
     assert P.show_prec(TY.fun(TY.forall([TY.bound_var("a")], INT), INT), 0) == "(forall a. Int) -> Int"
 
 # ---
