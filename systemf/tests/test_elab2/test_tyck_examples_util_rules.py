@@ -499,56 +499,6 @@ def test_inst_check_contra():
 # Test Helpers
 # =============================================================================
 
-def check_type(expected: Ty):
-    def _check(ty: Ty):
-        assert zonk_type(ty) == expected
-    return _check
-
-def equals_term(expected: CoreTm):
-    def _check(term: CoreTm):
-        assert term == expected
-    return _check
-
 def run_tyck(run: Callable[[TyCkImpl[CoreTm]], None]):
     impl = TyCkImpl(C)
     run(impl)
-
-def run_tyck_term(expr: Callable[[TyCkImpl[CoreTm]], TyCk[Defer[CoreTm]]], check_ty: Callable[[Ty], None], check: Callable[[CoreTm], None]):
-    def _run(impl):
-        poly_term = impl.poly(expr(impl))
-        ty, res = run_infer(None, poly_term)
-        check_ty(ty)
-        check(res())
-    run_tyck(_run)
-
-# =============================================================================
-# Integration Tests (End-to-end type checking)
-# =============================================================================
-
-def test_simple1():
-    # 1
-    run_tyck_term(
-        lambda s: s.lit(LitInt(1)),
-        check_type(INT),
-        equals_term(C.lit(LitInt(1))),
-    )
-
-def test_simple2():
-    # let id = \x -> x in id 1
-    a = TY.bound_var("a")
-    run_tyck_term(
-        lambda s: s.let("id", s.lam("x", s.var("x")),
-            s.app(s.var("id"), s.lit(LitInt(1)))),
-        check_type(INT),
-        equals_term(
-            C.let(
-                "id",
-                TY.forall([a], TY.fun(a, a)),
-                C.tylam(a, C.lam("x", a, C.var("x", a))),
-                C.app(
-                    C.tyapp(C.var("id", TY.forall([a], TY.fun(a, a))), INT),
-                    C.lit(LitInt(1))
-                )
-            )
-        )
-    )

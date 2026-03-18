@@ -344,50 +344,214 @@ The `inst` method implements bidirectional instantiation (INST1/INST2 rules).
 
 ---
 
-## Figure 8: Bidirectional Type Checking Rules (To Be Implemented)
+## Figure 8: Bidirectional Type Checking Rules
+
+Type-driven elaboration from source terms to System F core terms.
+
+---
 
 ### INT — Integer Literal
-| Source | Expected | Core Term | Wrapper |
-|--------|----------|-----------|---------|
-| `42` | `Int` | `42` | `WP_HOLE` |
 
-### VAR — Variable
-| Context | Source | Expected | Core Term |
-|---------|--------|----------|-----------|
-| `x:∀a.a→a ∈ Γ` | `x` | `?1→?1` | `x[?1]` |
+**Rule**: Literals synthesize their type directly.
 
-### ABS1/ABS2 — Lambda
-| Mode | Source | Check Against | Core Term |
-|------|--------|---------------|-----------|
-| Infer | `λx.x` | — | `λx:?1.x` |
-| Check | `λx.x` | `Int→Int` | `λx:Int.x` |
+| Field | Value |
+|-------|-------|
+| **Rule** | INT |
+| **Source** | `42` |
+| **Mode** | Infer |
+| **Expected Type** | `Int` |
+| **Core Term** | `42` |
+| **Wrapper** | `WP_HOLE` |
+| **Test** | `test_int_literal` |
 
-### AABS1/AABS2 — Annotated Lambda
-| Mode | Source | Annotation | Result |
-|------|--------|------------|--------|
-| Infer | `λx:Int.x` | `Int` | `Int→Int` |
-| Check | `λx:(Int→Int).x` | `Int→Int` | coercion via subsumption |
+**Key Insight**: Literals are the base case—no computation, just return their fixed type.
+
+---
+
+### VAR — Variable Lookup
+
+**Rule**: Look up variable in context, then instantiate polymorphic type.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | VAR |
+| **Context** | `Γ = {id : ∀a.a→a}` |
+| **Source** | `id` |
+| **Mode** | Infer against `?1→?1` |
+| **Expected Type** | `?1→?1` (after instantiation) |
+| **Core Term** | `id[?1]` (type application) |
+| **Test** | `test_var_simple`, `test_var_poly` |
+
+**Key Insight**: Polymorphic variables are instantiated at use site via fresh metas.
+
+---
+
+### ABS1 — Lambda Inference
+
+**Rule**: Infer lambda by creating fresh meta for argument, inferring body.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | ABS1 |
+| **Source** | `λx.x` |
+| **Mode** | Infer |
+| **Argument Type** | Fresh meta `?1` |
+| **Body Type** | `?1` (from `x` in context) |
+| **Result Type** | `?1→?1` |
+| **Core Term** | `λx:?1.x` |
+| **Test** | `test_abs1_identity` |
+
+**Key Insight**: ABS1 creates a fresh meta and lets unification discover the type.
+
+---
+
+### ABS2 — Lambda Checking
+
+**Rule**: Check lambda against known function type.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | ABS2 |
+| **Source** | `λx.x` |
+| **Mode** | Check against `Int→Int` |
+| **Decomposed** | Arg=`Int`, Res=`Int` |
+| **Check Body** | `x` against `Int` (with `x:Int` in context) |
+| **Result Type** | `Int→Int` |
+| **Core Term** | `λx:Int.x` |
+| **Test** | `test_abs2_identity` |
+
+**Key Insight**: ABS2 decomposes the expected type and checks components.
+
+---
+
+### AABS1 — Annotated Lambda (Inference)
+
+**Rule**: Lambda with explicit type annotation (infer mode).
+
+| Field | Value |
+|-------|-------|
+| **Rule** | AABS1 |
+| **Source** | `λx:Int.x` |
+| **Mode** | Infer |
+| **Annotation** | `Int` (arg type known) |
+| **Body Check** | `x` against `Int` |
+| **Result Type** | `Int→Int` |
+| **Core Term** | `λx:Int.x` |
+| **Test** | `test_aabs1_simple` |
+
+**Key Insight**: Annotation provides the argument type; body is checked against result.
+
+---
+
+### AABS2 — Annotated Lambda (Checking)
+
+**Rule**: Lambda with annotation, checked against expected type (may need coercion).
+
+| Field | Value |
+|-------|-------|
+| **Rule** | AABS2 |
+| **Source** | `λx:(∀a.a→a).x` |
+| **Mode** | Check against `(Int→Int)→(Int→Int)` |
+| **Annotation** | `∀a.a→a` (more polymorphic than expected) |
+| **Arg Check** | Subsumption: `Int→Int ≤ ∀a.a→a` |
+| **Core Term** | With coercion wrapper |
+| **Test** | `test_aabs2_subsumption` |
+
+**Key Insight**: Annotation may be more polymorphic than expected—requires subsumption.
+
+---
 
 ### APP — Application
-| Source | Fun Type | Arg | Result |
-|--------|----------|-----|--------|
-| `id 42` | `?1→?1` | `42:Int` | `Int`, core: `id[Int] 42` |
+
+**Rule**: Infer function type, check argument, return result.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | APP |
+| **Source** | `id 42` |
+| **Context** | `id : ∀a.a→a` |
+| **Fun Inferred** | `?1→?1` (instantiated) |
+| **Arg Checked** | `42` against `?1` (unifies `?1=Int`) |
+| **Result Type** | `Int` |
+| **Core Term** | `id[Int] 42` |
+| **Test** | `test_app_simple`, `test_app_poly` |
+
+**Key Insight**: Application combines inference (fun), checking (arg), and unification.
+
+---
 
 ### ANNOT — Type Annotation
-| Source | Annotation | Check | Core Term |
-|--------|------------|-------|-----------|
-| `λx.x :: ∀a.a→a` | `∀a.a→a` | `sk_a→sk_a` | `Λsk_a.λx:sk_a.x` |
+
+**Rule**: Check term against annotated type, elaborates to polymorphic core.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | ANNOT |
+| **Source** | `(λx.x :: ∀a.a→a)` |
+| **Annotation** | `∀a.a→a` |
+| **Skolemized** | `sk_a→sk_a` (for checking) |
+| **Check Body** | `λx.x` against `sk_a→sk_a` |
+| **Result Type** | `∀a.a→a` |
+| **Core Term** | `Λsk_a.λx:sk_a.x` |
+| **Test** | `test_annot_poly` |
+
+**Key Insight**: Annotation uses skolemization to check polymorphic types.
+
+---
 
 ### LET — Let Binding
-| Source | Binding | Body | Result |
-|--------|---------|------|--------|
-| `let id=λx.x in id 42` | `id:∀a.a→a` | `id 42` | `Int` |
 
-### GEN1/GEN2 — Generalization
-| Mode | Source | Context | Result |
-|------|--------|---------|--------|
-| GEN1 | `λx.x` | `ftv(Γ)=∅` | `∀a.a→a` with `Λa.λx:a.x` |
-| GEN2 | `λx.x` | Check `∀a.a→a` | `Λsk_a.λx:sk_a.x` via skolemise |
+**Rule**: Generalize binding type, extend context, check body.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | LET |
+| **Source** | `let id = λx.x in id 42` |
+| **Binding Inferred** | `id : ?1→?1` |
+| **Generalized** | `id : ∀a.a→a` (free vars in Γ only) |
+| **Body Checked** | `id 42` with `id:∀a.a→a` in context |
+| **Result Type** | `Int` |
+| **Core Term** | `let id = Λa.λx:a.x in id[Int] 42` |
+| **Test** | `test_let_generalization`, `test_let_poly` |
+
+**Key Insight**: LET is where polymorphism is introduced via generalization.
+
+---
+
+### GEN1 — Generalization (Inference Mode)
+
+**Rule**: Generalize free metas not in context to foralls.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | GEN1 |
+| **Source** | `λx.x` |
+| **Inferred Type** | `?1→?1` |
+| **Context** | `ftv(Γ) = ∅` (no free type vars) |
+| **Generalized** | `∀a.a→a` |
+| **Core Term** | `Λa.λx:a.x` |
+| **Test** | `test_gen1_simple` |
+
+**Key Insight**: GEN1 quantifies over metas that don't escape into the context.
+
+---
+
+### GEN2 — Generalization (Checking Mode)
+
+**Rule**: Check against polymorphic type using skolemization.
+
+| Field | Value |
+|-------|-------|
+| **Rule** | GEN2 |
+| **Source** | `λx.x` |
+| **Check Against** | `∀a.a→a` |
+| **Skolemized** | `sk_a→sk_a` |
+| **Check Body** | `λx.x` against `sk_a→sk_a` |
+| **Result Type** | `∀a.a→a` |
+| **Core Term** | `Λsk_a.λx:sk_a.x` |
+| **Test** | `test_gen2_skolem` |
+
+**Key Insight**: GEN2 uses skolemization to verify a term works for all types.
 
 ---
 
