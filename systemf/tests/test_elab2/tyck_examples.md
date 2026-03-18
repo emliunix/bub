@@ -203,6 +203,27 @@ This ensures minimal wrapper representation while preserving correctness.
 
 ---
 
+## INST — Instantiation Judgment
+
+The `inst` method implements bidirectional instantiation (INST1/INST2 rules).
+
+### INST1 — Infer Mode
+
+| Input Type | Mode | Instantiated Type | Wrapper |
+|------------|------|-------------------|---------|
+| `∀a. a` | Infer | `?1` | `WpTyApp(?1)` |
+| `Int` | Infer | `Int` | `WP_HOLE` |
+
+### INST2 — Check Mode
+
+| Input Type | Check Against | Wrapper |
+|------------|---------------|---------|
+| `∀a. a → a` | `Int → Int` | `WpTyApp(Int)` |
+
+**Note**: Contravariant argument position triggers unification (`?1 := Int`).
+
+---
+
 ## Figure 8: Bidirectional Type Checking Rules (To Be Implemented)
 
 ### INT — Integer Literal
@@ -250,36 +271,76 @@ This ensures minimal wrapper representation while preserving correctness.
 
 ---
 
-## Subsumption Rules (To Be Implemented)
+## Subsumption Rules
 
-### DEEP-SKOL
+**Notation**: `σ₁ ≤ σ₂` means σ₁ is at least as polymorphic as σ₂ (σ₁ can be used where σ₂ is expected).
 
-Direction: `subs_check(sigma1, sigma2)` checks if `sigma1` (more polymorphic) ≤ `sigma2` (less polymorphic).
-We **instantiate** the left to match the right, then check subsumption.
+### MONO — Monomorphic Base Case
 
-| Input | Instantiation | Skolemization | Subsumption Check | Wrapper |
-|-------|---------------|---------------|-------------------|---------|
-| `∀a.a→a ≤ Int→Int` | `a ↦ ?1` | (none for RHS) | `?1→?1 ≤ Int→Int` ✓ | `WpCompose(WpFun(Int, ...), WpTyApp(Int))` |
-| `Int→String ≤ ∀a.a→a` | (none) | `sk_a→sk_a` | rigid check fails | **FAIL** |
+Direct unification when both types are monomorphic.
 
-**Anti-case explanation**: For `Int→String ≤ ∀a.a→a`:
-1. Skolemize RHS: `∀a.a→a` becomes `sk_a→sk_a` (rigid skolem)
-2. Check: `Int→String ≤ sk_a→sk_a`
-3. Arg (contravariant): `sk_a ≤ Int` requires `sk_a = Int` (rigid equality)
-4. Res (covariant): `String ≤ sk_a` requires `String = sk_a` (rigid equality)
-5. But `Int ≠ String`, so `sk_a` cannot satisfy both → **FAIL**
+| Test | Coverage | Wrapper |
+|------|----------|---------|
+| `Int ≤ Int` | Identity | `WP_HOLE` |
 
-The rigid skolem correctly rejects impossible constraints.
+---
 
-### FUN
-| Input | Arg Check (Contravariant) | Res Check (Covariant) | Result |
-|-------|---------------------------|----------------------|--------|
-| `(∀a.a→a)→Int ≤ (Int→Int)→Int` | `Int→Int ≤ ∀a.a→a` ✓ | `Int ≤ Int` ✓ | coercion wrapper |
+### SPEC — Instantiate Left (LHS is ∀, RHS is ρ)
 
-### MONO
-| Input | Unification | Wrapper |
-|-------|-------------|---------|
-| `Int ≤ Int` | `Int = Int` | `WP_HOLE` |
+When LHS has outer foralls, instantiate with fresh metas.
+
+| Test | Coverage | Wrapper |
+|------|----------|---------|
+| `∀a.a ≤ Int` | Simple instantiation | `WpTyApp(Int)` |
+| `∀a.a → a ≤ Int → Int` | Instantiate in function | `WpTyApp(Int)` |
+| `∀a.∀b.a → b ≤ Int → String` | Nested foralls | `WpCompose(WpTyApp(Int), WpTyApp(String))` |
+| `Bool → (∀a.a → a) ≤ Bool → Int → Int` | Paper §4.6.2: instantiate nested ∀ in result | `WpTyApp(Int → Int)` |
+
+---
+
+### FUN — Function Subsumption (Contravariant Arg, Covariant Res)
+
+For `σ₁ → σ₂ ≤ σ₃ → ρ₄`:
+- **Arg**: `σ₃ ≤ σ₁` (flipped! contravariant)
+- **Res**: `σ₂ ≤ ρ₄` (same direction, covariant)
+
+| Test | Arg Check | Res Check | Wrapper |
+|------|-----------|-----------|---------|
+| `Int → String ≤ Int → String` | `Int ≤ Int` | `String ≤ String` | `WpFun(Int, WP_HOLE, WP_HOLE)` |
+| `(Int→Int) → String ≤ (∀a.a→a) → String` | `∀a.a→a ≤ Int→Int` ✓ | `String ≤ String` | `WpFun(∀a.a→a, WpTyApp(Int), WP_HOLE)` |
+| `(Int → Int) → Bool ≤ (∀a.a → a) → Bool` | Paper §4.6.2: contravariant arg | `Bool ≤ Bool` | `WpFun(∀a.a→a, WpTyApp(Int), WP_HOLE)` |
+
+**Key insight**: A function accepting *polymorphic* arguments can be used where a function accepting *monomorphic* arguments is expected. The caller provides monomorphic, the function accepts polymorphic.
+
+---
+
+### DEEP-SKOL — Skolemize Right (RHS is ∀)
+
+When RHS has foralls, skolemize to rigid constants and check subsumption. Uses **weak prenex conversion** `pr(σ)` to float ∀s from result position.
+
+| Test | LHS | RHS (skolemized) | Result |
+|------|-----|------------------|--------|
+| `∀a.a → a ≤ ∀b.b → b` | `?1 → ?1` | `sk_b → sk_b` | unifies `?1 := sk_b` ✓ |
+| `∀a.∀b.a → b ≤ ∀a.a → a` | `?1 → ?2` | `sk_a → sk_a` | fails: `?2 ≠ sk_a` (rigid) |
+| `∀a.∀b.a → b ≤ ∀a.a → Int` | `?1 → ?2` | `sk_a → sk_a` | fails: `sk_a ≠ Int` (rigid) |
+
+**Weak Prenex Equivalences** (Paper §4.6.2): These type pairs are equivalent under deep skolemization because `pr(∀a.a → (∀b.b → b)) = ∀ab.a → b → b`.
+
+| Test | Direction | pr(RHS) | Result |
+|------|-----------|---------|--------|
+| `∀ab.a → b → b ≤ ∀a.a → (∀b.b → b)` | Forward | `∀ab.a → b → b` (already prenex) | ✓ |
+| `∀a.a → (∀b.b → b) ≤ ∀ab.a → b → b` | Reverse | `∀ab.a → b → b` (floats ∀b) | ✓ |
+
+---
+
+### Anti-Tests (Must Fail)
+
+| Test | Why It Fails |
+|------|--------------|
+| `Int → String ≤ Int → Bool` | Different result types |
+| `(∀a.a→a) → Int ≤ (Int→Int) → Int` | Arg check: `Int→Int ≤ ∀a.a→a` fails (not more polymorphic) |
+| `Int → Int ≤ ∀a.a → a` | RHS skolemizes to `sk_a → sk_a`; `sk_a ≠ Int` (rigid) |
+| `String ≤ Int` | Different types |
 
 ---
 
@@ -300,13 +361,13 @@ Test docstrings should be **minimal but informative**:
 
 ```python
 def test_skolemise_prpoly():
-    """PRPOLY: pr(∀a. a → a) = sk_a → sk_a ↦ Λsk_a.[HOLE]
-    
-    See tyck_examples.md "PRPOLY — Polymorphic Type" for full spec.
+    """PRPOLY: pr(∀a. a → a) = sk_a → sk_a ↦ Λsk_a
+
+    Polymorphic type skolemizes to rigid variables with type lambda wrapper.
     """
 ```
 
-**Pattern**: `<RULE>: <brief description>` followed by `See tyck_examples.md "<section>" for full spec.`
+**Pattern**: `<RULE>: <brief description>` followed by one-line insight.
 
 ### Why This Style?
 
@@ -326,15 +387,15 @@ When adding a new test:
 
 2. **Write minimal test docstring**:
    - Identify the rule (e.g., PRPOLY, DEEP-SKOL)
-   - One-line description of what the test checks
-   - Reference to the spec section
+   - Brief description of what the test checks
+   - One-line insight or expected behavior
 
 3. **Example**:
    ```python
    def test_new_case():
-       """RULE-NAME: brief description of the test case.
-       
-       See tyck_examples.md "Section Name" for full spec.
+       """RULE-NAME: what the test verifies
+
+       Key insight or expected outcome.
        """
    ```
 
