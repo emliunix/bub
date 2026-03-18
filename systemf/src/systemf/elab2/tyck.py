@@ -246,8 +246,14 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
     # subsumption check
 
     def subs_check(self, sigma1: Ty, sigma2: Ty) -> Wrapper:
-        sks, rho2, sks_wrap = self.skolemise(sigma2)
-        subs_wrap = self.subs_check_rho(sigma1, rho2)  # sigma1 inst-to rho2
+        """
+        Subsumption check between two types.
+
+        sigma1 can be instantiated to sigma2.
+        The wrapper is sigma1 ~~> sigma2.
+        """
+        sks, rho2, sks_wrap = self.skolemise(sigma2)  # rho2 ~~> sigma2
+        subs_wrap = self.subs_check_rho(sigma1, rho2)  # sigma1 ~~> rho2
         # check skolem var escape
         # this is more like a covering test, that skolem vars are all used
         esc_tvs = set(sks).intersection(get_free_vars([sigma1, sigma2]))
@@ -272,11 +278,11 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
                 return WpCast(tau1, tau2)
 
     def subs_check_fun(self, a1: Ty, r1: Ty, a2: Ty, r2: Ty) -> Wrapper:
-        # a2 -> a1
+        # a2 ~> a1
         arg_wrap =self.subs_check(a2, a1)      # contravariant
-        # r1 -> r2
+        # r1 ~> r2
         res_wrap = self.subs_check_rho(r1, r2) # covariant
-        # a2 -> r2
+        # (a1 -> r1) ~> (a2 -> r2)
         return wp_fun(a2, arg_wrap, res_wrap)
 
     # ---
@@ -332,7 +338,7 @@ class TyCkImpl(SyntaxDSL[str, TyCk[Defer[OUT]]]):
                 inst_ty = subst_ty(vars, mvs, ty)
                 wrap = functools.reduce(lambda acc, ty: wp_compose(WpTyApp(ty), acc), mvs, WP_HOLE)
                 return inst_ty, wrap
-            case _:  # not a forall type
+            case _:  # not a sigma type
                 return sigma, WP_HOLE
 
     def unify_fun(self, ty: Ty) -> tuple[Ty, Ty]:

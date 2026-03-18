@@ -86,6 +86,126 @@ When checking `σ₁ ≤ σ₂`:
 
 ---
 
+## Wrapper Notation
+
+A concise syntax for describing wrapper constructions in subsumption derivations.
+
+### Variables
+
+| Notation | Meaning |
+|----------|---------|
+| `m_a` | Meta variable created by instantiating `∀a` (from forall var `a`) |
+| `m_1`, `m_2` | Fresh meta variables created during inference (numbered) |
+| `s_a`, `s_b` | Skolem constants created from `∀a`, `∀b` during skolemization |
+
+### Wrapper Operators
+
+| Notation | Meaning | Wrapper Type |
+|----------|---------|--------------|
+| `ID` | Identity wrapper (no-op) | `WpHole` |
+| `w1 <*> w2` | Compose wrappers left-to-right | `wp_compose(w1, w2)` |
+| `t1 ~~> t2` | A wrapper translating terms of type `t1` to terms of type `t2` | — |
+| `a ~ b` | Cast from type `a` to type `b` | `WpCast(a, b)` |
+| `Fun(t, w_arg, w_res)` | Eta-expansion wrapper | `WpFun(t, w_arg, w_res)` |
+| `TyLam(tv)` | Type abstraction | `WpTyLam(tv)` |
+| `TyApp(t)` | Type application | `WpTyApp(t)` |
+
+### Usage
+
+**Wrapper type**: `σ₁ ~~> σ₂` denotes a coercion that transforms a term of type `σ₁` into a term of type `σ₂`.
+
+**Composition**: The `<*>` operator composes wrappers sequentially:
+```
+(σ1 ~~> σ2) <*> (σ2 ~~> σ3)  =  (σ1 ~~> σ3)
+```
+
+**Example**: The subsumption check `∀ab.a→b→b ≤ ∀a.a→(∀b.b→b)` produces:
+```
+TyLam(s_a) <*> Fun(s_a, ID, TyLam(s_b) <*> Fun(s_b, ID, ID))
+    <*> TyApp(m_b) <*> TyApp(m_a)
+    : (∀ab.a→b→b ~~> ∀a.a→(∀b.b→b))
+```
+
+Where:
+- `TyApp(m_b) <*> TyApp(m_a)` instantiates LHS to `m_a → m_b → m_b` (outer forall b wraps inner forall a)
+- `TyLam(s_a) <*> ...` abstracts the skolemized RHS `s_a → s_b → s_b`
+- The `Fun` wrappers handle function structure (eta expansion)
+
+---
+
+## Utility Rules — Wrapper Semantics
+
+Wrapper-producing utility judgments and their semantic interpretation.
+
+### Instantiate — `inst(σ) → (ρ, w)`
+
+Produces a wrapper `w : σ ~~> ρ` that instantiates polymorphic types to monomorphic ones.
+
+| Rule | Input `σ` | Output `ρ` | Wrapper `w` | Semantics |
+|------|-----------|------------|-------------|-----------|
+| **INST-MONO** | `τ` (no ∀) | `τ` | `ID` | Identity, no instantiation needed |
+| **INST-POLY** | `∀a.ρ` | `ρ[m_a/a]` | `TyApp(m_a) <*> w_inner` | Instantiate `∀a` with fresh meta `m_a` |
+
+**Example**: `inst(∀a.a→a) = (m_a→m_a, TyApp(m_a))`
+
+**Direction**: The wrapper takes a term of the polymorphic type and produces a term of the instantiated type:
+```
+e : ∀a.a→a  ──TyApp(m_a)──>  e[m_a] : m_a→m_a
+```
+
+---
+
+### Skolemize — `skolemise(σ) → (ρ, w)`
+
+Produces a wrapper `w : ρ ~~> σ` that abstracts skolemized types back to polymorphic form.
+
+| Rule | Input `σ` | Output `ρ` | Skolems | Wrapper `w` | Semantics |
+|------|-----------|------------|---------|-------------|-----------|
+| **SK-MONO** | `τ` | `τ` | `[]` | `ID` | Identity, no foralls to skolemize |
+| **SK-POLY** | `∀a.ρ` | `ρ[s_a/a]` | `[s_a] ++ ss` | `TyLam(s_a) <*> w_inner` | Abstract `s_a` back to `∀a` |
+| **SK-FUN** | `σ₁→σ₂` | `σ₁→ρ₂` | `ss` | `Fun(σ₁, ID, w_res)` | Eta-expand, delegate to result |
+
+Where `w_inner` comes from recursive skolemization and `w_res = skolemise(σ₂)` when `σ₂` has prenex foralls.
+
+**Direction**: The wrapper takes a term of the skolemized type and produces a term of the polymorphic type:
+```
+e : s_a→s_a  ──TyLam(s_a)──>  Λs_a.e : ∀a.a→a
+```
+
+**Critical distinction**: `skolemise` produces a wrapper in the **opposite direction** from `inst`:
+- `inst` : `σ ~~> ρ` (polymorphic → monomorphic via instantiation)
+- `skolemise` : `ρ ~~> σ` (skolemized → polymorphic via abstraction)
+
+---
+
+### Subsumption — `subs_check(σ₁, σ₂) → w` / `subs_check_rho(ρ₁, ρ₂) → w`
+
+Produces a wrapper `w : σ₁ ~~> σ₂` witnessing that `σ₁` is at least as polymorphic as `σ₂`.
+
+| Rule | Condition | Result Wrapper | Semantics |
+|------|-----------|----------------|-----------|
+| **SUBS-SPEC** | `σ₁ = ∀a.ρ₁` | `w_inner <*> TyApp(m_a)` | Instantiate LHS, continue |
+| **SUBS-SKOL** | `σ₂ = ∀a.ρ₂` | `TyLam(s_a) <*> w_inner` | Skolemize RHS, abstract result |
+| **SUBS-RHO** | Both rho | `subs_check_rho(ρ₁, ρ₂)` | Delegate to rho-checking |
+| **SUBS-FUN** | `σ₁→σ₂ ≤ σ₃→ρ₄` | `Fun(σ₃, w_arg, w_res)` | Eta-expansion with contravariant arg |
+| **SUBS-MONO** | `τ₁ = τ₂` | `ID` | Types unify, identity wrapper |
+
+Where:
+- `w_arg : σ₃ ~~> σ₁` (contravariant — argument types flip)
+- `w_res : σ₂ ~~> ρ₄` (covariant — result types same direction)
+
+**Composition structure**:
+```
+subs_check(∀ab.a→b→b, ∀a.a→(∀b.b→b))
+  = skolemise_wrapper <*> subs_check_rho_wrapper <*> inst_wrapper
+  = (TyLam(s_a) <*> Fun(s_a, ID, TyLam(s_b) <*> Fun(s_b, ID, ID)))
+    <*> Fun(s_a, ID, Fun(s_b, ID, ID))
+    <*> (TyApp(m_b) <*> TyApp(m_a))  -- outer forall b wraps inner forall a
+  : (∀ab.a→b→b ~~> ∀a.a→(∀b.b→b))
+```
+
+---
+
 ## Figure 9: Subsumption and Skolemization (PR Rules)
 
 ### PRMONO — Monomorphic Type
@@ -337,6 +457,7 @@ When RHS has foralls, skolemize to rigid constants and check subsumption. Uses *
 
 | Test | Why It Fails |
 |------|--------------|
+| `Int ≤ ∀a.a` | RHS skolemizes to `sk_a`; `sk_a ≠ Int` (rigid) |
 | `Int → String ≤ Int → Bool` | Different result types |
 | `(∀a.a→a) → Int ≤ (Int→Int) → Int` | Arg check: `Int→Int ≤ ∀a.a→a` fails (not more polymorphic) |
 | `Int → Int ≤ ∀a.a → a` | RHS skolemizes to `sk_a → sk_a`; `sk_a ≠ Int` (rigid) |

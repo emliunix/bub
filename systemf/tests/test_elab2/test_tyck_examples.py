@@ -1,18 +1,12 @@
-# =============================================================================
-# Imports
-# =============================================================================
-
-import itertools
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable
 
 import pytest
 
-from systemf.elab2.tyck import Defer, TyCk, TyCkImpl, allnames, quantify, run_infer
+from systemf.elab2.tyck import Check, Defer, TyCk, TyCkImpl, run_infer
 from systemf.elab2.types import (
-    C, INT, STRING, TY, CoreTm, Lit, LitInt, Ty, TyCkException,
+    C, INT, STRING, TY, CoreTm, Lit, LitInt, Ref, Ty, TyCkException, WP_HOLE,
     WpCast, WpFun, WpTyApp, WpTyLam, wp_compose, wp_fun, zonk_type, zonk_wrapper
 )
-from systemf.elab2.unify import WP_HOLE, WpCompose, unify
 
 # =============================================================================
 # Figure 9: Skolemization Tests (PR Rules)
@@ -151,8 +145,9 @@ def test_subs_check_mono():
     """
     def _run(impl: TyCkImpl[Any]):
         wrap = impl.subs_check(INT, INT)
-        # Unification succeeds, wrapper is WpCast(Int, Int)
-        assert wrap == WpCast(INT, INT)
+        wrap = zonk_wrapper(wrap)
+        # Unification succeeds, WpCast(Int, Int) simplifies to WP_HOLE
+        assert wrap == WP_HOLE
     run_tyck(_run)
 
 
@@ -171,6 +166,20 @@ def test_subs_check_deep_skol():
         assert wrap == WpTyApp(INT)
     run_tyck(_run)
 
+def test_subs_check_anti_base():
+    """ANTI-CASE: Int ≤ ∀a.a MUST FAIL.
+
+    RHS skolemizes to sk_a; sk_a cannot unify with Int (rigid).
+    See tyck_examples.md "Anti-Tests (Must Fail)" for full spec.
+    """
+    a = TY.bound_var("a")
+    rhs = TY.forall([a], a)
+
+    def _run(impl: TyCkImpl[Any]):
+        with pytest.raises(TyCkException):
+            impl.subs_check(INT, rhs)
+    run_tyck(_run)
+
 def test_subs_check_deep_skol_anti():
     """ANTI-CASE: Int→String ≤ ∀a.a→a MUST FAIL
 
@@ -185,6 +194,306 @@ def test_subs_check_deep_skol_anti():
         with pytest.raises(TyCkException):
             impl.subs_check(bad_mono, poly_id)
     run_tyck(_run)
+
+
+def test_subs_check_spec_simple():
+    """SPEC: ∀a.a ≤ Int - simple instantiation with fresh meta.
+
+    See tyck_examples.md "SPEC — Instantiate Left" for full spec.
+    """
+    a = TY.bound_var("a")
+    poly_a = TY.forall([a], a)
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(poly_a, INT)
+        wrap = zonk_wrapper(wrap)
+        # Instantiation creates WpTyApp(Int)
+        assert wrap == WpTyApp(INT)
+    run_tyck(_run)
+
+
+def test_subs_check_spec_fun():
+    """SPEC: ∀a.a→a ≤ Int→Int - instantiate in function position.
+
+    See tyck_examples.md "SPEC — Instantiate Left" for full spec.
+    """
+    a = TY.bound_var("a")
+    poly_id = TY.forall([a], TY.fun(a, a))
+    mono_id = TY.fun(INT, INT)
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(poly_id, mono_id)
+        wrap = zonk_wrapper(wrap)
+        assert wrap == WpTyApp(INT)
+    run_tyck(_run)
+
+
+def test_subs_check_spec_nested():
+    """SPEC: ∀a.∀b.a→b ≤ Int→String - nested foralls instantiate to metas.
+
+    See tyck_examples.md "SPEC — Instantiate Left" for full spec.
+    """
+    a = TY.bound_var("a")
+    b = TY.bound_var("b")
+    poly_fun = TY.forall([a], TY.forall([b], TY.fun(a, b)))
+    mono_fun = TY.fun(INT, STRING)
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(poly_fun, mono_fun)
+        wrap = zonk_wrapper(wrap)
+        # Instantiation: TyApp(m_b) <*> TyApp(m_a) with m_a=Int, m_b=String
+        # Subsumption: Fun(Int, ID, ID) from function check
+        w_inst = wp_compose(WpTyApp(STRING), WpTyApp(INT))
+        w_fun = wp_fun(INT, WP_HOLE, WP_HOLE)
+        assert wrap == wp_compose(w_fun, w_inst)
+    run_tyck(_run)
+
+
+def test_subs_check_spec_paper():
+    """SPEC (Paper §4.6.2): Bool→(∀a.a→a) ≤ Bool→Int→Int.
+
+    RHS is Bool→(Int→Int), so ∀a.a→a instantiates to Int→Int.
+    See tyck_examples.md "SPEC — Instantiate Left" for full spec.
+    """
+    a = TY.bound_var("a")
+    lhs = TY.fun(INT, TY.forall([a], TY.fun(a, a)))  # Using INT as Bool proxy
+    rhs = TY.fun(INT, TY.fun(INT, INT))
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(lhs, rhs)
+        wrap = zonk_wrapper(wrap)
+        # Wrapper composes the argument coercion with result coercion
+        assert wrap == wp_fun(INT, WP_HOLE, WpTyApp(INT))
+    run_tyck(_run)
+
+
+def test_subs_check_fun_identity():
+    """FUN: Int→String ≤ Int→String - monomorphic function identity.
+
+    See tyck_examples.md "FUN — Function Subsumption" for full spec.
+    """
+    fun_ty = TY.fun(INT, STRING)
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(fun_ty, fun_ty)
+        # Both arg and res unify, wrapper is identity function
+        assert wrap == wp_fun(INT, WpCast(INT, INT), WpCast(STRING, STRING))
+    run_tyck(_run)
+
+
+def test_subs_check_fun_contra():
+    """FUN: (Int→Int)→String ≤ (∀a.a→a)→String - contravariant arg.
+
+    See tyck_examples.md "FUN — Function Subsumption" for full spec.
+    """
+    a = TY.bound_var("a")
+    poly_arg = TY.forall([a], TY.fun(a, a))
+    lhs = TY.fun(TY.fun(INT, INT), STRING)
+    rhs = TY.fun(poly_arg, STRING)
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(lhs, rhs)
+        wrap = zonk_wrapper(wrap)
+
+        assert wrap == wp_fun(poly_arg, WpTyApp(INT), WP_HOLE)
+    run_tyck(_run)
+
+#
+# WpFun(arg_ty=Int -> Int, wp_arg=WpTyApp(ty_arg=Int), wp_res=WpHole())
+# WpFun(arg_ty=forall a. a -> a, wp_arg=WpTyApp(ty_arg=Int), wp_res=WpHole())
+def test_subs_check_fun_paper():
+    """FUN (Paper §4.6.2): (Int→Int)→Bool ≤ (∀a.a→a)→Bool.
+
+    See tyck_examples.md "FUN — Function Subsumption" for full spec.
+    """
+    a = TY.bound_var("a")
+    poly_arg = TY.forall([a], TY.fun(a, a))
+    lhs = TY.fun(TY.fun(INT, INT), INT)  # Using INT as Bool proxy
+    rhs = TY.fun(poly_arg, INT)
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(lhs, rhs)
+        wrap = zonk_wrapper(wrap)
+        # Arg coercion: ∀a.a→a to Int→Int via instantiation
+        assert wrap == wp_fun(poly_arg, WpTyApp(INT), WP_HOLE)
+    run_tyck(_run)
+
+
+def test_subs_check_deep_skol_alpha():
+    """DEEP-SKOL: ∀a.a→a ≤ ∀b.b→b - alpha equivalence.
+
+    See tyck_examples.md "DEEP-SKOL — Skolemize Right" for full spec.
+    """
+    a = TY.bound_var("a")
+    b = TY.bound_var("b")
+    lhs = TY.forall([a], TY.fun(a, a))
+    rhs = TY.forall([b], TY.fun(b, b))
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(lhs, rhs)
+        wrap = zonk_wrapper(wrap)
+        # Skolemize: TyLam(sk_b) <*> Fun(sk_b, ID, ID)
+        # Subsumption: Fun(sk_b, ID, ID)
+        # Instantiation: TyApp(m_a) with m_a=sk_b
+        sk_b = TY.skolem("b", 0)
+        w_sk = wp_compose(WpTyLam(sk_b), wp_fun(sk_b, WP_HOLE, WP_HOLE))
+        w_subs = wp_fun(sk_b, WP_HOLE, WP_HOLE)
+        w_inst = WpTyApp(sk_b)
+        assert wrap == wp_compose(w_sk, wp_compose(w_subs, w_inst))
+    run_tyck(_run)
+
+
+def test_subs_check_deep_skol_prenex_fwd():
+    """DEEP-SKOL (Paper §4.6.2): ∀ab.a→b→b ≤ ∀a.a→(∀b.b→b).
+
+    RHS skolemizes to sk_a→sk_b→sk_b via PRFUN.
+    See tyck_examples.md "DEEP-SKOL — Weak Prenex Equivalences" for full spec.
+    """
+    a = TY.bound_var("a")
+    b = TY.bound_var("b")
+    lhs = TY.forall([a], TY.forall([b], TY.fun(a, TY.fun(b, b))))
+    rhs = TY.forall([a], TY.fun(a, TY.forall([b], TY.fun(b, b))))
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(lhs, rhs)
+        wrap = zonk_wrapper(wrap)
+
+        sk_a = TY.skolem("a", 0)
+        sk_b = TY.skolem("b", 1)
+
+        # Skolemization: TyLam(sk_a) <*> Fun(sk_a, ID, TyLam(sk_b) <*> Fun(sk_b, ID, ID))
+        w_sk_inner = wp_fun(sk_b, WP_HOLE, WP_HOLE)
+        w_sk_poly_b = wp_compose(WpTyLam(sk_b), w_sk_inner)
+        w_sk_fun = wp_fun(sk_a, WP_HOLE, w_sk_poly_b)
+        w_sk = wp_compose(WpTyLam(sk_a), w_sk_fun)
+
+        # Subsumption: Fun(sk_a, ID, Fun(sk_b, ID, ID))
+        w_subs_inner = wp_fun(sk_b, WP_HOLE, WP_HOLE)
+        w_subs = wp_fun(sk_a, WP_HOLE, w_subs_inner)
+
+        # Instantiation: TyApp(sk_b) <*> TyApp(sk_a) (metas unified with skolems)
+        w_inst = wp_compose(WpTyApp(sk_b), WpTyApp(sk_a))
+
+        expected = wp_compose(w_sk, wp_compose(w_subs, w_inst))
+        assert wrap == expected
+    run_tyck(_run)
+
+
+def test_subs_check_deep_skol_prenex_rev():
+    """DEEP-SKOL (Paper §4.6.2): ∀a.a→(∀b.b→b) ≤ ∀ab.a→b→b.
+
+    Reverse: pr(RHS) floats ∀b to top, creating sk_a→sk_b→sk_b.
+    See tyck_examples.md "DEEP-SKOL — Weak Prenex Equivalences" for full spec.
+    """
+    a = TY.bound_var("a")
+    b = TY.bound_var("b")
+    lhs = TY.forall([a], TY.fun(a, TY.forall([b], TY.fun(b, b))))
+    rhs = TY.forall([a], TY.forall([b], TY.fun(a, TY.fun(b, b))))
+
+    def _run(impl: TyCkImpl[Any]):
+        wrap = impl.subs_check(lhs, rhs)
+        wrap = zonk_wrapper(wrap)
+        sk_a = TY.skolem("a", 0)
+        sk_b = TY.skolem("b", 1)
+        # Skolemization: TyLam(sk_a) <*> TyLam(sk_b) <*> Fun(sk_a, ID, Fun(sk_b, ID, ID))
+        w_sk = wp_compose(WpTyLam(sk_a), wp_compose(WpTyLam(sk_b),
+            wp_fun(sk_a, WP_HOLE, wp_fun(sk_b, WP_HOLE, WP_HOLE))))
+        # Subsumption: Fun(sk_a, ID, Fun(sk_b, ID, ID) <*> TyApp(sk_b))
+        w_subs_inner = wp_compose(wp_fun(sk_b, WP_HOLE, WP_HOLE), WpTyApp(sk_b))
+        w_subs = wp_fun(sk_a, WP_HOLE, w_subs_inner)
+        # Instantiation: TyApp(sk_a) (outer), with TyApp(sk_b) nested in subsumption
+        w_inst = WpTyApp(sk_a)
+        expected = wp_compose(w_sk, wp_compose(w_subs, w_inst))
+        assert wrap == expected
+    run_tyck(_run)
+
+
+def test_subs_check_anti_diff_res():
+    """ANTI-CASE: Int→String ≤ Int→Bool MUST FAIL.
+
+    Different result types cannot unify.
+    """
+    lhs = TY.fun(INT, STRING)
+    rhs = TY.fun(INT, INT)  # Using INT as Bool proxy
+
+    def _run(impl: TyCkImpl[Any]):
+        with pytest.raises(TyCkException):
+            impl.subs_check(lhs, rhs)
+    run_tyck(_run)
+
+
+def test_subs_check_anti_contra():
+    """ANTI-CASE: (∀a.a→a)→Int ≤ (Int→Int)→Int MUST FAIL.
+
+    Contravariant arg: Int→Int ≤ ∀a.a→a fails (skolem rigid).
+    See tyck_examples.md "FUN — Function Subsumption" for full spec.
+    """
+    a = TY.bound_var("a")
+    poly_arg = TY.forall([a], TY.fun(a, a))
+    lhs = TY.fun(poly_arg, INT)
+    rhs = TY.fun(TY.fun(INT, INT), INT)
+
+    def _run(impl: TyCkImpl[Any]):
+        with pytest.raises(TyCkException):
+            impl.subs_check(lhs, rhs)
+    run_tyck(_run)
+
+
+def test_subs_check_anti_int_poly():
+    """ANTI-CASE: Int→Int ≤ ∀a.a→a MUST FAIL.
+
+    RHS skolemizes to sk_a→sk_a; sk_a cannot unify with Int (rigid).
+    """
+    a = TY.bound_var("a")
+    rhs = TY.forall([a], TY.fun(a, a))
+    lhs = TY.fun(INT, INT)
+
+    def _run(impl: TyCkImpl[Any]):
+        with pytest.raises(TyCkException):
+            impl.subs_check(lhs, rhs)
+    run_tyck(_run)
+
+
+# =============================================================================
+# INST Tests (inst method)
+# =============================================================================
+
+def test_inst_infer_forall():
+    """INST1: ∀a.a infers to ?1 with WpTyApp(?1)"""
+    def _run(impl: TyCkImpl[Any]):
+        a = TY.bound_var("a")
+        ty = TY.forall([a], a)
+
+        ty_result, wrap = run_infer(None, impl.inst(ty))
+
+        assert ty_result == TY.meta(0)
+        assert wrap == WpTyApp(ty_result)
+    run_tyck(_run)
+
+
+def test_inst_infer_mono():
+    """INST1: Int infers to Int with WP_HOLE"""
+    def _run(impl: TyCkImpl[Any]):
+        ty, wrap = run_infer(None, impl.inst(INT))
+
+        assert ty == INT
+        assert wrap == WP_HOLE
+    run_tyck(_run)
+
+
+def test_inst_check_contra():
+    """INST2: ∀a.a→a checks against Int→Int via contravariant unification"""
+    def _run(impl: TyCkImpl[Any]):
+        a = TY.bound_var("a")
+        ty = TY.forall([a], TY.fun(a, a))
+        ty2 = TY.fun(INT, INT)
+
+        wrap = impl.inst(ty)(None, Check(ty2))
+        wrap = zonk_wrapper(wrap)
+
+        assert wrap == WpTyApp(INT)
+    run_tyck(_run)
+
 
 # =============================================================================
 # Test Helpers
@@ -217,6 +526,7 @@ def run_tyck_term(expr: Callable[[TyCkImpl[CoreTm]], TyCk[Defer[CoreTm]]], check
 # =============================================================================
 
 def test_simple1():
+    # 1
     run_tyck_term(
         lambda s: s.lit(LitInt(1)),
         check_type(INT),
