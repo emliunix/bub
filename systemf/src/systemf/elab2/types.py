@@ -1,11 +1,18 @@
+import functools
+
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass, field
-import functools
 from typing import Generic, Protocol, TypeVar, override
+
 from systemf.utils.uniq import Uniq
 
 T = TypeVar("T")
+
+@dataclass
+class Name:
+    name: str
+    uniq: int
 
 @dataclass
 class Ref(Generic[T]):
