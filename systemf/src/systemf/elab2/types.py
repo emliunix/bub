@@ -34,6 +34,11 @@ class Ty:
         return TP.show_prec(self, 0)
 
 @dataclass(frozen=True, repr=False)
+class TyConApp(Ty):
+    name: str
+    args: list[Ty]
+
+@dataclass(frozen=True, repr=False)
 class TyVar(Ty):
     pass
 

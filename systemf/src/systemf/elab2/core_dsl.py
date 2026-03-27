@@ -20,12 +20,12 @@ class CoreDSL:
                           Callable[..., # ty_cons
                                    Callable[..., list[DataCon]]]]] # ty_vars
                       ):
-                      
+
         ty_con_ids = [
             self.uniq_id(name)
             for (name, _, _) in ty_cons
         ]
-        
+
         for (ty_con_id, (_, ty_var_names, mk_dcons)) in zip(ty_con_ids, ty_cons):
             ty_vars = [
                 TyVar(self.uniq_id(n))
@@ -34,19 +34,19 @@ class CoreDSL:
             dcons = mk_dcons(ty_con_ids)(*ty_vars)
             self.ty_cons.append(TyData(ty_con_id, ty_vars, dcons))
             self.data_cons.extend(dcons)
-    
+
     def uniq_id(self, name: str) -> Id:
         return Id(name, self.uniq.make_uniq())
-    
+
     def gen_var(self):
         u = self.uniq.make_uniq()
         return Id(f"$v{u}", u)
-    
+
     T = TypeVar("T")
 
     def vars(self, names: list[tuple[str, Ty]],) -> list[Var]:
         return [Var(self.uniq_id(name), ty) for (name, ty) in names]
-    
+
     def bracket_vars(self,
                      names: list[tuple[str, Ty]],
                      cont: Callable[..., T]) -> T:

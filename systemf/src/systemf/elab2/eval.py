@@ -41,6 +41,14 @@ class Let(Term):
     body: Term
 
 @dataclass
+class LetRec(Term):
+    # Parallel recursive bindings: all names are in scope for every expr and the body.
+    # Stored in the same left-to-right order as the names passed to Builder.let_rec,
+    # so bindings[i] corresponds to names[i].
+    bindings: list[Term]
+    body: Term
+
+@dataclass
 class Case(Term):
     scrutinee: Term
     cases: list[Alt]
@@ -110,6 +118,14 @@ class Builder:
             expr_term = expr()
             body_term = body()
         return Let(expr_term, body_term)
+
+    def let_rec(self, names: list[str], exprs: list[Callable[[], Term]], body: Callable[[], Term]) -> Term:
+        # All names are simultaneously in scope for every expr and for the body,
+        # enabling mutual recursion.
+        with self.extend_many(names):
+            expr_terms = [expr() for expr in exprs]
+            body_term = body()
+        return LetRec(expr_terms, body_term)
 
     def case_lit(self, v: int, body: Callable[[], Term]) -> LitAlt:
         return LitAlt(v, body())
@@ -194,6 +210,17 @@ class Backpatch(Cont):
     trap: Trap
     k: Cont
 
+@dataclass
+class BackpatchNext(Cont):
+    # Backpatch `trap` with the current value, then either kick off the next
+    # (trap, expr) pair in `rest`, or — when `rest` is empty — evaluate `body`
+    # in `new_env` (whose traps are all filled by that point).
+    trap: Trap
+    rest: list[tuple[Trap, Term]]
+    new_env: Env
+    body: Term
+    k: Cont
+
 def vdata(tag: str) -> Callable[[list[Val]], Val]:
     def _go(args: list[Val]) -> Val:
         return VData(tag, args)
@@ -252,6 +279,13 @@ def call_continue(v: Val, k: Cont) -> Config | Val:
         case Backpatch(trap, k):
             trap.set(v)
             return call_continue(v, k)
+        case BackpatchNext(trap, rest, new_env, body, k):
+            trap.set(v)
+            if rest:
+                next_trap, next_expr = rest[0]
+                return (next_expr, new_env, BackpatchNext(next_trap, rest[1:], new_env, body, k))
+            else:
+                return (body, new_env, k)
         case Kases(cases, env, k):
             for case in cases:
                 match case:
@@ -290,6 +324,13 @@ def step(t: Term, env: Env, k: Cont) -> Config | Val:
         case Let(expr, body):
             trap = Trap()
             return (expr, env + [trap], Backpatch(trap, Ap(VClosure(env, Lam(body)), k)))
+        case LetRec(bindings, body):
+            traps: list[Trap] = [Trap() for _ in bindings]
+            new_env = env + traps
+            if not bindings:
+                return (body, env, k)
+            rest = list(zip(traps[1:], bindings[1:]))
+            return (bindings[0], new_env, BackpatchNext(traps[0], rest, new_env, body, k))
         case Case(scrutinee, cases):
             return (scrutinee, env, Kases(cases, env, k))
         case _:
