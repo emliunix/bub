@@ -1,30 +1,21 @@
 """
-CEK evaluator for core
+CEK evaluator
 """
-
-# from . import core
 
 from abc import ABC
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from typing import Callable, cast
-
+from typing import Callable
 
 @dataclass
 class Term(ABC):
     pass
 
 @dataclass
-class Data(Term):
-    tag: str
-    arity: int
-
-@dataclass
-class PrimOp(Term):
+class GlobalVar(Term):
     name: str
-    arity: int
 
 @dataclass
 class Lit(Term):
@@ -72,26 +63,6 @@ class DataAlt(Alt):
     tag: str
     body: Term
 
-DATAS = {
-    # Bool
-    "TRUE": Data("TRUE", 0),
-    "FALSE": Data("FALSE", 0),
-    # Pair
-    "PAIR": Data("PAIR", 2),
-    # Unit
-    "UNIT": Data("UNIT", 0),
-    # List
-    "CONS": Data("CONS", 2),
-    "NIL": Data("NIL", 0),
-}
-
-PRIMOPS = {
-    "+": PrimOp("+", 2),
-    "-": PrimOp("-", 2),
-    "*": PrimOp("*", 2),
-    "/": PrimOp("/", 2),
-}
-
 class Builder:
     def __init__(self):
         self.env: list[str] = []
@@ -121,11 +92,11 @@ class Builder:
     def var(self, name: str) -> Term:
         if (i := self.lookup(name)) is not None:
             return Var(i, name)
-        elif (data := DATAS.get(name)) is not None:
-            return data
-        elif (primop := PRIMOPS.get(name)) is not None:
-            return primop
-        raise Exception(f"unbound variable: {name}")
+        else:
+            # Unbound locally — treat as a global variable reference.
+            # The evaluator will resolve globals (data constructors and primops)
+            # via `lookup_global` when encountering `GlobalVar`.
+            return GlobalVar(name)
 
     def lam(self, name: str, body: Callable[[], Term]) -> Term:
         with self.extend(name):
@@ -160,13 +131,6 @@ class Builder:
             lambda: self.case_data("FALSE", [], lambda: else_),
         ])
 
-PRIMOP_FUNCS = {
-    "+": lambda x, y: x + y,
-    "-": lambda x, y: x - y,
-    "*": lambda x, y: x * y,
-    "/": lambda x, y: x // y,
-}
-
 @dataclass
 class Val:
     pass
@@ -183,19 +147,6 @@ class VPartial(Val):
     arity: int
     done: list[Val]
     finish: Callable[[list[Val]], Val]
-
-def vpartial_primop(name: str, arity: int, done: list[Val]) -> VPartial:
-    def _finish(args: list[Val]) -> Val:
-        func = PRIMOP_FUNCS.get(name)
-        if func is None:
-            raise Exception(f"unknown primitive operation: {name}")
-        return VLit(func(*(val.v for val in cast(list[VLit], args))))
-    return VPartial(name, arity, done, _finish)
-
-def vpartial_data(tag: str, arity: int, done: list[Val]) -> VPartial:
-    def _finish(args: list[Val]) -> Val:
-        return VData(tag, args)
-    return VPartial(tag, arity, done, _finish)
 
 @dataclass
 class VData(Val):
@@ -233,7 +184,7 @@ class Ap(Cont):
     k: Cont
 
 @dataclass
-class NextCases(Cont):
+class Kases(Cont):
     cases: list[Alt]
     env: Env
     k: Cont
@@ -242,6 +193,42 @@ class NextCases(Cont):
 class Backpatch(Cont):
     trap: Trap
     k: Cont
+
+def vdata(tag: str) -> Callable[[list[Val]], Val]:
+    def _go(args: list[Val]) -> Val:
+        return VData(tag, args)
+    return _go
+
+def mk_primop(func: Callable[..., int]) -> Callable[[list[Val]], Val]:
+    def _go(args: list[Val]) -> Val:
+        return VLit(func(*[v.v for v in args]))
+    return _go
+
+def mk_partial(name: str, arity: int, func: Callable[[list[Val]], Val]) -> Val:
+    return VPartial(name, arity, [], func)
+
+GLOBALS: dict[str, Val] = {
+    # Bool
+    "TRUE": vdata("TRUE")([]),
+    "FALSE": vdata("FALSE")([]),
+    # Pair
+    "PAIR": mk_partial("PAIR", 2, vdata("PAIR")),
+    # Unit
+    "UNIT": vdata("UNIT")([]),
+    # List
+    "CONS": mk_partial("CONS", 2, vdata("CONS")),
+    "NIL": vdata("NIL")([]),
+    # prim ops
+    "+": mk_partial("+", 2, mk_primop(lambda x, y: x + y)),
+    "-": mk_partial("-", 2, mk_primop(lambda x, y: x - y)),
+    "*": mk_partial("*", 2, mk_primop(lambda x, y: x * y)),
+    "/": mk_partial("/", 2, mk_primop(lambda x, y: x // y)),
+}
+
+def lookup_global(name: str) -> Val:
+    if (val := GLOBALS.get(name)) is None:
+        raise Exception(f"unknown primitive operation: {name}")
+    return val
 
 type Config = tuple[Term, Env, Cont]
 
@@ -265,18 +252,18 @@ def call_continue(v: Val, k: Cont) -> Config | Val:
         case Backpatch(trap, k):
             trap.set(v)
             return call_continue(v, k)
-        case NextCases([], _, _):
+        case Kases(cases, env, k):
+            for case in cases:
+                match case:
+                    case LitAlt(v_, body) if VLit(v_) == v:
+                        return (body, env, k)
+                    case DataAlt(tag, body) if isinstance(v, VData) and v.tag == tag:
+                        return (body, env + v.vals, k)
+                    case DefaultAlt(body):
+                        return (body, env, k)
+                    case _:
+                        continue
             raise Exception(f"no matching case for value: {v}")
-        case NextCases([case, *cases], env, k):
-            match case:
-                case LitAlt(v_, body) if VLit(v_) == v:
-                    return (body, env, k)
-                case DataAlt(tag, body) if isinstance(v, VData) and v.tag == tag:
-                    return (body, env + v.vals, k)
-                case DefaultAlt(body):
-                    return (body, env, k)
-                case _:
-                    return call_continue(v, NextCases(cases, env, k))
         case Halt():
             return v
         case _:
@@ -298,18 +285,13 @@ def step(t: Term, env: Env, k: Cont) -> Config | Val:
             return call_continue(VClosure(env, Lam(body)), k)
         case App(fun, arg):
             return (fun, env, Ar(arg, env, k))
-        case Data(tag, arity):
-            if arity == 0:
-                return call_continue(VData(tag, []), k)
-            else:
-                return call_continue(vpartial_data(tag, arity, []), k)
-        case PrimOp(name, arity):
-            return call_continue(vpartial_primop(name, arity, []), k)
+        case GlobalVar(name):
+            return call_continue(lookup_global(name), k)
         case Let(expr, body):
             trap = Trap()
             return (expr, env + [trap], Backpatch(trap, Ap(VClosure(env, Lam(body)), k)))
         case Case(scrutinee, cases):
-            return (scrutinee, env, NextCases(cases, env, k))
+            return (scrutinee, env, Kases(cases, env, k))
         case _:
             raise Exception(f"invalid term: {t}")
 
