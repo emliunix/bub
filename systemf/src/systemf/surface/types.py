@@ -318,8 +318,30 @@ class SurfaceTypeApp(SurfaceTerm):
 
 
 @dataclass(frozen=True, kw_only=True)
-class SurfaceLet(SurfaceTerm):
-    """Local let binding within an expression.
+class ValBind(SurfaceNode):
+    """Single value binding in a let expression.
+
+    Represents one binding: name : type = value
+    Used within ValBinds for both surface and scoped representations.
+
+    Attributes:
+        name: Variable name being bound
+        type_ann: Optional type annotation
+        value: The bound expression
+    """
+
+    name: str = ""
+    type_ann: Optional[SurfaceType] = None
+    value: Optional[SurfaceTerm] = None
+
+    def __str__(self) -> str:
+        type_part = f" : {self.type_ann}" if self.type_ann else ""
+        return f"{self.name}{type_part} = {self.value}"
+
+
+@dataclass(frozen=True, kw_only=True)
+class ValBinds(SurfaceTerm):
+    """Local let binding with support for recursive groups.
 
     Syntax:
         let x : Int = 42 in x + 1
@@ -328,24 +350,48 @@ class SurfaceLet(SurfaceTerm):
           y = 2
         in x + y
 
+    All bindings in a ValBinds are mutually recursive - they can all reference
+    each other. This is detected via SCC analysis in the scope checking phase.
+
     Note: type annotation is optional for locals since they can be inferred.
     """
 
-    bindings: list[tuple[str, Optional[SurfaceType], SurfaceTerm]] = field(
-        default_factory=list
-    )  # (var_name, var_type, value)
+    bindings: list[ValBind] = field(default_factory=list)
     body: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
         if len(self.bindings) == 1:
-            var_name, var_type, value = self.bindings[0]
-            type_part = f" : {var_type}" if var_type else ""
-            return f"let {var_name}{type_part} = {value} in {self.body}"
+            return f"let {self.bindings[0]} in {self.body}"
         else:
-            bindings_str = "\n".join(
-                f"  {name}{f' : {t}' if t else ''} = {val}" for name, t, val in self.bindings
-            )
+            bindings_str = "\n".join(f"  {b}" for b in self.bindings)
             return f"let\n{bindings_str}\nin {self.body}"
+
+
+@dataclass(frozen=True, kw_only=True)
+class ValBindsScoped(SurfaceTerm):
+    """Scoped let binding after name resolution.
+
+    This is the post-scope-checking representation of ValBinds.
+    Variable references within bindings and body use de Bruijn indices
+    via ScopedVar nodes.
+
+    The bindings remain name-based for readability, but the values and
+    body contain scoped (index-based) variable references.
+    """
+
+    bindings: list[ValBind] = field(default_factory=list)
+    body: Optional[SurfaceTerm] = None
+
+    def __str__(self) -> str:
+        if len(self.bindings) == 1:
+            return f"let {self.bindings[0]} in {self.body}"
+        else:
+            bindings_str = "\n".join(f"  {b}" for b in self.bindings)
+            return f"let\n{bindings_str}\nin {self.body}"
+
+
+# Backwards compatibility alias
+SurfaceLet = ValBinds
 
 
 @dataclass(frozen=True, kw_only=True)

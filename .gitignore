@@ -146,3 +146,15 @@ reference/
 
 # OpenCode IDE configuration and plans
 .opencode/
+
+# tex
+
+*.aux
+*.out
+*.toc
+
+
+# emacs
+\#*
+.\#*
+*~

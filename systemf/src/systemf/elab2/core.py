@@ -6,8 +6,9 @@ class Id:
     uniq: int
 
 @dataclass
-class Var(Id):
-    type: Ty
+class Var:
+    name: Id
+    ty: Ty
 
 # ---
 # types
@@ -68,7 +69,7 @@ class TyLitStr(TyLit):
 @dataclass
 class TyData(Ty):
     name: Id
-    args: list[Ty]
+    args: list[TyVar]
     data_cons: list[DataCon]
 
 @dataclass
@@ -109,8 +110,7 @@ class CoreVar(CoreTm):
 
 @dataclass
 class CoreLam(CoreTm):
-    var: Id
-    type: Ty
+    var: Var
     body: CoreTm
 
 @dataclass
@@ -120,7 +120,7 @@ class CoreApp(CoreTm):
 
 @dataclass
 class CoreTyLam(CoreTm):
-    var: Id
+    var: TyVar
     body: CoreTm
 
 @dataclass
@@ -130,10 +130,25 @@ class CoreTyApp(CoreTm):
 
 @dataclass
 class CoreLet(CoreTm):
-    var: Id
-    type: Ty
-    val: CoreTm
+    bind: LetBind
     body: CoreTm
+
+class LetBind:
+    pass
+
+@dataclass
+class NonRecBind(LetBind):
+    var: Var
+    expr: CoreTm
+
+@dataclass
+class RecBinds(LetBind):
+    binds: list[RecBind]
+
+@dataclass
+class RecBind:
+    var: Var
+    expr: CoreTm
 
 @dataclass
 class CoreCase(CoreTm):
@@ -144,5 +159,10 @@ class CoreCase(CoreTm):
 @dataclass
 class CaseBranch:
     data_con: DataCon
-    vars: list[tuple[Id, Ty]]
+    vars: list[Var]
+    body: CoreTm
+
+@dataclass
+class LitBranch:
+    lit: Lit
     body: CoreTm
