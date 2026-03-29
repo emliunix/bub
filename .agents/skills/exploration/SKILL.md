@@ -12,6 +12,7 @@ Guide for systematically exploring and documenting unfamiliar codebases.
 **Topic** - Investigation area with central question and scope boundaries
 **Claim** - Atomic, verifiable assertion with source attribution  
 **Evidence** - Exact code snippets with file paths and line numbers
+**Validated Notes** - Once exploration files are marked Validated, they can be cited as sources (secondary to source code, but authoritative for derived claims)
 
 ## Document Structure
 
@@ -47,6 +48,29 @@ Brief overview (2-3 paragraphs).
 ```
 
 **Session files** (`{TOPIC}_{DATE}_{ID}_TEMP.md`): Same structure, add **Confidence:** field per claim.
+
+### Using Existing Exploration Notes
+
+When previous validated exploration exists, it can serve as a starting point:
+
+**Evidence hierarchy:**
+1. **Source code** - Primary evidence (most authoritative)
+2. **Validated exploration notes** - Secondary source (claims marked "Validated" in master files)
+3. **Draft exploration notes** - Reference only (not authoritative)
+
+**When citing validated notes:**
+```markdown
+**Claim:** [Derived assertion]
+**Source:** `analysis/TOPIC_EXPLORATION.md:Claim N` + `path/file:lines`
+**Evidence:**
+- From exploration: [validated finding]
+- From source: [code confirming the finding]
+```
+
+**Workflow:**
+- **Stage 1 (Explore):** Check existing validated notes first for relevant claims
+- **Stage 2 (Validate):** Verify both the source code AND check against existing validated claims for consistency
+- **Stage 3 (Merge):** Update cross-references between related topics
 
 ## Step 0: Scope Clarification
 
@@ -126,8 +150,9 @@ You are a validation subagent...
 
 **Validate:**
 1. Evidence verification (code exists at cited location?)
-2. Logic check (does claim follow from evidence?)
-3. Assess confidence (High/Medium/Low)
+2. Cross-check against existing validated claims (consistency with prior findings)
+3. Logic check (does claim follow from evidence?)
+4. Assess confidence (High/Medium/Low)
 
 **Add per claim:**
 - **VALIDATED:** Yes/No/Partial
