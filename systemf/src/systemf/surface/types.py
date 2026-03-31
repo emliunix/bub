@@ -7,7 +7,7 @@ omitting type annotations where they can be inferred.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Optional, Union, override
 
 from systemf.utils.location import Location
 
@@ -61,9 +61,9 @@ class SurfaceTypeArrow(SurfaceType):
         )
     """
 
-    arg: Optional[SurfaceType] = None
-    ret: Optional[SurfaceType] = None
-    param_doc: Optional[str] = None  # Populated when parser sees -- ^ after type
+    arg: SurfaceType
+    ret: SurfaceType
+    param_doc: str | None = None  # Populated when parser sees -- ^ after type
 
     def __str__(self) -> str:
         match self.arg:
@@ -79,8 +79,8 @@ class SurfaceTypeArrow(SurfaceType):
 class SurfaceTypeForall(SurfaceType):
     """Polymorphic type: forall a. body."""
 
-    var: str = ""
-    body: Optional[SurfaceType] = None
+    var: str
+    body: SurfaceType
 
     def __str__(self) -> str:
         return f"forall {self.var}. {self.body}"
@@ -156,8 +156,8 @@ class SurfaceAbs(SurfaceTerm):
 
     # Multi-param support: list of (name, type) pairs
     # For single param, use params=[(name, type)]
-    params: list[tuple[str, Optional[SurfaceType]]] = field(default_factory=list)
-    body: Optional[SurfaceTerm] = None
+    params: list[tuple[str, SurfaceType | None]]
+    body: SurfaceTerm
 
     # Backwards compatibility properties
     @property
@@ -250,8 +250,8 @@ class ScopedAbs(SurfaceTerm):
 class SurfaceApp(SurfaceTerm):
     """Function application: f arg."""
 
-    func: Optional[SurfaceTerm] = None
-    arg: Optional[SurfaceTerm] = None
+    func: SurfaceTerm
+    arg: SurfaceTerm
 
     def __str__(self) -> str:
         return f"({self.func} {self.arg})"
@@ -330,9 +330,9 @@ class ValBind(SurfaceNode):
         value: The bound expression
     """
 
-    name: str = ""
-    type_ann: Optional[SurfaceType] = None
-    value: Optional[SurfaceTerm] = None
+    name: str
+    type_ann: SurfaceType | None
+    value: SurfaceTerm
 
     def __str__(self) -> str:
         type_part = f" : {self.type_ann}" if self.type_ann else ""
@@ -356,8 +356,8 @@ class ValBinds(SurfaceTerm):
     Note: type annotation is optional for locals since they can be inferred.
     """
 
-    bindings: list[ValBind] = field(default_factory=list)
-    body: Optional[SurfaceTerm] = None
+    bindings: list[ValBind]
+    body: SurfaceTerm
 
     def __str__(self) -> str:
         if len(self.bindings) == 1:
@@ -398,8 +398,8 @@ SurfaceLet = ValBinds
 class SurfaceAnn(SurfaceTerm):
     """Type annotation: term : type."""
 
-    term: Optional[SurfaceTerm] = None
-    type: Optional[SurfaceType] = None
+    term: SurfaceTerm
+    type: SurfaceType
 
     def __str__(self) -> str:
         return f"({self.term} : {self.type})"
@@ -412,9 +412,9 @@ class SurfaceIf(SurfaceTerm):
     Syntactic sugar for: case cond of True -> t | False -> f
     """
 
-    cond: Optional[SurfaceTerm] = None
-    then_branch: Optional[SurfaceTerm] = None
-    else_branch: Optional[SurfaceTerm] = None
+    cond: SurfaceTerm
+    then_branch: SurfaceTerm
+    else_branch: SurfaceTerm
 
     def __str__(self) -> str:
         return f"if {self.cond} then {self.then_branch} else {self.else_branch}"
@@ -513,8 +513,8 @@ class SurfacePatternBase(SurfaceNode):
 class SurfacePattern(SurfacePatternBase):
     """Pattern in a case branch: Con vars."""
 
-    constructor: str = ""
-    vars: list[SurfacePatternBase] = field(default_factory=list)
+    constructor: str
+    vars: list[SurfacePatternBase]
 
     def __str__(self) -> str:
         if self.vars:
@@ -568,8 +568,8 @@ class SurfaceLitPattern(SurfacePatternBase):
 class SurfaceBranch(SurfaceNode):
     """Case branch: pattern -> body."""
 
-    pattern: Optional[SurfacePatternBase] = None
-    body: Optional[SurfaceTerm] = None
+    pattern: SurfacePatternBase
+    body: SurfaceTerm
 
     def __str__(self) -> str:
         return f"{self.pattern} -> {self.body}"
@@ -579,8 +579,8 @@ class SurfaceBranch(SurfaceNode):
 class SurfaceCase(SurfaceTerm):
     """Pattern matching: case scrutinee of branches."""
 
-    scrutinee: Optional[SurfaceTerm] = None
-    branches: list[SurfaceBranch] = field(default_factory=list)
+    scrutinee: SurfaceTerm
+    branches: list[SurfaceBranch]
 
     def __str__(self) -> str:
         branches_str = " | ".join(str(branch) for branch in self.branches)
@@ -605,21 +605,21 @@ class SurfaceToolCall(SurfaceTerm):
         return f"(@{self.tool_name} {args_str})"
 
 
-SurfaceTermRepr = Union[
-    SurfaceVar,
-    SurfaceAbs,
-    SurfaceApp,
-    SurfaceTypeAbs,
-    SurfaceTypeApp,
-    SurfaceLet,
-    SurfaceAnn,
-    SurfaceConstructor,
-    SurfaceCase,
-    SurfaceToolCall,
-    SurfaceLit,
-    GlobalVar,
-    SurfaceOp,
-]
+type SurfaceTermRepr = (
+    SurfaceVar |
+    SurfaceAbs |
+    SurfaceApp |
+    SurfaceTypeAbs |
+    SurfaceTypeApp |
+    SurfaceLet |
+    SurfaceAnn |
+    SurfaceConstructor |
+    SurfaceCase |
+    SurfaceToolCall |
+    SurfaceLit |
+    GlobalVar |
+    SurfaceOp )
+
 
 
 # =============================================================================
@@ -699,7 +699,7 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
 
     name: str = ""
     type_annotation: SurfaceType | None = None  # REQUIRED - changed from Optional
-    body: Optional[SurfaceTerm] = None
+    body: SurfaceTerm | None = None
     docstring: str | None = None  # -- | style, attaches to this declaration
     pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
 
@@ -758,6 +758,7 @@ class SurfaceImportDeclaration(SurfaceDeclaration):
     items: list[str] | None = None
     hiding: bool = False
 
+    @override
     def __str__(self) -> str:
         parts = ["import"]
         if self.qualified:
@@ -773,13 +774,13 @@ class SurfaceImportDeclaration(SurfaceDeclaration):
         return " ".join(parts)
 
 
-SurfaceDeclarationRepr = Union[
-    SurfaceDataDeclaration,
-    SurfaceTermDeclaration,
-    SurfacePrimTypeDecl,
-    SurfacePrimOpDecl,
-    SurfaceImportDeclaration,
-]
+type SurfaceDeclarationRepr = (
+    SurfaceDataDeclaration |
+    SurfaceTermDeclaration |
+    SurfacePrimTypeDecl |
+    SurfacePrimOpDecl |
+    SurfaceImportDeclaration )
+
 
 
 # Note: equals_ignore_location has been moved to systemf.utils.ast_utils
