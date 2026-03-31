@@ -1,0 +1,10 @@
+{
+  "semantic_tokens": "full",
+  "languages": {
+    "Python": {
+      "document_folding_ranges": "off",
+      "document_symbols": "on",
+      "format_on_save": "off"
+    }
+  }
+}

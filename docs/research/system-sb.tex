@@ -1,0 +1,235 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{array}
+
+\begin{document}
+
+\section*{Syntax}
+
+\[
+\begin{array}{rcll}
+e & ::= & \ldots & \text{expressions} \\
+\tau & ::= & \ldots & \text{monotypes} \\
+\Gamma & ::= & \cdot \mid \Gamma, x\!:\!\sigma \mid \Gamma, a & \text{contexts}
+\end{array}
+\qquad
+\begin{array}{rcll}
+\rho & ::= & \tau \mid \upsilon_1 \to \rho_2 & \text{rho-types} \\
+\phi & ::= & \tau \mid \upsilon_1 \to \upsilon_2 & \text{phi-types} \\
+\upsilon & ::= & \phi \mid \forall a.\, \upsilon & \text{specified polytypes} \\
+\sigma & ::= & \upsilon \mid \forall\{a\}.\, \sigma & \text{type schemes}
+\end{array}
+\]
+
+\section*{Typing Rules}
+
+\subsection*{Synthesis of types without top-level quantifiers}
+
+\[
+\boxed{\Gamma \vdash_{\mathrm{sb}} e \Rightarrow \phi}
+\]
+
+\[
+\frac{\Gamma, x\!:\!\tau \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon}{\Gamma \vdash_{\mathrm{sb}} \lambda x.\, e \Rightarrow \tau \to \upsilon}\text{(SB\_Abs)}
+\qquad
+\frac{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \forall \bar{a}.\, \phi \quad \text{no other rule matches}}{\Gamma \vdash_{\mathrm{sb}} e \Rightarrow \phi[\bar{\tau}/\bar{a}]}\text{(SB\_InstS)}
+\]
+
+\[
+\frac{}{\Gamma \vdash_{\mathrm{sb}} n \Rightarrow \mathit{Int}}\text{(SB\_Int)}
+\]
+
+\subsection*{Synthesis of specified polytypes}
+
+\[
+\boxed{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon}
+\]
+
+\[
+\frac{x\!:\!\forall\{\bar{a}\}.\, \upsilon \in \Gamma}{\Gamma \vdash_{\mathrm{sb}}^{*} x \Rightarrow \upsilon[\bar{\tau}/\bar{a}]}\text{(SB\_Var)}
+\qquad
+\frac{\Gamma \vdash_{\mathrm{sb}} e_1 \Rightarrow \upsilon_1 \to \upsilon_2 \quad \Gamma \vdash_{\mathrm{sb}}^{*} e_2 \Leftarrow \upsilon_1}{\Gamma \vdash_{\mathrm{sb}}^{*} e_1\, e_2 \Rightarrow \upsilon_2}\text{(SB\_App)}
+\]
+
+\[
+\frac{\Gamma \vdash \tau \quad \Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \forall a.\, \upsilon}{\Gamma \vdash_{\mathrm{sb}}^{*} e\, @\tau \Rightarrow \upsilon[\tau/a]}\text{(SB\_TApp)}
+\qquad
+\frac{\Gamma \vdash \upsilon \quad \upsilon = \forall \bar{a}, \bar{b}.\, \phi \quad \Gamma, \bar{a} \vdash_{\mathrm{sb}}^{*} e \Leftarrow \phi \quad \bar{a}, \bar{b} \notin \mathrm{ftv}(\Gamma)}{\Gamma \vdash_{\mathrm{sb}}^{*} (\Lambda \bar{a}.\, e : \upsilon) \Rightarrow \upsilon}\text{(SB\_Annot)}
+\]
+
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e_1 \Rightarrow \sigma_1 \quad \Gamma, x\!:\!\sigma_1 \vdash_{\mathrm{sb}}^{*} e_2 \Rightarrow \upsilon_2}{\Gamma \vdash_{\mathrm{sb}}^{*} \mathbf{let}\; x = e_1 \;\mathbf{in}\; e_2 \Rightarrow \upsilon_2}\text{(SB\_Let)}
+\qquad
+\frac{\Gamma \vdash_{\mathrm{sb}} e \Rightarrow \phi \quad \text{no other rule matches}}{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \phi}\text{(SB\_Phi)}
+\]
+
+\subsection*{Synthesis with generalization}
+
+\[
+\boxed{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e \Rightarrow \sigma}
+\]
+
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon \quad \bar{a} = \mathrm{ftv}(\upsilon) \setminus \mathrm{ftv}(\Gamma)}{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e \Rightarrow \forall\{\bar{a}\}.\, \upsilon}\text{(SB\_Gen)}
+\]
+
+\subsection*{Checking against types without top-level quantifiers}
+
+\[
+\boxed{\Gamma \vdash_{\mathrm{sb}} e \Leftarrow \rho}
+\]
+
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e_1 \Rightarrow \sigma_1 \quad \Gamma, x\!:\!\sigma_1 \vdash_{\mathrm{sb}} e_2 \Leftarrow \rho_2}{\Gamma \vdash_{\mathrm{sb}} \mathbf{let}\; x = e_1 \;\mathbf{in}\; e_2 \Leftarrow \rho_2}\text{(SB\_DLet)}
+\]
+
+\[
+\frac{\Gamma, x\!:\!\upsilon_1 \vdash_{\mathrm{sb}}^{*} e \Leftarrow \rho_2}{\Gamma \vdash_{\mathrm{sb}} \lambda x.\, e \Leftarrow \upsilon_1 \to \rho_2}\text{(SB\_DAbs)}
+\qquad
+\frac{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon_1 \quad \upsilon_1 \leq_{\mathrm{dsk}} \rho_2 \quad \text{no other rule matches}}{\Gamma \vdash_{\mathrm{sb}} e \Leftarrow \rho_2}\text{(SB\_Infer)}
+\]
+
+\subsection*{Checking against specified polytypes}
+
+\[
+\boxed{\Gamma \vdash_{\mathrm{sb}}^{*} e \Leftarrow \upsilon}
+\]
+
+\[
+\frac{\mathrm{prenex}(\upsilon) = \forall \bar{a}.\, \rho \quad \bar{a} \notin \mathrm{ftv}(\Gamma) \quad \Gamma \vdash_{\mathrm{sb}} e \Leftarrow \rho}{\Gamma \vdash_{\mathrm{sb}}^{*} e \Leftarrow \upsilon}\text{(SB\_DeepSkol)}
+\]
+
+\section*{Subsumption Relations}
+
+\subsection*{Higher-rank instantiation}
+
+\[
+\boxed{\sigma_1 \leq_b \sigma_2}
+\]
+
+\[
+\frac{}{\tau \leq_b \tau}\text{(B\_Refl)}
+\qquad
+\frac{\upsilon_3 \leq_b \upsilon_1 \quad \upsilon_2 \leq_b \upsilon_4}{\upsilon_1 \to \upsilon_2 \leq_b \upsilon_3 \to \upsilon_4}\text{(B\_Fun)}
+\]
+
+\[
+\frac{\phi_1[\bar{\tau}/\bar{b}] \leq_b \phi_2}{\forall \bar{a}, \bar{b}.\, \phi_1 \leq_b \forall \bar{a}.\, \phi_2}\text{(B\_InstS)}
+\qquad
+\frac{\upsilon_1[\bar{\tau}/\bar{a}] \leq_b \upsilon_2 \quad \bar{b} \notin \mathrm{ftv}(\forall\{\bar{a}\}.\, \upsilon_1)}{\forall\{\bar{a}\}.\, \upsilon_1 \leq_b \forall\{\bar{b}\}.\, \upsilon_2}\text{(B\_InstG)}
+\]
+
+\subsection*{Subsumption, after deep skolemization}
+
+\[
+\boxed{\phi_1 \leq_{\mathrm{dsk}}^{*} \rho_2}
+\]
+
+\[
+\frac{}{\tau \leq_{\mathrm{dsk}}^{*} \tau}\text{(DSK\_Refl)}
+\qquad
+\frac{\upsilon_3 \leq_{\mathrm{dsk}} \upsilon_1 \quad \upsilon_2 \leq_{\mathrm{dsk}} \rho_4}{\upsilon_1 \to \upsilon_2 \leq_{\mathrm{dsk}}^{*} \upsilon_3 \to \rho_4}\text{(DSK\_Fun)}
+\]
+
+\subsection*{Deep skolemization}
+
+\[
+\boxed{\sigma_1 \leq_{\mathrm{dsk}} \upsilon_2}
+\]
+
+\[
+\frac{\begin{array}{c}
+\mathit{prenex}(\upsilon_2) = \forall \bar{c}.\, \rho_2 \\
+\phi_1[\bar{\tau}/\bar{a}][\bar{\tau}'/\bar{b}] \leq_{\mathrm{dsk}}^{*} \rho_2
+\end{array}}{\forall\{\bar{a}\}, \bar{b}.\, \phi_1 \leq_{\mathrm{dsk}} \upsilon_2}\text{(DSK\_Inst)}
+\]
+
+Define $\mathit{prenex}(\upsilon) = \forall \bar{a}.\, \rho$ as follows:
+
+\[
+\begin{array}{rcl}
+\mathit{prenex}(\forall \bar{a}.\, \tau) & = & \forall \bar{a}.\, \tau \\
+\mathit{prenex}(\forall \bar{a}.\, \upsilon_1 \to \upsilon_2) & = & \forall \bar{a}, \bar{b}.\, \upsilon_1 \to \rho_2 \\
+& & \text{where } \forall \bar{b}.\, \rho_2 = \mathit{prenex}(\upsilon_2)
+\end{array}
+\]
+
+\section*{Algorithm $\mathcal{V}$}
+
+\textbf{Definition 19} (Algorithm $\mathcal{V}$).
+
+\begin{enumerate}
+\item[(1)] $\mathcal{V}(\Gamma, \lambda x.\, e) = (S_1, S_1(b) \to \tau)$ \textit{when} \\
+           \hspace*{2em} $\mathcal{V}((\Gamma, x\!:\!b), e) = (S_1, \tau)$ \\
+           \hspace*{2em} $b$ \textit{fresh}
+
+
+\item[(2)] $\mathcal{V}(\Gamma, e_1\,e_2) = (S_3 \circ S_2 \circ S_1, S_3(b))$ \textit{when} \\
+           \hspace*{2em} $(S_1, \tau_1) = \mathcal{V}(\Gamma, e_1)$ \\
+           \hspace*{2em} $(S_2, \tau_2) = \mathcal{V}(S_1(\Gamma), e_2)$ \\
+           \hspace*{2em} $S_3 = \mathcal{U}_{\mathit{vars}(\Gamma)}(S_2(\tau_1), \tau_2 \to b)$ \\
+           \hspace*{2em} $b$ \textit{fresh}
+
+
+\item[(3)] $\mathcal{V}(\Gamma, n) = (\epsilon, \mathit{Int})$
+
+
+\item[(4)] $\mathcal{V}(\Gamma, e) = (S_1, \tau)$ \textit{when} \\
+           \hspace*{2em} $(S_1, \forall\bar{a}.\,\tau) = \mathcal{V}^*(\Gamma, e)$ \\
+           \hspace*{2em} $\bar{a}$ \textit{fresh}
+
+
+\item[(5)] $\mathcal{V}^*(\Gamma, x) = (\epsilon, \upsilon)$ \textit{when} \\
+           \hspace*{2em} $x : \forall\{\bar{a}\}.\,\upsilon \in \Gamma$ \\
+           \hspace*{2em} $\bar{a}$ \textit{fresh}
+\item[(6)] $\mathcal{V}^*(\Gamma, \mathbf{let}\; x = e_1\; \mathbf{in}\; e_2) = (S_2 \circ S_1, \upsilon_2)$ \textit{when} \\           \hspace*{2em} $(S_1, \sigma_1) = \mathcal{V}^{gen}(\Gamma, e_1)$ \\
+           \hspace*{2em} $(S_2, \upsilon_2) = \mathcal{V}^*((S_1(\Gamma), x\!:\!\sigma_1), e_2)$
+
+
+\item[(7)] $\mathcal{V}^*(\Gamma, e\; @\tau) = (S_1, \upsilon_1[\tau/a])$ \textit{when} \\
+           \hspace*{2em} $(S_1, \forall a.\,\upsilon_1) = \mathcal{V}^*(\Gamma, e)$ \\
+           \hspace*{2em} $\Gamma \vdash \tau$
+
+
+\item[(8)] $\mathcal{V}^*(\Gamma, (\Lambda\bar{a}.\, e : \upsilon)) = (S_2 \circ S_1, \upsilon)$ \textit{when} \\
+           \hspace*{2em} $\Gamma \vdash \upsilon$ \\
+           \hspace*{2em} $\forall\bar{a},\bar{b}.\,\tau = \upsilon$ \\
+           \hspace*{2em} $(S_1, \tau') = \mathcal{V}((\Gamma, \bar{a}), e)$ \\
+           \hspace*{2em} $S_2 = \mathcal{U}_{\mathit{vars}(\Gamma),\bar{a},\bar{b}}(\tau, \tau')$
+
+
+\item[(9)] $\mathcal{V}^*(\Gamma, e) = \mathcal{V}(\Gamma, e)$
+
+
+\item[(10)] $\mathcal{V}^{gen}(\Gamma, e) = (S, \forall\{\bar{a}\}.\,\upsilon)$ \textit{when} \\
+            \hspace*{2em} $(S, \upsilon) = \mathcal{V}^*(\Gamma, e)$ \\
+            \hspace*{2em} $\bar{a} = \mathit{ftv}(\upsilon) \setminus \mathit{ftv}(S(\Gamma))$
+\end{enumerate}
+
+\section*{Examples}
+
+\begin{align*}
+&\forall a.\, a \to \forall b.\, b \to b \leq_b \mathit{Int} \to \mathit{Bool} \to \mathit{Bool} 
+&& \text{Can instantiate non-top-level vars} \\
+&\forall a.\, a \to \forall b.\, b \to b \leq_b \mathit{Int} \to \forall b.\, b \to b 
+&& \text{Not all vars must be instantiated} \\
+&\forall a.\, a \to \forall b.\, b \to b \leq_b \forall a.\, a \to \mathit{Bool} \to \mathit{Bool} 
+&& \text{Can skip a top-level quantifier} \\
+&(\mathit{Int} \to \mathit{Int}) \to \mathit{Bool} \leq_b (\forall a.\, a \to a) \to \mathit{Bool} 
+&& \text{Contravariant instantiation} \\
+&\mathit{Int} \to \forall a, b.\, a \to b \nleq_b \mathit{Int} \to \forall b.\, \mathit{Bool} \to b 
+&& \text{Spec. vars are inst'd from the right} \\
+&\mathit{Int} \to \forall a.\, a \to a \nleq_b \forall a.\, \mathit{Int} \to a \to a 
+&& \text{Cannot move $\forall$ for spec. vars} \\
+&\mathit{Int} \to \forall a, b.\, a \to b \leq_{\mathrm{dsk}} \mathit{Int} \to \forall b.\, \mathit{Bool} \to b 
+&& \text{$\leq_{\mathrm{dsk}}$ can inst. spec. vars in any order} \\
+&\mathit{Int} \to \forall a.\, a \to a \leq_{\mathrm{dsk}} \forall a.\, \mathit{Int} \to a \to a 
+&& \text{Spec. $\forall$ can move with $\leq_{\mathrm{dsk}}$} \\
+&(\mathit{Int} \to \forall b.\, b \to b) \to \mathit{Int} \leq_{\mathrm{dsk}} \\
+&\qquad (\forall a, b.\, a \to b \to b) \to \mathit{Int} 
+&& \text{Contravariant out-of-order inst.} \\
+&\forall\{a\}.\, a \to a \leq_{\mathrm{dsk}} \forall a.\, a \to a 
+&& \text{Same handling of spec. and gen. vars}
+\end{align*}
+
+\end{document}

@@ -221,6 +221,270 @@ data Test = A"""
         assert result[0].pragma is None
 
 
+class TestElab3SyntaxSample:
+    """Test that all elab3-required syntax constructs parse correctly."""
+
+    def test_elab3_sample_program(self, elab3_syntax_sample):
+        """Parse comprehensive sample with imports, data, terms, lambda, let, case, literals."""
+        from systemf.surface.types import (
+            SurfaceImportDeclaration,
+            SurfaceDataDeclaration,
+            SurfaceTermDeclaration,
+            SurfaceConstructorInfo,
+            SurfaceTypeVar,
+            SurfaceTypeArrow,
+            SurfaceTypeForall,
+            SurfaceTypeConstructor,
+            SurfaceAbs,
+            SurfaceVar,
+            SurfaceCase,
+            SurfaceBranch,
+            SurfacePattern,
+            SurfaceLitPattern,
+            SurfaceLit,
+            SurfaceLet,
+            ValBind,
+            SurfaceApp,
+            SurfaceOp,
+        )
+        from systemf.utils.ast_utils import equals_ignore_location
+
+        result = parse_program(elab3_syntax_sample)
+
+        expected = [
+            SurfaceImportDeclaration(module="List"),
+            SurfaceDataDeclaration(
+                name="Bool",
+                constructors=[
+                    SurfaceConstructorInfo(name="True"),
+                    SurfaceConstructorInfo(name="False"),
+                ],
+            ),
+            SurfaceDataDeclaration(
+                name="Maybe",
+                params=["a"],
+                constructors=[
+                    SurfaceConstructorInfo(name="Nothing"),
+                    SurfaceConstructorInfo(name="Just", args=[SurfaceTypeVar("a")]),
+                ],
+            ),
+            SurfaceDataDeclaration(
+                name="List",
+                params=["a"],
+                constructors=[
+                    SurfaceConstructorInfo(name="Nil"),
+                    SurfaceConstructorInfo(
+                        name="Cons",
+                        args=[
+                            SurfaceTypeVar("a"),
+                            SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a")]),
+                        ],
+                    ),
+                ],
+            ),
+            SurfaceTermDeclaration(
+                name="id",
+                type_annotation=SurfaceTypeForall(
+                    var="a",
+                    body=SurfaceTypeArrow(arg=SurfaceTypeVar("a"), ret=SurfaceTypeVar("a")),
+                ),
+                body=SurfaceAbs(params=[("x", None)], body=SurfaceVar("x")),
+            ),
+            SurfaceTermDeclaration(
+                name="const",
+                type_annotation=SurfaceTypeForall(
+                    var="a",
+                    body=SurfaceTypeForall(
+                        var="b",
+                        body=SurfaceTypeArrow(
+                            arg=SurfaceTypeVar("a"),
+                            ret=SurfaceTypeArrow(
+                                arg=SurfaceTypeVar("b"),
+                                ret=SurfaceTypeVar("a"),
+                            ),
+                        ),
+                    ),
+                ),
+                body=SurfaceAbs(
+                    params=[("x", None), ("y", None)],
+                    body=SurfaceVar("x"),
+                ),
+            ),
+            SurfaceTermDeclaration(
+                name="fromMaybe",
+                type_annotation=SurfaceTypeForall(
+                    var="a",
+                    body=SurfaceTypeArrow(
+                        arg=SurfaceTypeVar("a"),
+                        ret=SurfaceTypeArrow(
+                            arg=SurfaceTypeConstructor(name="Maybe", args=[SurfaceTypeVar("a")]),
+                            ret=SurfaceTypeVar("a"),
+                        ),
+                    ),
+                ),
+                body=SurfaceAbs(
+                    params=[("default", None), ("ma", None)],
+                    body=SurfaceCase(
+                        scrutinee=SurfaceVar("ma"),
+                        branches=[
+                            SurfaceBranch(
+                                pattern=SurfacePattern(constructor="Nothing"),
+                                body=SurfaceVar("default"),
+                            ),
+                            SurfaceBranch(
+                                pattern=SurfacePattern(
+                                    constructor="Just",
+                                    vars=[SurfacePattern(constructor="x")],
+                                ),
+                                body=SurfaceVar("x"),
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+            SurfaceTermDeclaration(
+                name="length",
+                type_annotation=SurfaceTypeForall(
+                    var="a",
+                    body=SurfaceTypeArrow(
+                        arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a")]),
+                        ret=SurfaceTypeConstructor(name="Int"),
+                    ),
+                ),
+                body=SurfaceAbs(
+                    params=[("xs", None)],
+                    body=SurfaceLet(
+                        bindings=[
+                            ValBind(
+                                name="go",
+                                type_ann=SurfaceTypeForall(
+                                    var="a",
+                                    body=SurfaceTypeArrow(
+                                        arg=SurfaceTypeConstructor(name="Int"),
+                                        ret=SurfaceTypeArrow(
+                                            arg=SurfaceTypeConstructor(
+                                                name="List", args=[SurfaceTypeVar("a")]
+                                            ),
+                                            ret=SurfaceTypeConstructor(name="Int"),
+                                        ),
+                                    ),
+                                ),
+                                value=SurfaceAbs(
+                                    params=[("acc", None), ("ys", None)],
+                                    body=SurfaceCase(
+                                        scrutinee=SurfaceVar("ys"),
+                                        branches=[
+                                            SurfaceBranch(
+                                                pattern=SurfacePattern(constructor="Nil"),
+                                                body=SurfaceVar("acc"),
+                                            ),
+                                            SurfaceBranch(
+                                                pattern=SurfacePattern(
+                                                    constructor="Cons", vars=["z", "zs"]
+                                                ),
+                                                body=SurfaceApp(
+                                                    func=SurfaceApp(
+                                                        func=SurfaceVar("go"),
+                                                        arg=SurfaceOp(
+                                                            left=SurfaceVar("acc"),
+                                                            op="+",
+                                                            right=SurfaceLit(
+                                                                prim_type="Int", value=1
+                                                            ),
+                                                        ),
+                                                    ),
+                                                    arg=SurfaceVar("zs"),
+                                                ),
+                                            ),
+                                        ],
+                                    ),
+                                ),
+                            )
+                        ],
+                        body=SurfaceApp(
+                            func=SurfaceApp(
+                                func=SurfaceVar("go"),
+                                arg=SurfaceLit(prim_type="Int", value=0),
+                            ),
+                            arg=SurfaceVar("xs"),
+                        ),
+                    ),
+                ),
+            ),
+            SurfaceTermDeclaration(
+                name="factorial",
+                type_annotation=SurfaceTypeArrow(
+                    arg=SurfaceTypeConstructor(name="Int"),
+                    ret=SurfaceTypeConstructor(name="Int"),
+                ),
+                body=SurfaceAbs(
+                    params=[("n", None)],
+                    body=SurfaceCase(
+                        scrutinee=SurfaceVar("n"),
+                        branches=[
+                            SurfaceBranch(
+                                pattern=SurfaceLitPattern(prim_type="Int", value=0),
+                                body=SurfaceLit(prim_type="Int", value=1),
+                            ),
+                            SurfaceBranch(
+                                pattern=SurfacePattern(constructor="m"),
+                                body=SurfaceOp(
+                                    left=SurfaceVar("m"),
+                                    op="*",
+                                    right=SurfaceApp(
+                                        func=SurfaceVar("factorial"),
+                                        arg=SurfaceOp(
+                                            left=SurfaceVar("m"),
+                                            op="-",
+                                            right=SurfaceLit(prim_type="Int", value=1),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+            SurfaceTermDeclaration(
+                name="greet",
+                type_annotation=SurfaceTypeArrow(
+                    arg=SurfaceTypeConstructor(name="String"),
+                    ret=SurfaceTypeConstructor(name="String"),
+                ),
+                body=SurfaceAbs(
+                    params=[("name", None)],
+                    body=SurfaceCase(
+                        scrutinee=SurfaceVar("name"),
+                        branches=[
+                            SurfaceBranch(
+                                pattern=SurfaceLitPattern(
+                                    prim_type="String", value="world"
+                                ),
+                                body=SurfaceLit(
+                                    prim_type="String", value="hello world"
+                                ),
+                            ),
+                            SurfaceBranch(
+                                pattern=SurfacePattern(constructor="other"),
+                                body=SurfaceOp(
+                                    left=SurfaceLit(
+                                        prim_type="String", value="hello "
+                                    ),
+                                    op="++",
+                                    right=SurfaceVar("other"),
+                                ),
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+        ]
+
+        assert len(result) == len(expected)
+        for actual, exp in zip(result, expected):
+            assert equals_ignore_location(actual, exp)
+
+
 class TestMixedDeclarationStyles:
     """Test mixing single-line and multi-line declarations."""
 

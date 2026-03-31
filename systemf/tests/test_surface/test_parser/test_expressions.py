@@ -23,8 +23,12 @@ from systemf.surface.types import (
     SurfaceTypeAbs,
     SurfaceApp,
     SurfaceCase,
+    SurfaceBranch,
+    SurfacePattern,
+    SurfaceLitPattern,
     SurfaceLet,
 )
+from systemf.utils.ast_utils import equals_ignore_location
 
 
 class TestAtomParser:
@@ -285,6 +289,38 @@ class TestCaseParser:
         assert isinstance(cons_pattern, SurfacePatternCons)
         # Should be right-associative: x : (y : zs)
         assert isinstance(cons_pattern.tail, SurfacePatternCons)
+
+    def test_case_with_int_literal_pattern(self):
+        """Parse case with integer literal pattern."""
+        source = """case n of
+  0 → 1
+  m → m * 2"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="n"),
+            branches=[
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="Int", value=0), body=SurfaceLit(prim_type="Int", value=1)),
+                SurfaceBranch(pattern=SurfacePattern(constructor="m"), body=SurfaceOp(left=SurfaceVar(name="m"), op="*", right=SurfaceLit(prim_type="Int", value=2))),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_string_literal_pattern(self):
+        """Parse case with string literal pattern."""
+        source = """case s of
+  "hello" → 1
+  msg → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="s"),
+            branches=[
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="String", value="hello"), body=SurfaceLit(prim_type="Int", value=1)),
+                SurfaceBranch(pattern=SurfacePattern(constructor="msg"), body=SurfaceLit(prim_type="Int", value=0)),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_constructor_tuple_arg(self):
         """Parse case with constructor taking tuple: Pair (x, y) z."""

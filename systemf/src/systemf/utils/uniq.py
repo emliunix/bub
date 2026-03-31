@@ -1,6 +1,9 @@
 class Uniq:
-    def __init__(self):
-        self.uniq = 0
+    def __init__(self, start: int | None = None):
+        if start is not None:
+            self.uniq = start
+        else:
+            self.uniq = 0
 
     def make_uniq(self) -> int:
         n = self.uniq

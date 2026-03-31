@@ -637,7 +637,11 @@ class TestConstructorsAndCases:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="Pair", vars=["a", "b"], location=DUMMY_LOC),
+                pattern=SurfacePattern(
+                    constructor="Pair",
+                    vars=[SurfacePattern(constructor="a"), SurfacePattern(constructor="b")],
+                    location=DUMMY_LOC,
+                ),
                 body=ScopedVar(
                     index=1, debug_name="a", location=DUMMY_LOC
                 ),  # a is at index 1 (b is at 0)

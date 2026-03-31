@@ -503,27 +503,33 @@ class SurfaceTuple(SurfaceTerm):
         return f"({elems_str})"
 
 
+class SurfacePatternBase(SurfaceNode):
+    """Base class for all surface patterns."""
+
+    pass
+
+
 @dataclass(frozen=True, kw_only=True)
-class SurfacePattern(SurfaceNode):
+class SurfacePattern(SurfacePatternBase):
     """Pattern in a case branch: Con vars."""
 
     constructor: str = ""
-    vars: list[str] = field(default_factory=list)
+    vars: list[SurfacePatternBase] = field(default_factory=list)
 
     def __str__(self) -> str:
         if self.vars:
-            return f"{self.constructor} {' '.join(self.vars)}"
+            return f"{self.constructor} {' '.join(str(v) for v in self.vars)}"
         return self.constructor
 
 
 @dataclass(frozen=True, kw_only=True)
-class SurfacePatternTuple(SurfaceNode):
+class SurfacePatternTuple(SurfacePatternBase):
     """Tuple pattern: (p1, p2, ..., pn) - desugars to nested Pairs.
 
     Sugar for: Pair p1 (Pair p2 (... pn))
     """
 
-    elements: list[SurfacePattern] = field(default_factory=list)
+    elements: list[SurfacePatternBase] = field(default_factory=list)
 
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
@@ -531,25 +537,38 @@ class SurfacePatternTuple(SurfaceNode):
 
 
 @dataclass(frozen=True, kw_only=True)
-class SurfacePatternCons(SurfaceNode):
+class SurfacePatternCons(SurfacePatternBase):
     """Cons pattern: head : tail - desugars to Cons head tail.
 
     Sugar for: Cons head tail
     Right-associative: x : y : zs parses as x : (y : zs)
     """
 
-    head: Optional[SurfacePattern] = None
-    tail: Optional[SurfacePattern] = None
+    head: Optional[SurfacePatternBase] = None
+    tail: Optional[SurfacePatternBase] = None
 
     def __str__(self) -> str:
         return f"{self.head} : {self.tail}"
 
 
 @dataclass(frozen=True, kw_only=True)
+class SurfaceLitPattern(SurfacePatternBase):
+    """Literal pattern: 42, \"hello\"."""
+
+    prim_type: str = ""
+    value: object = None
+
+    def __str__(self) -> str:
+        if self.prim_type == "String":
+            return f'"{self.value}"'
+        return str(self.value)
+
+
+@dataclass(frozen=True, kw_only=True)
 class SurfaceBranch(SurfaceNode):
     """Case branch: pattern -> body."""
 
-    pattern: Optional[SurfacePattern | SurfacePatternTuple | SurfacePatternCons] = None
+    pattern: Optional[SurfacePatternBase] = None
     body: Optional[SurfaceTerm] = None
 
     def __str__(self) -> str:
@@ -729,8 +748,37 @@ class SurfacePrimOpDecl(SurfaceDeclaration):
         return f"prim_op {self.name} : {self.type_annotation}"
 
 
+@dataclass(frozen=True, kw_only=True)
+class SurfaceImportDeclaration(SurfaceDeclaration):
+    """Import declaration: import [qualified] Module [as Alias] [import_spec]."""
+
+    module: str = ""
+    qualified: bool = False
+    alias: str | None = None
+    items: list[str] | None = None
+    hiding: bool = False
+
+    def __str__(self) -> str:
+        parts = ["import"]
+        if self.qualified:
+            parts.append("qualified")
+        parts.append(self.module)
+        if self.alias is not None:
+            parts.extend(["as", self.alias])
+        if self.items is not None:
+            if self.hiding:
+                parts.append("hiding")
+            items_str = ", ".join(self.items)
+            parts.append(f"({items_str})")
+        return " ".join(parts)
+
+
 SurfaceDeclarationRepr = Union[
-    SurfaceDataDeclaration, SurfaceTermDeclaration, SurfacePrimTypeDecl, SurfacePrimOpDecl
+    SurfaceDataDeclaration,
+    SurfaceTermDeclaration,
+    SurfacePrimTypeDecl,
+    SurfacePrimOpDecl,
+    SurfaceImportDeclaration,
 ]
 
 

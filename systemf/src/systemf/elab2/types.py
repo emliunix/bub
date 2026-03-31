@@ -1,5 +1,4 @@
 import functools
-
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass, field
@@ -9,10 +8,12 @@ from systemf.utils.uniq import Uniq
 
 T = TypeVar("T")
 
-@dataclass
+
+@dataclass(frozen=True)
 class Name:
     name: str
     uniq: int
+
 
 @dataclass
 class Ref(Generic[T]):
@@ -24,8 +25,10 @@ class Ref(Generic[T]):
     def get(self) -> T | None:
         return self.inner
 
+
 # ---
 # shared "type" defintions
+
 
 @dataclass(frozen=True, repr=False)
 class Ty:
@@ -33,51 +36,63 @@ class Ty:
     def __repr__(self) -> str:
         return TP.show_prec(self, 0)
 
+
 @dataclass(frozen=True, repr=False)
 class TyConApp(Ty):
     name: str
     args: list[Ty]
 
+
 @dataclass(frozen=True, repr=False)
 class TyVar(Ty):
     pass
 
+
 @dataclass(frozen=True, repr=False)
 class BoundTv(TyVar):
     name: str
+
 
 @dataclass(frozen=True, repr=False)
 class SkolemTv(TyVar):
     name: str
     uniq: int
 
+
 @dataclass(frozen=True, repr=False)
 class TyCon(Ty):
     name: str
 
+
 INT = TyCon("Int")
 STRING = TyCon("String")
+
 
 @dataclass(frozen=True, repr=False)
 class TyFun(Ty):
     arg: Ty
     result: Ty
 
+
 @dataclass(frozen=True, repr=False)
 class TyForall(Ty):
     vars: list[TyVar]
     body: Ty
+
 
 @dataclass(frozen=True, repr=False)
 class MetaTv(Ty):
     uniq: int
     ref: Ref[Ty]
 
+
 # ---
 # type printer
 
+
 class PrettyPrinter(Protocol[T]):
     def show_prec(self, v: T, prec: int) -> str: ...
+
 
 class TyPrinter(PrettyPrinter[Ty]):
     def show_prec(self, v: Ty, prec: int) -> str:
@@ -92,17 +107,23 @@ class TyPrinter(PrettyPrinter[Ty]):
                 case TyFun(arg, res):
                     return 1, f"{self.show_prec(arg, 1)} -> {self.show_prec(res, 0)}"
                 case TyForall(vars, body):
-                    return 0, f"forall {' '.join(name for name in varnames(vars))}. {self.show_prec(body, 0)}"
+                    return (
+                        0,
+                        f"forall {' '.join(name for name in varnames(vars))}. {self.show_prec(body, 0)}",
+                    )
                 case MetaTv(uniq):
                     return 1, f"$m{uniq}"
                 case _:
                     raise TypeError(f"Unexpected type: {v}")
+
         p, s = _show()
         if p < prec:
             return f"({s})"
         return s
 
+
 TP = TyPrinter()
+
 
 def varnames(vars: list[TyVar]) -> list[str]:
     def _name(v: TyVar) -> str:
@@ -111,10 +132,13 @@ def varnames(vars: list[TyVar]) -> list[str]:
                 return name
             case _:
                 raise TypeError(f"Expected a bound type variable, got {v}")
+
     return [_name(v) for v in vars]
+
 
 # ---
 # type helpers
+
 
 def zonk_type(ty: Ty) -> Ty:
     match ty:
@@ -133,10 +157,11 @@ def zonk_type(ty: Ty) -> Ty:
         case _:
             raise ValueError(f"Unknown type: {ty}")
 
+
 def get_free_vars(tys: list[Ty]) -> list[TyVar]:
     def _free_tv(ty: Ty) -> Generator[TyVar, None, None]:
         match ty:
-            case TyVar(): # BoundTv | Skolem
+            case TyVar():  # BoundTv | Skolem
                 yield ty
             case TyFun(arg, res):
                 yield from _free_tv(arg)
@@ -150,11 +175,7 @@ def get_free_vars(tys: list[Ty]) -> list[TyVar]:
             case _:
                 pass
 
-    return [
-        v
-        for ty in tys
-        for v in _free_tv(zonk_type(ty))
-    ]
+    return [v for ty in tys for v in _free_tv(zonk_type(ty))]
 
 
 def get_meta_vars(tys: list[Ty]) -> list[MetaTv]:
@@ -179,7 +200,9 @@ def get_meta_vars(tys: list[Ty]) -> list[MetaTv]:
                 result.append(v)
     return result
 
+
 _CO_TY = TypeVar("_CO_TY", covariant=True, bound=Ty)
+
 
 def subst_ty(vars: list[TyVar], tys: list[_CO_TY], ty: Ty) -> Ty:
     def _subst(env: dict[TyVar, _CO_TY], ty: Ty) -> Ty:
@@ -196,8 +219,10 @@ def subst_ty(vars: list[TyVar], tys: list[_CO_TY], ty: Ty) -> Ty:
 
     return _subst({n: t for n, t in zip(vars, tys)}, ty)
 
+
 # ---
 # type builder
+
 
 class TypeBuilder:
     def int_ty(self) -> TyCon:
@@ -221,6 +246,7 @@ class TypeBuilder:
     def meta(self, uniq: int) -> MetaTv:
         return MetaTv(uniq, Ref())
 
+
 TY = TypeBuilder()
 
 # ---
@@ -228,6 +254,7 @@ TY = TypeBuilder()
 
 REPR = TypeVar("REPR")
 NAME = TypeVar("NAME")
+
 
 class SyntaxDSL(Protocol[NAME, REPR]):
     def lit(self, value: Lit) -> REPR: ...
@@ -239,13 +266,16 @@ class SyntaxDSL(Protocol[NAME, REPR]):
     def app(self, fun: REPR, arg: REPR) -> REPR: ...
     def let(self, name: NAME, expr: REPR, body: REPR) -> REPR: ...
 
+
 # ---
 # runtime value
+
 
 class Lit(ABC):
     @property
     @abstractmethod
     def ty(self) -> Ty: ...
+
 
 @dataclass
 class LitInt(Lit):
@@ -256,6 +286,7 @@ class LitInt(Lit):
     def ty(self) -> Ty:
         return INT
 
+
 @dataclass
 class LitString(Lit):
     value: str
@@ -265,29 +296,36 @@ class LitString(Lit):
     def ty(self) -> Ty:
         return STRING
 
+
 # --
 # system f core terms
 
+
 class CoreTm: ...
+
 
 @dataclass
 class CoreLit(CoreTm):
     value: Lit
+
 
 @dataclass
 class CoreVar(CoreTm):
     name: str
     ty: Ty
 
+
 @dataclass
 class CoreTyLam(CoreTm):
     var: TyVar
     body: CoreTm
 
+
 @dataclass
 class CoreTyApp(CoreTm):
     fun: CoreTm
     tyarg: Ty
+
 
 @dataclass
 class CoreLam(CoreTm):
@@ -295,10 +333,12 @@ class CoreLam(CoreTm):
     ty: Ty
     body: CoreTm
 
+
 @dataclass
 class CoreApp(CoreTm):
     fun: CoreTm
     arg: CoreTm
+
 
 @dataclass
 class CoreLet(CoreTm):
@@ -307,19 +347,23 @@ class CoreLet(CoreTm):
     expr: CoreTm
     body: CoreTm
 
+
 @dataclass
 class Id:
     name: str
     ty: Ty
     uniq: int
 
+
 # ---
 # Core term builder protocol and implementation
 
 OUT = TypeVar("OUT")
 
+
 class SyntaxCore(Protocol[OUT]):
     """Protocol for building core terms."""
+
     def lit(self, value: Lit) -> OUT: ...
     def var(self, name: str, ty: Ty) -> OUT: ...
     def tyapp(self, fun: OUT, tyarg: Ty) -> OUT: ...
@@ -328,8 +372,10 @@ class SyntaxCore(Protocol[OUT]):
     def app(self, fun: OUT, arg: OUT) -> OUT: ...
     def let(self, name: str, expr_ty: Ty, expr: OUT, body: OUT) -> OUT: ...
 
+
 class SyntaxCoreSubst(SyntaxCore[OUT], Protocol):
     """with substituting support."""
+
     def subst(self, name: str, to: OUT, expr: OUT) -> OUT: ...
 
 
@@ -338,22 +384,31 @@ class CoreBuilder(SyntaxCoreSubst[CoreTm]):
     A builder for constructing core terms, directly derived from CoreTm dataclasses.
     Implements SyntaxCore[CoreTm].
     """
+
     def lit(self, value: Lit) -> CoreTm:
         return CoreLit(value)
+
     def var(self, name: str, ty: Ty) -> CoreTm:
         return CoreVar(name, zonk_type(ty))
+
     def tyapp(self, fun: CoreTm, tyarg: Ty) -> CoreTm:
         return CoreTyApp(fun, zonk_type(tyarg))
+
     def tylam(self, var: TyVar, body: CoreTm) -> CoreTm:
         return CoreTyLam(var, body)
+
     def lam(self, name: str, ty: Ty, body: CoreTm) -> CoreTm:
         return CoreLam(name, zonk_type(ty), body)
+
     def app(self, fun: CoreTm, arg: CoreTm) -> CoreTm:
         return CoreApp(fun, arg)
+
     def let(self, name: str, expr_ty: Ty, expr: CoreTm, body: CoreTm) -> CoreTm:
         return CoreLet(name, zonk_type(expr_ty), expr, body)
+
     def subst(self, name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
         return subst_coretm(name, to, expr)
+
 
 def subst_coretm(name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
     def _go(expr: CoreTm) -> CoreTm:
@@ -364,7 +419,7 @@ def subst_coretm(name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
                 return CoreTyApp(_go(fun), ty_arg)
             case CoreTyLam(n, body):
                 return CoreTyLam(n, _go(body))
-            case CoreLam(name=n) if n == name: # otherwise
+            case CoreLam(name=n) if n == name:  # otherwise
                 return expr
             case CoreLam(n, ty, body):
                 return CoreLam(n, ty, _go(body))
@@ -376,7 +431,9 @@ def subst_coretm(name: str, to: CoreTm, expr: CoreTm) -> CoreTm:
                 return CoreLet(n, expr_ty, _go(expr), _go(body))
             case _:
                 return expr
+
     return _go(expr)
+
 
 # A convenience variable for the core builder.
 C = CoreBuilder()
@@ -384,12 +441,16 @@ C = CoreBuilder()
 # ---
 # Unit core builder for type-checking only
 
+
 class UnitCore:
     """A core builder that just returns None - for type checking only."""
+
     def lit(self, value: Lit, ty: Ty) -> None:
         return None
+
     def lam(self, name: str, ty: Ty, body: None) -> None:
         return None
+
     def app(self, fun: None, arg: None) -> None:
         return None
 
@@ -402,10 +463,13 @@ class UnitCore:
 #
 class Wrapper: ...
 
+
 @dataclass
 class WpHole(Wrapper): ...
 
+
 WP_HOLE = WpHole()
+
 
 @dataclass
 class WpCast(Wrapper):
@@ -415,8 +479,10 @@ class WpCast(Wrapper):
     TODO: I think it's just temporary to witness the fact that meta tv == some type.
           which after type inference should be equivalent to WpHole. Needs confirmation.
     """
+
     ty_from: Ty
     ty_to: Ty
+
 
 @dataclass
 class WpFun(Wrapper):
@@ -424,14 +490,17 @@ class WpFun(Wrapper):
     This wraps a function.
     say it's e: a -> b, then builds: \\x:arg_ty -> wp_res (e (wp_arg x))
     """
+
     arg_ty: Ty
     wp_arg: Wrapper
     wp_res: Wrapper
+
 
 def wp_fun(arg_ty: Ty, wp_arg: Wrapper, wp_res: Wrapper) -> Wrapper:
     if wp_arg == WP_HOLE and wp_res == WP_HOLE:
         return WP_HOLE
     return WpFun(arg_ty, wp_arg, wp_res)
+
 
 def mk_wp_eta(ty: Ty, wp_body: Wrapper) -> Wrapper:
     """
@@ -440,6 +509,7 @@ def mk_wp_eta(ty: Ty, wp_body: Wrapper) -> Wrapper:
     binders are not relevant here, it's created and used all by us.
     but should be not in fv(e)
     """
+
     # supose to be used in skolemise, but our skolemise process layer by layer
     # so each layer it constructs it's own WpFun
     def _go(ty: Ty) -> Wrapper:
@@ -448,20 +518,25 @@ def mk_wp_eta(ty: Ty, wp_body: Wrapper) -> Wrapper:
                 return wp_fun(arg_ty, WP_HOLE, _go(res_ty))
             case _:
                 return wp_body
+
     return _go(ty)
+
 
 @dataclass
 class WpTyApp(Wrapper):
     ty_arg: Ty
 
+
 @dataclass
 class WpTyLam(Wrapper):
     ty_var: TyVar
+
 
 def mk_wp_ty_lams(tvs: list[TyVar], w: Wrapper) -> Wrapper:
     if tvs:
         return functools.reduce(lambda acc, tv: WpCompose(WpTyLam(tv), acc), reversed(tvs), w)
     return w
+
 
 @dataclass
 class WpCompose(Wrapper):
@@ -469,8 +544,10 @@ class WpCompose(Wrapper):
     apply f first, then g.
     g . f
     """
+
     wp_g: Wrapper
     wp_f: Wrapper
+
 
 def wp_compose(wp_g: Wrapper, wp_f: Wrapper) -> Wrapper:
     """
@@ -481,6 +558,7 @@ def wp_compose(wp_g: Wrapper, wp_f: Wrapper) -> Wrapper:
     if wp_f == WP_HOLE:
         return wp_g
     return WpCompose(wp_g, wp_f)
+
 
 def zonk_wrapper(wp: Wrapper) -> Wrapper:
     match wp:
@@ -499,9 +577,11 @@ def zonk_wrapper(wp: Wrapper) -> Wrapper:
         case _:
             return wp
 
+
 def run_wrapper(wp: Wrapper, uniq: Uniq, sytx: SyntaxCore[OUT], e: OUT) -> OUT:
     def _make_uniq_var():
         return f"c{uniq.make_uniq()}"
+
     # TODO: fix dummy names
     def _go(wp, e) -> OUT:
         match wp:
@@ -526,14 +606,18 @@ def run_wrapper(wp: Wrapper, uniq: Uniq, sytx: SyntaxCore[OUT], e: OUT) -> OUT:
                 return _go(wp_g, _go(wp_f, e))
             case _:
                 raise Exception("impossible")
+
     return _go(wp, e)
+
 
 # ---
 # misc
 #
 
+
 class TyCkException(Exception):
     pass
+
 
 @dataclass
 class Cons[T]:
@@ -545,7 +629,9 @@ class Cons[T]:
             yield xs.fst
             if xs.snd:
                 yield from _go(xs.snd)
+
         return list(_go(self))
+
 
 def cons(x: T, xs: Cons[T] | None) -> Cons[T]:
     return Cons(x, xs)

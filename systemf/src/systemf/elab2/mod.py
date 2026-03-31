@@ -30,8 +30,6 @@ class Module:
     The instantiated module. Built gradually during elaboration.
     """
     name: str
-    imported_types: dict[Name, Any]
-    imported_decls: dict[Name, Any]
     types: dict[Name, Any]
     decls: dict[Name, Any]
 

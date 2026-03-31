@@ -81,6 +81,45 @@ from systemf.surface.inference.unification import (
 )
 
 
+def _extract_pattern_var_names(
+    pattern: object,
+) -> list[str]:
+    """Extract variable names bound at the current pattern level."""
+    from systemf.surface.types import (
+        SurfaceLitPattern,
+        SurfacePattern,
+        SurfacePatternCons,
+        SurfacePatternTuple,
+    )
+
+    match pattern:
+        case SurfacePattern(constructor=constructor, vars=vars):
+            if not vars:
+                return [constructor]
+            return [
+                var.constructor
+                for var in vars
+                if isinstance(var, SurfacePattern) and not var.vars
+            ]
+        case SurfacePatternTuple(elements=elements):
+            return [
+                elem.constructor
+                for elem in elements
+                if isinstance(elem, SurfacePattern) and not elem.vars
+            ]
+        case SurfacePatternCons(head=head, tail=tail):
+            result = []
+            if isinstance(head, SurfacePattern) and not head.vars:
+                result.append(head.constructor)
+            if isinstance(tail, SurfacePattern) and not tail.vars:
+                result.append(tail.constructor)
+            return result
+        case SurfaceLitPattern():
+            return []
+        case _:
+            return []
+
+
 def _fresh_binder_names(count: int, ty: Type) -> list[str]:
     """Generate fresh binder names not already used in ty."""
     used = ty.free_vars()
@@ -958,7 +997,8 @@ class BidiInference:
 
         # Bind pattern variables with correct types
         branch_ctx = ctx
-        for i, var_name in enumerate(branch.pattern.vars):
+        pattern_var_names = _extract_pattern_var_names(branch.pattern)
+        for i, var_name in enumerate(pattern_var_names):
             if i < len(arg_types):
                 var_type = arg_types[i]
             else:
@@ -975,7 +1015,7 @@ class BidiInference:
             core_body, body_type = self.infer(branch.body, branch_ctx)
 
         core_branch = core.Branch(
-            pattern=core.Pattern(branch.pattern.constructor, branch.pattern.vars),
+            pattern=core.Pattern(branch.pattern.constructor, pattern_var_names),
             body=core_body,
         )
 
@@ -1028,7 +1068,8 @@ class BidiInference:
 
         # Bind pattern variables with correct types
         branch_ctx = ctx
-        for i, var_name in enumerate(branch.pattern.vars):
+        pattern_var_names = _extract_pattern_var_names(branch.pattern)
+        for i, var_name in enumerate(pattern_var_names):
             if i < len(arg_types):
                 var_type = arg_types[i]
             else:
@@ -1041,7 +1082,7 @@ class BidiInference:
         core_body = self.check(branch.body, expected_result, branch_ctx)
 
         return core.Branch(
-            pattern=core.Pattern(branch.pattern.constructor, branch.pattern.vars),
+            pattern=core.Pattern(branch.pattern.constructor, pattern_var_names),
             body=core_body,
         )
 

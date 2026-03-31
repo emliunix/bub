@@ -304,6 +304,26 @@ uv run pytest tests/test_bus.py
 - Logs are available via `journalctl --user -u <unit-name>`
 - Dynamic agents (conversation agents) are also tracked and can be stopped by name
 
+### Change Plan Requirement
+
+**Before modifying any code, you MUST create a plan file in `changes/1-somechange.md`.**
+
+This applies to any non-trivial code change (new feature, bug fix, refactor, or parser/AST modification).
+
+The plan file must contain:
+- **Facts**: What the existing project already does (relevant code paths, current behavior, constraints)
+- **Design**: The exact change you intend to make (new types, new functions, modified logic)
+- **Why it works**: Explanation of how the design integrates with existing code and why it is correct
+- **Files**: A concrete list of files to change, add, or delete
+
+**Example filename**: `changes/1-add-literal-patterns.md`
+
+**Append-only rule**: Change plans are append-only. If the design evolves, create a new file (e.g., `changes/2-add-literal-patterns-v2.md`) that references the previous plan. Never modify an existing change plan—doing so destroys the decision trail.
+
+**Mandatory subagent review**: After writing a change plan, you MUST spawn a subagent to review it before executing any code edits. The reviewer subagent should check for consistency with existing architecture, missing edge cases, and incorrect assumptions. Do not proceed to Phase 3 (Execute) until the review is complete and any issues are resolved.
+
+This rule exists to prevent "student-level engineer" behavior: jumping straight into code before the design is validated. The plan file is lightweight but mandatory.
+
 ### Multi-File Change Protocol
 
 When a change spans multiple files (types → implementations → callers), follow this sequence.
@@ -321,6 +341,7 @@ Goal: Gather all affected locations and identify unresolved inconsistencies befo
 
 Goal: Create a detailed, actionable edit plan that can be executed without surprises.
 
+- Write the change plan to `changes/1-somechange.md` (see Change Plan Requirement above).
 - Start with core types (protocol/message schemas).
 - Update implementations.
 - Update callers last.

@@ -9,8 +9,10 @@ from systemf.surface.result import Result, Ok
 from systemf.surface.types import (
     SurfaceTerm,
     SurfacePattern,
+    SurfacePatternBase,
     SurfacePatternCons,
     SurfacePatternTuple,
+    SurfaceLitPattern,
 )
 
 
@@ -144,69 +146,88 @@ def _desugar_term(term: SurfaceTerm) -> SurfaceTerm:
 
 
 def _desugar_pattern(
-    pattern: SurfacePattern | SurfacePatternTuple | SurfacePatternCons | None,
-) -> SurfacePattern | SurfacePatternTuple | None:
+    pattern: SurfacePatternBase | None,
+) -> SurfacePatternBase | None:
     """Recursively desugar cons patterns to constructor patterns.
 
     Converts:
-    - SurfacePatternCons(head, tail) -> SurfacePattern(constructor="Cons", vars=[flattened_vars])
+    - SurfacePatternCons(head, tail) -> SurfacePattern(constructor="Cons", vars=[head, tail])
     - SurfacePatternTuple(elements) -> SurfacePatternTuple with desugared elements
-    - SurfacePattern -> unchanged
+    - SurfacePattern -> desugar nested vars
+    - SurfaceLitPattern -> unchanged
     """
     if pattern is None:
         return None
 
     match pattern:
-        case SurfacePattern():
-            # Simple constructor/variable pattern - no change needed
-            return pattern
+        case SurfacePattern(vars=vars):
+            new_vars = [_desugar_pattern(var) for var in vars]
+            return SurfacePattern(
+                constructor=pattern.constructor,
+                vars=[v for v in new_vars if v is not None],
+                location=pattern.location,
+            )
 
         case SurfacePatternTuple(elements=elements):
             # Desugar each element
             new_elements = [_desugar_pattern(elem) for elem in elements]
-            return SurfacePatternTuple(elements=new_elements, location=pattern.location)
+            return SurfacePatternTuple(elements=[v for v in new_elements if v is not None], location=pattern.location)
 
         case SurfacePatternCons(head=head, tail=tail):
             # Convert cons pattern to constructor pattern
             # x : xs -> Cons x xs
-            # (a, b) : zs -> Cons (Pair a b) zs (handled by collecting vars)
-            head_vars = _collect_pattern_vars(head)
-            tail_vars = _collect_pattern_vars(tail)
-            all_vars = head_vars + tail_vars
-            return SurfacePattern(constructor="Cons", vars=all_vars, location=pattern.location)
+            # (a, b) : zs -> Cons (Pair a b) zs
+            new_head = _desugar_pattern(head)
+            new_tail = _desugar_pattern(tail)
+            vars: list[SurfacePatternBase] = []
+            if new_head is not None:
+                vars.append(new_head)
+            if new_tail is not None:
+                vars.append(new_tail)
+            return SurfacePattern(constructor="Cons", vars=vars, location=pattern.location)
+
+        case SurfaceLitPattern():
+            # Literal pattern - no change needed
+            return pattern
 
         case _:
             return pattern
 
 
 def _collect_pattern_vars(
-    pattern: SurfacePattern | SurfacePatternTuple | SurfacePatternCons | None,
+    pattern: SurfacePatternBase | None,
 ) -> list[str]:
-    """Collect all variable names from a pattern.
-
-    For cons patterns, we need to flatten the structure to get a list of
-    variable names that will be bound in order.
-    """
+    """Collect variable names bound at the current pattern level."""
     if pattern is None:
         return []
 
     match pattern:
-        case SurfacePattern(vars=vars):
-            return vars
+        case SurfacePattern(constructor=constructor, vars=vars):
+            if not vars:
+                return [constructor]
+            return [
+                var.constructor
+                for var in vars
+                if isinstance(var, SurfacePattern) and not var.vars
+            ]
 
         case SurfacePatternTuple(elements=elements):
-            # For tuples, collect vars from all elements
-            result = []
-            for elem in elements:
-                result.extend(_collect_pattern_vars(elem))
-            return result
+            return [
+                elem.constructor
+                for elem in elements
+                if isinstance(elem, SurfacePattern) and not elem.vars
+            ]
 
         case SurfacePatternCons(head=head, tail=tail):
-            # For cons, collect vars from head then tail
             result = []
-            result.extend(_collect_pattern_vars(head))
-            result.extend(_collect_pattern_vars(tail))
+            if isinstance(head, SurfacePattern) and not head.vars:
+                result.append(head.constructor)
+            if isinstance(tail, SurfacePattern) and not tail.vars:
+                result.append(tail.constructor)
             return result
+
+        case SurfaceLitPattern():
+            return []
 
         case _:
             return []

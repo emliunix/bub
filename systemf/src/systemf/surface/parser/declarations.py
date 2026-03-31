@@ -32,6 +32,7 @@ from systemf.surface.types import (
     SurfaceTermDeclaration,
     SurfacePrimTypeDecl,
     SurfacePrimOpDecl,
+    SurfaceImportDeclaration,
     SurfaceConstructorInfo,
     SurfaceType,
     SurfaceTerm,
@@ -432,6 +433,77 @@ def prim_op_parser() -> P[SurfacePrimOpDecl]:
     return parser
 
 
+def import_decl_parser() -> P[SurfaceImportDeclaration]:
+    """Parse an import declaration: import [qualified] module_name [as alias] [import_spec].
+
+    Grammar:
+        import_decl   ::= "import" ["qualified"] module_name ["as" alias] [import_spec]
+        module_name   ::= IDENT ("." IDENT)*
+        import_spec   ::= "(" ident_list ")" | "hiding" "(" ident_list ")"
+        ident_list    ::= ident ("," ident)*
+
+    Returns:
+        SurfaceImportDeclaration with module, qualified, alias, items, and hiding
+    """
+
+    @generate
+    def parser():
+        import_token = yield match_keyword("import")
+        loc = import_token.location
+
+        qualified = yield (match_keyword("qualified")).optional()
+
+        # Module name: IDENT ("." IDENT)*
+        first_part = yield match_ident()
+        module_parts = [first_part.value]
+        while True:
+            dot = yield (match_symbol(".")).optional()
+            if dot is None:
+                break
+            part = yield match_ident()
+            module_parts.append(part.value)
+        module_name = ".".join(module_parts)
+
+        alias = None
+        as_kw = yield (match_keyword("as")).optional()
+        if as_kw is not None:
+            alias_token = yield match_ident()
+            alias = alias_token.value
+
+        items = None
+        hiding = False
+
+        hiding_kw = yield (match_keyword("hiding")).optional()
+        if hiding_kw is not None:
+            hiding = True
+
+        open_paren = yield (match_symbol("(")).optional()
+        if open_paren is not None:
+            first_item = yield match_ident().optional()
+            item_names: list[str] = []
+            if first_item is not None:
+                item_names = [first_item.value]
+                while True:
+                    comma = yield (match_symbol(",")).optional()
+                    if comma is None:
+                        break
+                    item_token = yield match_ident()
+                    item_names.append(item_token.value)
+            yield match_symbol(")")
+            items = item_names
+
+        return SurfaceImportDeclaration(
+            module=module_name,
+            qualified=qualified is not None,
+            alias=alias,
+            items=items,
+            hiding=hiding,
+            location=loc,
+        )
+
+    return parser
+
+
 # =============================================================================
 # Main Declaration Entry Point
 # =============================================================================
@@ -481,6 +553,7 @@ def _try_parse_declaration(
     prim_type_p: P[SurfacePrimTypeDecl],
     prim_op_p: P[SurfacePrimOpDecl],
     term_p: P[SurfaceTermDeclaration],
+    import_p: P[SurfaceImportDeclaration],
 ) -> tuple[bool, SurfaceDeclaration | None, str | None, int]:
     """Try to parse a declaration starting at the given token.
 
@@ -506,6 +579,11 @@ def _try_parse_declaration(
             result = prim_op_p(tokens, i)
             if result.status:
                 return (True, result.value, "prim_op", result.index)
+            return (True, None, None, i)
+        case KeywordToken(keyword="import"):
+            result = import_p(tokens, i)
+            if result.status:
+                return (True, result.value, "import", result.index)
             return (True, None, None, i)
         case IdentifierToken():
             result = term_p(tokens, i)
@@ -559,6 +637,15 @@ def _attach_metadata(
                 docstring=docstring,
                 pragma=pragmas,
             )
+        case "import":
+            return SurfaceImportDeclaration(
+                module=decl.module,
+                qualified=decl.qualified,
+                alias=decl.alias,
+                items=decl.items,
+                hiding=decl.hiding,
+                location=decl.location,
+            )
         case _:
             return decl
 
@@ -593,6 +680,7 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
         prim_type_p = prim_type_parser()
         prim_op_p = prim_op_parser()
         term_p = term_parser()
+        import_p = import_decl_parser()
 
         while i < len(tokens):
             token = tokens[i]
@@ -610,7 +698,7 @@ def top_decl_parser() -> P[list[SurfaceDeclaration]]:
 
             # Try to parse a declaration
             can_start_decl, decl_result, decl_type, new_i = _try_parse_declaration(
-                token, tokens, i, data_p, prim_type_p, prim_op_p, term_p
+                token, tokens, i, data_p, prim_type_p, prim_op_p, term_p, import_p
             )
 
             if decl_result is not None:
@@ -651,4 +739,5 @@ __all__ = [
     "prim_op_parser",
     "decl_parser",
     "top_decl_parser",
+    "import_decl_parser",
 ]

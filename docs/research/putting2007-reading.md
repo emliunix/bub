@@ -333,9 +333,39 @@ Checking if one type is "at least as polymorphic" as another:
 
 **Relationship to Putting 2007**: Foundation for scoped type variables used in higher-rank systems. The pattern signature `(x :: a)` brings `a` into scope for inner annotations.
 
+### 3. Carnier-Pottier-Keuchel 2024 - Verified Type Inference Logics
+
+**Paper**: "Type Inference Logics"  
+**Authors**: Denis Carnier (KU Leuven), François Pottier (Inria), Steven Keuchel (VUB)  
+**Venue**: Proc. ACM Program. Lang., Vol. 8, No. OOPSLA2, Article 346 (October 2024)  
+**Location**: [`docs/research/`](./)
+
+| File | Description |
+|------|-------------|
+| [`carnier-pottier-keuchel-type-inference-logics.pdf`](carnier-pottier-keuchel-type-inference-logics.pdf) | Original PDF (OOPSLA 2024) |
+| [`carnier-2023.txt`](carnier-2023.txt) | Plain text extraction (1,978 lines) |
+| [`carnier-2023-index.md`](carnier-2023-index.md) | Line number index |
+
+**Key contribution**: Mechanized (Coq) verified type inference using constraints with semantic values. Shows how to verify both soundness and completeness of constraint-based type inference. Introduces domain-specific logic for reasoning about monadic constraint generation.
+
+**Core mechanisms**:
+- **Constraints as monadic programs**: `CstrM A` produces values, not just Boolean results
+- **World-indexed types**: First-order representation for existential variables (solves HOAS problems)
+- **Predicate transformer semantics**: WP/WLP for proving correctness
+- **Elaboration**: Produces explicitly-typed terms during inference
+
+**Relationship to Putting 2007**: 
+- **Putting 2007**: More expressive types (higher-rank polymorphism), hand proofs
+- **Carnier 2024**: Machine-checked verification, constraint-based modularity, includes elaboration
+- **Pattern matching**: Neither paper covers pattern matching, but both provide the foundation (bidirectional checking, existential variable handling)
+
+**Key insight for pattern elaboration**: World-indexed types (Section 3) provide the mechanism to handle pattern variables as fresh existentials. The bidirectional generator (Section 4.7) shows how checking mode can handle pattern scrutinees.
+
 ---
 
 ## Paper Relationships
+
+### Type System Evolution
 
 ```
 Jones & Shields 2002 (Scoped Type Variables)
@@ -345,20 +375,44 @@ Putting 2007 (Higher-Rank Type Inference)  ←  You are here
 Eisenberg 2016 (Visible Type Application)
 ```
 
+### Verification & Elaboration
+
+```
+Putting 2007 (Higher-rank, hand proofs)
+        ↓
+Carnier 2024 (Verified, constraint-based, elaboration)
+```
+
 **Reading order for implementation:**
 1. **Jones & Shields** - Understand scoped type variables (HMV_Annot, SB_Annot rules)
 2. **Putting 2007** - Understand bidirectional checking and higher-rank inference
 3. **Eisenberg 2016** - Add visible type application on top of the above
+4. **Carnier 2024** - For verified, modular type inference with elaboration
+
+**Reading order for pattern matching:**
+1. **Putting 2007** - Bidirectional checking fundamentals
+2. **Carnier 2024** - Constraint-based elaboration framework
+3. **GADT papers** (next) - Pattern matching with unknown scrutinee types
 
 ---
 
 ## Further Reading
 
+### Core Papers
+
 1. **Original Paper**: Journal of Functional Programming, 2007
-2. **GHC Core**: [System FC specification](https://gitlab.haskell.org/ghc/ghc/-/blob/master/docs/core-spec/)
-3. **Idris2**: [Core TT module](https://github.com/idris-lang/Idris2/blob/main/src/Core/TT/Term.idr)
-4. **Coercible Paper**: "Safe Coercions" (JFP'16) - for newtype handling
-5. **Roles Paper**: "Generative Type Abstraction" (ICFP'11)
+2. **Carnier 2024**: Type Inference Logics (OOPSLA) - Verified constraint-based elaboration
+
+### Implementation References
+
+3. **GHC Core**: [System FC specification](https://gitlab.haskell.org/ghc/ghc/-/blob/master/docs/core-spec/)
+4. **Idris2**: [Core TT module](https://github.com/idris-lang/Idris2/blob/main/src/Core/TT/Term.idr)
+
+### Extensions
+
+5. **Coercible Paper**: "Safe Coercions" (JFP'16) - for newtype handling
+6. **Roles Paper**: "Generative Type Abstraction" (ICFP'11)
+7. **GADT Type Inference**: Peyton Jones et al. 2006, Sulzmann et al. 2006 (for pattern matching)
 
 ---
 

@@ -21,8 +21,10 @@ from systemf.surface.types import (
     SurfaceLit,
     SurfaceOp,
     SurfacePattern,
+    SurfacePatternBase,
     SurfacePatternCons,
     SurfacePatternTuple,
+    SurfaceLitPattern,
     SurfaceTerm,
     SurfaceTermDeclaration,
     SurfaceToolCall,
@@ -34,24 +36,33 @@ from systemf.surface.types import (
 
 
 def _collect_pattern_vars(
-    pattern: SurfacePattern | SurfacePatternTuple | SurfacePatternCons,
+    pattern: SurfacePatternBase,
 ) -> list[str]:
-    """Collect all variable names from a pattern recursively."""
+    """Collect variable names bound at the current pattern level."""
     match pattern:
-        case SurfacePattern(vars=vars):
-            return vars
+        case SurfacePattern(constructor=constructor, vars=vars):
+            if not vars:
+                return [constructor]
+            return [
+                var.constructor
+                for var in vars
+                if isinstance(var, SurfacePattern) and not var.vars
+            ]
         case SurfacePatternTuple(elements=elements):
-            result = []
-            for elem in elements:
-                result.extend(_collect_pattern_vars(elem))
-            return result
+            return [
+                elem.constructor
+                for elem in elements
+                if isinstance(elem, SurfacePattern) and not elem.vars
+            ]
         case SurfacePatternCons(head=head, tail=tail):
             result = []
-            if head is not None:
-                result.extend(_collect_pattern_vars(head))
-            if tail is not None:
-                result.extend(_collect_pattern_vars(tail))
+            if isinstance(head, SurfacePattern) and not head.vars:
+                result.append(head.constructor)
+            if isinstance(tail, SurfacePattern) and not tail.vars:
+                result.append(tail.constructor)
             return result
+        case SurfaceLitPattern():
+            return []
         case _:
             return []
 

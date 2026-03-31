@@ -38,4 +38,6 @@ warn_return_any = true
 warn_unused_configs = true
 
 [tool.pyright]
+include = ["src"]
+extraPaths = ["src"]
 stubPath = "./typings"

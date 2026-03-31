@@ -265,6 +265,34 @@ class PrimOpToken(KeywordToken):
     pass
 
 
+@dataclass(frozen=True, kw_only=True)
+class ImportToken(KeywordToken):
+    """Import keyword: import"""
+
+    pass
+
+
+@dataclass(frozen=True, kw_only=True)
+class QualifiedToken(KeywordToken):
+    """Qualified keyword: qualified"""
+
+    pass
+
+
+@dataclass(frozen=True, kw_only=True)
+class AsToken(KeywordToken):
+    """As keyword: as"""
+
+    pass
+
+
+@dataclass(frozen=True, kw_only=True)
+class HidingToken(KeywordToken):
+    """Hiding keyword: hiding"""
+
+    pass
+
+
 class DocstringType:
     """Docstring type constants."""
 
@@ -562,6 +590,10 @@ __all__ = [
     "ElseToken",
     "PrimTypeToken",
     "PrimOpToken",
+    "ImportToken",
+    "QualifiedToken",
+    "AsToken",
+    "HidingToken",
     # Operator tokens
     "OperatorToken",
     "ArrowToken",

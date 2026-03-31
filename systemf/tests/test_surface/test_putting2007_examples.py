@@ -761,7 +761,11 @@ class TestHigherRankConstructors:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="MkT", vars=["v"], location=DUMMY_LOC),
+                pattern=SurfacePattern(
+                    constructor="MkT",
+                    vars=[SurfacePattern(constructor="v")],
+                    location=DUMMY_LOC,
+                ),
                 body=body,
                 location=DUMMY_LOC,
             )

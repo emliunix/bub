@@ -150,6 +150,8 @@ class TestGroupedPatternRegression:
 
     def test_grouped_constructor(self):
         """Grouped constructor: (Cons x xs)"""
+        from systemf.surface.types import SurfacePattern
+
         source = """case xs of
   (Cons x xs) → x
   Nil → 0"""
@@ -158,8 +160,9 @@ class TestGroupedPatternRegression:
         assert isinstance(result, SurfaceCase)
         pattern = result.branches[0].pattern
         assert pattern.constructor == "Cons"
-        assert "x" in pattern.vars
-        assert "xs" in pattern.vars
+        var_constructors = [v.constructor for v in pattern.vars if isinstance(v, SurfacePattern)]
+        assert "x" in var_constructors
+        assert "xs" in var_constructors
 
     def test_grouped_cons(self):
         """Grouped cons pattern: (x : xs)"""

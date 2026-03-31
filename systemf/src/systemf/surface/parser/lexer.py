@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from systemf.surface.parser.types import (
+    AsToken,
     CaseToken,
     CommentToken,
     DataToken,
@@ -16,8 +17,10 @@ from systemf.surface.parser.types import (
     DocstringType,
     ElseToken,
     ForallToken,
+    HidingToken,
     IdentifierToken,
     IfToken,
+    ImportToken,
     InToken,
     LambdaToken,
     LetToken,
@@ -27,6 +30,7 @@ from systemf.surface.parser.types import (
     PragmaToken,
     PrimOpToken,
     PrimTypeToken,
+    QualifiedToken,
     StringToken,
     ThenToken,
     TokenBase,
@@ -98,6 +102,10 @@ class Lexer:
         ("ELSE", r"\belse\b"),
         ("PRIM_TYPE", r"\bprim_type\b"),
         ("PRIM_OP", r"\bprim_op\b"),
+        ("IMPORT", r"\bimport\b"),
+        ("QUALIFIED", r"\bqualified\b"),
+        ("AS", r"\bas\b"),
+        ("HIDING", r"\bhiding\b"),
         # Multi-character operators
         ("ARROW", r"->|→"),
         ("DARROW", r"=>"),
@@ -333,6 +341,14 @@ class Lexer:
             return PrimTypeToken(keyword=value, location=loc)
         elif token_type == "PRIM_OP":
             return PrimOpToken(keyword=value, location=loc)
+        elif token_type == "IMPORT":
+            return ImportToken(keyword=value, location=loc)
+        elif token_type == "QUALIFIED":
+            return QualifiedToken(keyword=value, location=loc)
+        elif token_type == "AS":
+            return AsToken(keyword=value, location=loc)
+        elif token_type == "HIDING":
+            return HidingToken(keyword=value, location=loc)
         elif token_type == "LAMBDA":
             return LambdaToken(symbol=value, location=loc)
         elif token_type == "ARROW":

@@ -14,8 +14,12 @@ from systemf.surface.parser import (
     type_parser,
     lex,
 )
+from systemf.surface.parser import (
+    import_decl_parser,
+)
 from systemf.surface.types import (
     SurfaceDataDeclaration,
+    SurfaceImportDeclaration,
     SurfacePrimOpDecl,
     SurfacePrimTypeDecl,
     SurfaceTermDeclaration,
@@ -24,6 +28,7 @@ from systemf.surface.types import (
     SurfaceTypeTuple,
 )
 from systemf.utils.ast_utils import equals_ignore_location
+
 
 
 class TestDataDeclaration:
@@ -141,7 +146,7 @@ class TestDataDeclaration:
 
         for source in sources:
             result = data_parser().parse(lex(source))
-            # Use equals_ignore_location to compare AST structure (ignoring source locations)
+            # Use structural equality to compare AST structure (ignoring source locations)
             assert equals_ignore_location(result, reference), f"Style failed: {source!r}"
 
     def test_data_dedented_constructor_behavior(self):
@@ -397,6 +402,74 @@ class TestDeclarationCombinations:
             tokens = lex(decl)
             result = decl_parser().parse(tokens)
             assert result is not None
+
+
+class TestImportDeclaration:
+    """Test import declaration parser."""
+
+    def test_simple_import(self):
+        """Parse import List."""
+        tokens = lex("import List")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="List")
+        assert equals_ignore_location(result, expected)
+
+    def test_qualified_import(self):
+        """Parse import qualified Data.Maybe."""
+        tokens = lex("import qualified Data.Maybe")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="Data.Maybe", qualified=True)
+        assert equals_ignore_location(result, expected)
+
+    def test_aliased_import(self):
+        """Parse import List as L."""
+        tokens = lex("import List as L")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="List", alias="L")
+        assert equals_ignore_location(result, expected)
+
+    def test_qualified_aliased_import(self):
+        """Parse import qualified List as L."""
+        tokens = lex("import qualified List as L")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="List", qualified=True, alias="L")
+        assert equals_ignore_location(result, expected)
+
+    def test_explicit_items(self):
+        """Parse import List (map, filter)."""
+        tokens = lex("import List (map, filter)")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="List", items=["map", "filter"])
+        assert equals_ignore_location(result, expected)
+
+    def test_hiding_items(self):
+        """Parse import List hiding (internal)."""
+        tokens = lex("import List hiding (internal)")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="List", items=["internal"], hiding=True)
+        assert equals_ignore_location(result, expected)
+
+    def test_empty_explicit_items(self):
+        """Parse import List ()."""
+        tokens = lex("import List ()")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="List", items=[])
+        assert equals_ignore_location(result, expected)
+
+    def test_empty_hiding_items(self):
+        """Parse import List hiding ()."""
+        tokens = lex("import List hiding ()")
+        result = import_decl_parser().parse(tokens)
+        assert isinstance(result, SurfaceImportDeclaration)
+        expected = SurfaceImportDeclaration(module="List", items=[], hiding=True)
+        assert equals_ignore_location(result, expected)
 
 
 class TestTypeParser:

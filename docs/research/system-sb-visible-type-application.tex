@@ -1,0 +1,206 @@
+% System SB: Syntax-Directed Bidirectional Type System with Visible Type Application
+% From Eisenberg et al., "Visible Type Application" (ESOP 2016, extended version)
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathpartir}
+\usepackage{geometry}
+\usepackage{caption}
+
+\geometry{margin=1in}
+
+\begin{document}
+
+\title{System SB: Syntax-Directed Bidirectional Type Checking with Visible Type Application}
+\date{}
+\maketitle
+
+\section{Overview}
+
+System SB (Syntax-directed Bidirectional type system with visible type application) is defined in Eisenberg et al.\ (2016) \textit{``Visible Type Application''} (ESOP 2016, extended version). It is a syntax-directed bidirectional type system combining:
+\begin{itemize}
+\item Higher-rank polymorphism (predicative)
+\item Visible type application (@)
+\item Scoped type variables
+\item Bidirectional type checking (synthesis vs. checking)
+\end{itemize}
+
+The system uses \textbf{lazy instantiation}: polymorphic types are not eagerly instantiated at variable lookup, but delayed until application sites.
+
+\section{Syntax}
+
+\begin{figure}[h]
+\centering
+\[
+\begin{array}{rcll}
+e & ::= & \ldots & \text{expressions} \\
+\tau & ::= & \ldots & \text{monotypes} \\
+\Gamma & ::= & \cdot \mid \Gamma, x\!:\!\sigma \mid \Gamma, a & \text{contexts}
+\end{array}
+\qquad
+\begin{array}{rcll}
+\rho & ::= & \tau \mid \upsilon_1 \to \rho_2 & \text{rho-types} \\
+\phi & ::= & \tau \mid \upsilon_1 \to \upsilon_2 & \text{phi-types} \\
+\upsilon & ::= & \phi \mid \forall a.\, \upsilon & \text{specified polytypes} \\
+\sigma & ::= & \upsilon \mid \forall\{a\}.\, \sigma & \text{type schemes}
+\end{array}
+\]
+\caption{System SB syntax}
+\end{figure}
+
+\section{Judgments}
+
+System SB has \textbf{five mutually recursive judgments}:
+
+\begin{enumerate}
+\item $\Gamma \vdash_{\mathrm{sb}} e \Rightarrow \phi$ --- Synthesize monotype
+\item $\Gamma \vdash^*_{\mathrm{sb}} e \Rightarrow \upsilon$ --- Synthesize specified polytype
+\item $\Gamma \vdash^{\mathit{gen}}_{\mathrm{sb}} e \Rightarrow \sigma$ --- Synthesize generalized polytype
+\item $\Gamma \vdash_{\mathrm{sb}} e \Leftarrow \rho$ --- Check against rho-type
+\item $\Gamma \vdash^*_{\mathrm{sb}} e \Leftarrow \upsilon$ --- Check against specified polytype
+\end{enumerate}
+
+\begin{figure}[p]
+\centering
+\textbf{Monotype synthesis:} $\boxed{\Gamma \vdash_{\mathrm{sb}} e \Rightarrow \phi}$
+\[
+\frac{\Gamma, x\!:\!\tau \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon}{\Gamma \vdash_{\mathrm{sb}} \lambda x.\, e \Rightarrow \tau \to \upsilon}\textsc{(SB\_Abs)}
+\quad
+\frac{}{\Gamma \vdash_{\mathrm{sb}} n \Rightarrow \mathit{Int}}\textsc{(SB\_Int)}
+\]
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \forall \bar{a}.\, \phi \quad \text{no other rule matches}}{\Gamma \vdash_{\mathrm{sb}} e \Rightarrow \phi[\bar{\tau}/\bar{a}]}\textsc{(SB\_InstS)}
+\]
+
+\vspace{1em}
+\textbf{Specified polytype synthesis:} $\boxed{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon}$
+\[
+\frac{x\!:\!\forall\{\bar{a}\}.\, \upsilon \in \Gamma}{\Gamma \vdash_{\mathrm{sb}}^{*} x \Rightarrow \upsilon[\bar{\tau}/\bar{a}]}\textsc{(SB\_Var)}
+\quad
+\frac{\Gamma \vdash_{\mathrm{sb}} e_1 \Rightarrow \upsilon_1 \to \upsilon_2 \quad \Gamma \vdash_{\mathrm{sb}}^{*} e_2 \Leftarrow \upsilon_1}{\Gamma \vdash_{\mathrm{sb}}^{*} e_1\, e_2 \Rightarrow \upsilon_2}\textsc{(SB\_App)}
+\]
+\[
+\frac{\Gamma \vdash \tau \quad \Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \forall a.\, \upsilon}{\Gamma \vdash_{\mathrm{sb}}^{*} e\, @\tau \Rightarrow \upsilon[\tau/a]}\textsc{(SB\_TApp)}
+\quad
+\frac{\Gamma \vdash \upsilon \quad \upsilon = \forall \bar{a}, \bar{b}.\, \phi \quad \Gamma, \bar{a} \vdash_{\mathrm{sb}}^{*} e \Leftarrow \phi \quad \bar{a}, \bar{b} \notin \mathrm{ftv}(\Gamma)}{\Gamma \vdash_{\mathrm{sb}}^{*} (\Lambda \bar{a}.\, e : \upsilon) \Rightarrow \upsilon}\textsc{(SB\_Annot)}
+\]
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e_1 \Rightarrow \sigma_1 \quad \Gamma, x\!:\!\sigma_1 \vdash_{\mathrm{sb}}^{*} e_2 \Rightarrow \upsilon_2}{\Gamma \vdash_{\mathrm{sb}}^{*} \mathbf{let}\; x = e_1 \;\mathbf{in}\; e_2 \Rightarrow \upsilon_2}\textsc{(SB\_Let)}
+\quad
+\frac{\Gamma \vdash_{\mathrm{sb}} e \Rightarrow \phi \quad \text{no other rule matches}}{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \phi}\textsc{(SB\_Phi)}
+\]
+
+\vspace{1em}
+\textbf{Generalization:} $\boxed{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e \Rightarrow \sigma}$
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon \quad \bar{a} = \mathrm{ftv}(\upsilon) \setminus \mathrm{ftv}(\Gamma)}{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e \Rightarrow \forall\{\bar{a}\}.\, \upsilon}\textsc{(SB\_Gen)}
+\]
+
+\vspace{1em}
+\textbf{Checking:} $\boxed{\Gamma \vdash_{\mathrm{sb}} e \Leftarrow \rho}$
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{\mathit{gen}} e_1 \Rightarrow \sigma_1 \quad \Gamma, x\!:\!\sigma_1 \vdash_{\mathrm{sb}} e_2 \Leftarrow \rho_2}{\Gamma \vdash_{\mathrm{sb}} \mathbf{let}\; x = e_1 \;\mathbf{in}\; e_2 \Leftarrow \rho_2}\textsc{(SB\_DLet)}
+\quad
+\frac{\Gamma, x\!:\!\upsilon_1 \vdash_{\mathrm{sb}}^{*} e \Leftarrow \rho_2}{\Gamma \vdash_{\mathrm{sb}} \lambda x.\, e \Leftarrow \upsilon_1 \to \rho_2}\textsc{(SB\_DAbs)}
+\]
+\[
+\frac{\Gamma \vdash_{\mathrm{sb}}^{*} e \Rightarrow \upsilon_1 \quad \upsilon_1 \leq_{\mathrm{dsk}} \rho_2 \quad \text{no other rule matches}}{\Gamma \vdash_{\mathrm{sb}} e \Leftarrow \rho_2}\textsc{(SB\_Infer)}
+\]
+
+\vspace{1em}
+\textbf{Specified polytype checking:} $\boxed{\Gamma \vdash_{\mathrm{sb}}^{*} e \Leftarrow \upsilon}$
+\[
+\frac{\mathrm{prenex}(\upsilon) = \forall \bar{a}.\, \rho \quad \bar{a} \notin \mathrm{ftv}(\Gamma) \quad \Gamma \vdash_{\mathrm{sb}} e \Leftarrow \rho}{\Gamma \vdash_{\mathrm{sb}}^{*} e \Leftarrow \upsilon}\textsc{(SB\_DeepSkol)}
+\]
+\caption{System SB typing rules}
+\label{fig:typing-rules}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\textbf{Higher-rank instantiation:} $\boxed{\sigma_1 \leq_b \sigma_2}$
+\[
+\frac{}{\tau \leq_b \tau}\textsc{(B\_Refl)}
+\quad
+\frac{\upsilon_3 \leq_b \upsilon_1 \quad \upsilon_2 \leq_b \upsilon_4}{\upsilon_1 \to \upsilon_2 \leq_b \upsilon_3 \to \upsilon_4}\textsc{(B\_Fun)}
+\]
+\[
+\frac{\phi_1[\bar{\tau}/\bar{b}] \leq_b \phi_2}{\forall \bar{a}, \bar{b}.\, \phi_1 \leq_b \forall \bar{a}.\, \phi_2}\textsc{(B\_InstS)}
+\quad
+\frac{\upsilon_1[\bar{\tau}/\bar{a}] \leq_b \upsilon_2 \quad \bar{b} \notin \mathrm{ftv}(\forall\{\bar{a}\}.\, \upsilon_1)}{\forall\{\bar{a}\}.\, \upsilon_1 \leq_b \forall\{\bar{b}\}.\, \upsilon_2}\textsc{(B\_InstG)}
+\]
+
+\vspace{1em}
+\textbf{Deep skolemization:} $\boxed{\sigma_1 \leq_{\mathrm{dsk}} \upsilon_2}$
+\[
+\frac{\begin{array}{c}
+\mathit{prenex}(\upsilon_2) = \forall \bar{c}.\, \rho_2 \\
+\phi_1[\bar{\tau}/\bar{a}][\bar{\tau}'/\bar{b}] \leq_{\mathrm{dsk}}^{*} \rho_2
+\end{array}}{\forall\{\bar{a}\}, \bar{b}.\, \phi_1 \leq_{\mathrm{dsk}} \upsilon_2}\textsc{(DSK\_Inst)}
+\]
+
+\vspace{0.5em}
+\textbf{Subsumption (auxiliary):} $\boxed{\phi_1 \leq_{\mathrm{dsk}}^{*} \rho_2}$
+\[
+\frac{}{\tau \leq_{\mathrm{dsk}}^{*} \tau}\textsc{(DSK\_Refl)}
+\quad
+\frac{\upsilon_3 \leq_{\mathrm{dsk}} \upsilon_1 \quad \upsilon_2 \leq_{\mathrm{dsk}} \rho_4}{\upsilon_1 \to \upsilon_2 \leq_{\mathrm{dsk}}^{*} \upsilon_3 \to \rho_4}\textsc{(DSK\_Fun)}
+\]
+
+\vspace{0.5em}
+Define $\mathit{prenex}(\upsilon) = \forall \bar{a}.\, \rho$ as:
+\[
+\begin{array}{rcl}
+\mathit{prenex}(\forall \bar{a}.\, \tau) & = & \forall \bar{a}.\, \tau \\
+\mathit{prenex}(\forall \bar{a}.\, \upsilon_1 \to \upsilon_2) & = & \forall \bar{a}, \bar{b}.\, \upsilon_1 \to \rho_2 \quad \text{where } \forall \bar{b}.\, \rho_2 = \mathit{prenex}(\upsilon_2)
+\end{array}
+\]
+\caption{System SB subsumption relations}
+\label{fig:subsumption}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\small
+\begin{align*}
+\forall a.\, a \to \forall b.\, b \to b &\leq_b \mathit{Int} \to \mathit{Bool} \to \mathit{Bool} 
+&&\text{(instantiate non-top-level vars)} \\
+\forall a.\, a \to \forall b.\, b \to b &\leq_b \mathit{Int} \to \forall b.\, b \to b 
+&&\text{(not all vars must be instantiated)} \\
+\forall a.\, a \to \forall b.\, b \to b &\leq_b \forall a.\, a \to \mathit{Bool} \to \mathit{Bool} 
+&&\text{(can skip a top-level quantifier)} \\
+(\mathit{Int} \to \mathit{Int}) \to \mathit{Bool} &\leq_b (\forall a.\, a \to a) \to \mathit{Bool} 
+&&\text{(contravariant instantiation)} \\
+\mathit{Int} \to \forall a, b.\, a \to b &\nleq_b \mathit{Int} \to \forall b.\, \mathit{Bool} \to b 
+&&\text{(spec.~vars are inst'd from the right)} \\
+\mathit{Int} \to \forall a.\, a \to a &\nleq_b \forall a.\, \mathit{Int} \to a \to a 
+&&\text{(cannot move $\forall$ for spec.~vars)} \\
+\mathit{Int} \to \forall a, b.\, a \to b &\leq_{\mathrm{dsk}} \mathit{Int} \to \forall b.\, \mathit{Bool} \to b 
+&&\text{($\leq_{\mathrm{dsk}}$ can inst.~spec.~vars in any order)} \\
+\mathit{Int} \to \forall a.\, a \to a &\leq_{\mathrm{dsk}} \forall a.\, \mathit{Int} \to a \to a 
+&&\text{(spec.~$\forall$ can move with $\leq_{\mathrm{dsk}}$)} \\
+(\mathit{Int} \to \forall b.\, b \to b) \to \mathit{Int} &\leq_{\mathrm{dsk}} (\forall a, b.\, a \to b \to b) \to \mathit{Int} 
+&&\text{(contravariant out-of-order inst.)} \\
+\forall\{a\}.\, a \to a &\leq_{\mathrm{dsk}} \forall a.\, a \to a 
+&&\text{(same handling of spec.~and gen.~vars)}
+\end{align*}
+\caption{Subsumption examples}
+\label{fig:examples}
+\end{figure}
+
+\section{Key Differences from Peyton Jones 2007}
+
+\begin{enumerate}
+\item \textbf{Lazy Instantiation}: Polymorphic types are not instantiated at variable lookup, but delayed until application.
+
+\item \textbf{Multiple Judgments}: Five mutually recursive judgments instead of one, handling monotypes, specified polytypes, and generalized polytypes separately.
+
+\item \textbf{Visible Type Application}: New form $e \,@\,\tau$ with rule SB\_TApp allows explicit type instantiation.
+
+\item \textbf{Scoped Type Variables}: Type variables in annotations scope over the annotated expression (SB\_Annot).
+
+\item \textbf{Two Subsumption Relations}: $\leq_b$ for synthesis/checking boundary and $\leq_{\mathrm{dsk}}$ for checking against specified types.
+\end{enumerate}
+
+\end{document}

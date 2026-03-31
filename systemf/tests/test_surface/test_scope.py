@@ -682,7 +682,11 @@ class TestComplexExpressions:
         ctx = ScopeContext()
 
         # case x of Pair a b -> a
-        pattern = SurfacePattern(constructor="Pair", vars=["a", "b"], location=DUMMY_LOC)
+        pattern = SurfacePattern(
+            constructor="Pair",
+            vars=[SurfacePattern(constructor="a"), SurfacePattern(constructor="b")],
+            location=DUMMY_LOC,
+        )
         # Body references 'a' which is bound by the pattern
         body = SurfaceVar(name="a", location=DUMMY_LOC)
         branch = SurfaceBranch(pattern=pattern, body=body, location=DUMMY_LOC)
