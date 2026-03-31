@@ -21,7 +21,7 @@ from systemf.utils.location import Location
 class SurfaceNode:
     """Base class for all surface AST nodes."""
 
-    location: Location | None = field(default=None)
+    location: Location | None = None
 
 
 # =============================================================================
@@ -39,8 +39,11 @@ class SurfaceType(SurfaceNode):
 class SurfaceTypeVar(SurfaceType):
     """Type variable: a."""
 
-    name: str = ""
+    name: str
 
+    @override
+    @override
+    @override
     def __str__(self) -> str:
         return self.name
 
@@ -63,8 +66,10 @@ class SurfaceTypeArrow(SurfaceType):
 
     arg: SurfaceType
     ret: SurfaceType
-    param_doc: str | None = None  # Populated when parser sees -- ^ after type
+    param_doc: str | None  # Populated when parser sees -- ^ after type
 
+    @override
+    @override
     def __str__(self) -> str:
         match self.arg:
             case SurfaceTypeArrow():
@@ -82,6 +87,8 @@ class SurfaceTypeForall(SurfaceType):
     var: str
     body: SurfaceType
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"forall {self.var}. {self.body}"
 
@@ -90,9 +97,11 @@ class SurfaceTypeForall(SurfaceType):
 class SurfaceTypeConstructor(SurfaceType):
     """Data type constructor: T t1 ... tn."""
 
-    name: str = ""
-    args: list[SurfaceType] = field(default_factory=list)
+    name: str
+    args: list[SurfaceType]
 
+    @override
+    @override
     def __str__(self) -> str:
         if not self.args:
             return self.name
@@ -114,8 +123,10 @@ class SurfaceTypeTuple(SurfaceType):
     Sugar for: Pair t1 (Pair t2 (... tn))
     """
 
-    elements: list[SurfaceType] = field(default_factory=list)
+    elements: list[SurfaceType]
 
+    @override
+    @override
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
         return f"({elems_str})"
@@ -139,8 +150,10 @@ class SurfaceTerm(SurfaceNode):
 class SurfaceVar(SurfaceTerm):
     """Variable reference by name: x."""
 
-    name: str = ""
+    name: str
 
+    @override
+    @override
     def __str__(self) -> str:
         return self.name
 
@@ -193,6 +206,8 @@ class SurfaceAbs(SurfaceTerm):
         object.__setattr__(self, "body", body)
         object.__setattr__(self, "location", location)
 
+    @override
+    @override
     def __str__(self) -> str:
         if not self.params:
             return f"\\ -> {self.body}"
@@ -213,9 +228,11 @@ class ScopedVar(SurfaceTerm):
         location: Source location
     """
 
-    index: int = 0
-    debug_name: str = ""
+    index: int
+    debug_name: str
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"#{self.index}({self.debug_name})"
 
@@ -234,10 +251,11 @@ class ScopedAbs(SurfaceTerm):
         location: Source location
     """
 
-    var_name: str = ""
-    var_type: SurfaceType | None = None
-    body: SurfaceTerm | None = None
+    var_name: str
+    var_type: SurfaceType | None
+    body: SurfaceTerm
 
+    @override
     def __str__(self) -> str:
         if self.var_type:
             return f"\\{self.var_name}:{self.var_type} -> {self.body}"
@@ -251,6 +269,7 @@ class SurfaceApp(SurfaceTerm):
     func: SurfaceTerm
     arg: SurfaceTerm
 
+    @override
     def __str__(self) -> str:
         return f"({self.func} {self.arg})"
 
@@ -264,8 +283,8 @@ class SurfaceTypeAbs(SurfaceTerm):
 
     # Multi-var support: list of type variable names
     # For single var, use vars=["a"]
-    vars: list[str] = field(default_factory=list)
-    body: SurfaceTerm | None = None
+    vars: list[str]
+    body: SurfaceTerm
 
     # Backwards compatibility property
     @property
@@ -297,6 +316,7 @@ class SurfaceTypeAbs(SurfaceTerm):
         object.__setattr__(self, "body", body)
         object.__setattr__(self, "location", location)
 
+    @override
     def __str__(self) -> str:
         if not self.vars:
             return f"/\\. {self.body}"
@@ -308,9 +328,11 @@ class SurfaceTypeAbs(SurfaceTerm):
 class SurfaceTypeApp(SurfaceTerm):
     """Type application: func @type or func [type]."""
 
-    func: SurfaceTerm | None = None
-    type_arg: SurfaceType | None = None
+    func: SurfaceTerm
+    type_arg: SurfaceType
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"({self.func} @{self.type_arg})"
 
@@ -332,6 +354,8 @@ class ValBind(SurfaceNode):
     type_ann: SurfaceType | None
     value: SurfaceTerm
 
+    @override
+    @override
     def __str__(self) -> str:
         type_part = f" : {self.type_ann}" if self.type_ann else ""
         return f"{self.name}{type_part} = {self.value}"
@@ -357,6 +381,8 @@ class ValBinds(SurfaceTerm):
     bindings: list[ValBind]
     body: SurfaceTerm
 
+    @override
+    @override
     def __str__(self) -> str:
         if len(self.bindings) == 1:
             return f"let {self.bindings[0]} in {self.body}"
@@ -377,9 +403,11 @@ class ValBindsScoped(SurfaceTerm):
     body contain scoped (index-based) variable references.
     """
 
-    bindings: list[ValBind] = field(default_factory=list)
-    body: SurfaceTerm | None = None
+    bindings: list[ValBind]
+    body: SurfaceTerm
 
+    @override
+    @override
     def __str__(self) -> str:
         if len(self.bindings) == 1:
             return f"let {self.bindings[0]} in {self.body}"
@@ -399,6 +427,8 @@ class SurfaceAnn(SurfaceTerm):
     term: SurfaceTerm
     type: SurfaceType
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"({self.term} : {self.type})"
 
@@ -414,6 +444,8 @@ class SurfaceIf(SurfaceTerm):
     then_branch: SurfaceTerm
     else_branch: SurfaceTerm
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"if {self.cond} then {self.then_branch} else {self.else_branch}"
 
@@ -422,9 +454,11 @@ class SurfaceIf(SurfaceTerm):
 class SurfaceConstructor(SurfaceTerm):
     """Data constructor application: Con args."""
 
-    name: str = ""
-    args: list[SurfaceTerm] = field(default_factory=list)
+    name: str
+    args: list[SurfaceTerm]
 
+    @override
+    @override
     def __str__(self) -> str:
         if not self.args:
             return self.name
@@ -444,9 +478,11 @@ class SurfaceLit(SurfaceTerm):
         value: The literal value (int, str, float, etc.)
     """
 
-    prim_type: str = ""
-    value: object = None
+    prim_type: str
+    value: object
 
+    @override
+    @override
     def __str__(self) -> str:
         if self.prim_type == "String":
             return f'"{self.value}"'
@@ -465,8 +501,10 @@ class GlobalVar(SurfaceTerm):
         name: Global variable name
     """
 
-    name: str = ""
+    name: str
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"@{self.name}"
 
@@ -479,10 +517,12 @@ class SurfaceOp(SurfaceTerm):
     operation application. Operators include +, -, *, /, ==, <, >, <=, >=.
     """
 
-    left: SurfaceTerm | None = None
-    op: str = ""  # The operator symbol: '+', '-', '*', '/', '==', '<', '>', '<=', '>='
-    right: SurfaceTerm | None = None
+    left: SurfaceTerm
+    op: str  # The operator symbol: '+', '-', '*', '/', '==', '<', '>', '<=', '>='
+    right: SurfaceTerm
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"({self.left} {self.op} {self.right})"
 
@@ -494,8 +534,10 @@ class SurfaceTuple(SurfaceTerm):
     Sugar for: Pair e1 (Pair e2 (... en))
     """
 
-    elements: list[SurfaceTerm] = field(default_factory=list)
+    elements: list[SurfaceTerm]
 
+    @override
+    @override
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
         return f"({elems_str})"
@@ -514,6 +556,8 @@ class SurfacePattern(SurfacePatternBase):
     constructor: str
     vars: list[SurfacePatternBase]
 
+    @override
+    @override
     def __str__(self) -> str:
         if self.vars:
             return f"{self.constructor} {' '.join(str(v) for v in self.vars)}"
@@ -527,8 +571,10 @@ class SurfacePatternTuple(SurfacePatternBase):
     Sugar for: Pair p1 (Pair p2 (... pn))
     """
 
-    elements: list[SurfacePatternBase] = field(default_factory=list)
+    elements: list[SurfacePatternBase]
 
+    @override
+    @override
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
         return f"({elems_str})"
@@ -542,9 +588,11 @@ class SurfacePatternCons(SurfacePatternBase):
     Right-associative: x : y : zs parses as x : (y : zs)
     """
 
-    head: SurfacePatternBase | None = None
-    tail: SurfacePatternBase | None = None
+    head: SurfacePatternBase
+    tail: SurfacePatternBase
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"{self.head} : {self.tail}"
 
@@ -553,9 +601,11 @@ class SurfacePatternCons(SurfacePatternBase):
 class SurfaceLitPattern(SurfacePatternBase):
     """Literal pattern: 42, \"hello\"."""
 
-    prim_type: str = ""
-    value: object = None
+    prim_type: str
+    value: object
 
+    @override
+    @override
     def __str__(self) -> str:
         if self.prim_type == "String":
             return f'"{self.value}"'
@@ -569,6 +619,8 @@ class SurfaceBranch(SurfaceNode):
     pattern: SurfacePatternBase
     body: SurfaceTerm
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"{self.pattern} -> {self.body}"
 
@@ -580,6 +632,8 @@ class SurfaceCase(SurfaceTerm):
     scrutinee: SurfaceTerm
     branches: list[SurfaceBranch]
 
+    @override
+    @override
     def __str__(self) -> str:
         branches_str = " | ".join(str(branch) for branch in self.branches)
         return f"case {self.scrutinee} of {{ {branches_str} }}"
@@ -593,9 +647,11 @@ class SurfaceToolCall(SurfaceTerm):
     The tool name is resolved at runtime from the tool registry.
     """
 
-    tool_name: str = ""
-    args: list[SurfaceTerm] = field(default_factory=list)
+    tool_name: str
+    args: list[SurfaceTerm]
 
+    @override
+    @override
     def __str__(self) -> str:
         if not self.args:
             return f"@{self.tool_name}"
@@ -633,11 +689,11 @@ class SurfacePragma(SurfaceNode):
     Key=value parsing happens in later passes if needed.
     """
 
-    directive: str = ""  # e.g., "LLM"
-    raw_content: str = (
-        ""  # Raw string content after directive (e.g., "model=gpt-4 temperature=0.7")
-    )
+    directive: str  # e.g., "LLM"
+    raw_content: str  # Raw string content after directive (e.g., "model=gpt-4 temperature=0.7")
 
+    @override
+    @override
     def __str__(self) -> str:
         return "{-# " + self.directive + " " + self.raw_content + " #-}"
 
@@ -666,12 +722,14 @@ class SurfaceConstructorInfo(SurfaceNode):
 class SurfaceDataDeclaration(SurfaceDeclaration):
     """Data type declaration: data Name params = Con1 args1 | Con2 args2 | ..."""
 
-    name: str = ""
-    params: list[str] = field(default_factory=list)
-    constructors: list[SurfaceConstructorInfo] = field(default_factory=list)
-    docstring: str | None = None
-    pragma: dict[str, str] | None = None
+    name: str
+    params: list[str]
+    constructors: list[SurfaceConstructorInfo]
+    docstring: str | None
+    pragma: dict[str, str] | None
 
+    @override
+    @override
     def __str__(self) -> str:
         params_str = " ".join(self.params) if self.params else ""
         constrs_str = " | ".join(
@@ -695,12 +753,14 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
         prim_op func : Type -- ^ param -> Type
     """
 
-    name: str = ""
-    type_annotation: SurfaceType | None = None  # REQUIRED - changed from Optional
-    body: SurfaceTerm | None = None
-    docstring: str | None = None  # -- | style, attaches to this declaration
-    pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
+    name: str
+    type_annotation: SurfaceType | None
+    body: SurfaceTerm
+    docstring: str | None
+    pragma: dict[str, str] | None
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"{self.name} : {self.type_annotation} = {self.body}"
 
@@ -715,10 +775,12 @@ class SurfacePrimTypeDecl(SurfaceDeclaration):
     Example: prim_type Int
     """
 
-    name: str = ""
-    docstring: str | None = None
-    pragma: dict[str, str] | None = None
+    name: str
+    docstring: str | None
+    pragma: dict[str, str] | None
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"prim_type {self.name}"
 
@@ -737,11 +799,13 @@ class SurfacePrimOpDecl(SurfaceDeclaration):
         prim_op translate : String -> String
     """
 
-    name: str = ""
-    type_annotation: SurfaceType | None = None
-    docstring: str | None = None
-    pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
+    name: str
+    type_annotation: SurfaceType | None
+    docstring: str | None
+    pragma: dict[str, str] | None
 
+    @override
+    @override
     def __str__(self) -> str:
         return f"prim_op {self.name} : {self.type_annotation}"
 
@@ -750,12 +814,13 @@ class SurfacePrimOpDecl(SurfaceDeclaration):
 class SurfaceImportDeclaration(SurfaceDeclaration):
     """Import declaration: import [qualified] Module [as Alias] [import_spec]."""
 
-    module: str = ""
+    module: str
     qualified: bool = False
-    alias: str | None = None
-    items: list[str] | None = None
+    alias: str | None
+    items: list[str] | None
     hiding: bool = False
 
+    @override
     @override
     def __str__(self) -> str:
         parts = ["import"]

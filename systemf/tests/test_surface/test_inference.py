@@ -482,7 +482,7 @@ class TestTypeAnnotations:
         abs_term = ScopedAbs(var_name="x", var_type=None, body=body, location=DUMMY_LOC)
 
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, param_doc=None, location=DUMMY_LOC)
         ann_term = SurfaceAnn(term=abs_term, type=arrow_type, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(ann_term, empty_ctx)

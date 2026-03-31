@@ -328,7 +328,7 @@ class TestElab3SyntaxSample:
                         scrutinee=SurfaceVar("ma"),
                         branches=[
                             SurfaceBranch(
-                                pattern=SurfacePattern(constructor="Nothing"),
+                                pattern=SurfacePattern(constructor="Nothing", vars=[]),
                                 body=SurfaceVar("default"),
                             ),
                             SurfaceBranch(
