@@ -29,6 +29,7 @@ Styles:
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -243,3 +244,29 @@ class ModuleDecls:
     """All declarations in a module (pre-renaming)."""
     data_decls: list[RnDataDecl]
     term_decls: list[RnTermDecl]
+
+
+def expr_names(expr: Expr) -> Generator[Name, None, None]:
+    names = []
+    match expr:
+        case Var(name):
+            yield name
+        case Lam(args, body):
+            yield from expr_names(body)
+        case App(func, arg):
+            yield from expr_names(func)
+            yield from expr_names(arg)
+        case Let(bindings, body):
+            for b in bindings:
+                yield from expr_names(b.expr)
+            yield from expr_names(body)
+        case Ann(expr, ty):
+            yield from expr_names(expr)  # ignore types for name collection
+        case LitExpr(_):
+            pass
+        case Case(scrutinee, branches):
+            yield from expr_names(scrutinee)
+            for b in branches:
+                yield from expr_names(b.body)
+        case _:
+            raise Exception(f"unexpected expr: {expr}")

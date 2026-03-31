@@ -15,14 +15,14 @@ from systemf.utils.uniq import Uniq
 @dataclass
 class REPLSession:
     """Accumulates imports and bindings. Corresponds to InteractiveContext."""
-    repl: REPL
+    ctx: REPLContext
     reader_env: ReaderEnv         # Accumulated imports
     tythings: list[TyThing]       # Previous definitions
 
 
     @property
     def current_module(self) -> str:
-        return f"REPL{self.repl.next_module_id()}"
+        return f"REPL{self.ctx.next_module_id()}"
 
     def fork(self) -> REPLSession:
         """
@@ -30,7 +30,7 @@ class REPLSession:
         w/ session level states copied.
         """
         return REPLSession(
-            repl=self.repl,
+            ctx=self.ctx,
             reader_env=self.reader_env,
             tythings=self.tythings[:] # Copy tythings
         )
@@ -42,7 +42,7 @@ class REPLSession:
 
 
 @dataclass
-class REPL:
+class REPLContext:
     """Owns shared state, creates sessions, orchestrates module loading.
     
     Contains NameCache which wraps the Uniq counter for generating unique IDs.
@@ -100,6 +100,6 @@ class REPL:
         """Create a new REPL session with given state."""
         return REPLSession(
             repl=self,
-            reader_env=ReaderEnv(),
+            reader_env=ReaderEnv.empty(),
             tythings=[],
         )

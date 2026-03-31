@@ -7,7 +7,7 @@ omitting type annotations where they can be inferred.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union, override
+from typing import override
 
 from systemf.utils.location import Location
 
@@ -21,7 +21,7 @@ from systemf.utils.location import Location
 class SurfaceNode:
     """Base class for all surface AST nodes."""
 
-    location: Optional[Location] = field(default=None)
+    location: Location | None = field(default=None)
 
 
 # =============================================================================
@@ -121,9 +121,7 @@ class SurfaceTypeTuple(SurfaceType):
         return f"({elems_str})"
 
 
-SurfaceTypeRepr = Union[
-    SurfaceTypeVar, SurfaceTypeArrow, SurfaceTypeForall, SurfaceTypeConstructor, SurfaceTypeTuple
-]
+type SurfaceTypeRepr = SurfaceTypeVar | SurfaceTypeArrow | SurfaceTypeForall | SurfaceTypeConstructor | SurfaceTypeTuple
 
 
 # =============================================================================
@@ -166,13 +164,13 @@ class SurfaceAbs(SurfaceTerm):
         return self.params[0][0] if self.params else ""
 
     @property
-    def var_type(self) -> Optional[SurfaceType]:
+    def var_type(self) -> SurfaceType | None:
         """First parameter type (backwards compatibility)."""
         return self.params[0][1] if self.params else None
 
     def __init__(
         self,
-        params: list[tuple[str, Optional[SurfaceType]]] | None = None,
+        params: list[tuple[str, SurfaceType | None]] | None = None,
         body: SurfaceTerm | None = None,
         location: Location | None = None,
         # Backwards compatibility kwargs
@@ -237,8 +235,8 @@ class ScopedAbs(SurfaceTerm):
     """
 
     var_name: str = ""
-    var_type: Optional[SurfaceType] = None
-    body: Optional[SurfaceTerm] = None
+    var_type: SurfaceType | None = None
+    body: SurfaceTerm | None = None
 
     def __str__(self) -> str:
         if self.var_type:
@@ -267,7 +265,7 @@ class SurfaceTypeAbs(SurfaceTerm):
     # Multi-var support: list of type variable names
     # For single var, use vars=["a"]
     vars: list[str] = field(default_factory=list)
-    body: Optional[SurfaceTerm] = None
+    body: SurfaceTerm | None = None
 
     # Backwards compatibility property
     @property
@@ -310,8 +308,8 @@ class SurfaceTypeAbs(SurfaceTerm):
 class SurfaceTypeApp(SurfaceTerm):
     """Type application: func @type or func [type]."""
 
-    func: Optional[SurfaceTerm] = None
-    type_arg: Optional[SurfaceType] = None
+    func: SurfaceTerm | None = None
+    type_arg: SurfaceType | None = None
 
     def __str__(self) -> str:
         return f"({self.func} @{self.type_arg})"
@@ -380,7 +378,7 @@ class ValBindsScoped(SurfaceTerm):
     """
 
     bindings: list[ValBind] = field(default_factory=list)
-    body: Optional[SurfaceTerm] = None
+    body: SurfaceTerm | None = None
 
     def __str__(self) -> str:
         if len(self.bindings) == 1:
@@ -481,9 +479,9 @@ class SurfaceOp(SurfaceTerm):
     operation application. Operators include +, -, *, /, ==, <, >, <=, >=.
     """
 
-    left: Optional[SurfaceTerm] = None
+    left: SurfaceTerm | None = None
     op: str = ""  # The operator symbol: '+', '-', '*', '/', '==', '<', '>', '<=', '>='
-    right: Optional[SurfaceTerm] = None
+    right: SurfaceTerm | None = None
 
     def __str__(self) -> str:
         return f"({self.left} {self.op} {self.right})"
@@ -544,8 +542,8 @@ class SurfacePatternCons(SurfacePatternBase):
     Right-associative: x : y : zs parses as x : (y : zs)
     """
 
-    head: Optional[SurfacePatternBase] = None
-    tail: Optional[SurfacePatternBase] = None
+    head: SurfacePatternBase | None = None
+    tail: SurfacePatternBase | None = None
 
     def __str__(self) -> str:
         return f"{self.head} : {self.tail}"
@@ -740,7 +738,7 @@ class SurfacePrimOpDecl(SurfaceDeclaration):
     """
 
     name: str = ""
-    type_annotation: Optional[SurfaceType] = None
+    type_annotation: SurfaceType | None = None
     docstring: str | None = None
     pragma: dict[str, str] | None = None  # {"LLM": "model=gpt-4 temp=0.7"}
 
@@ -774,12 +772,7 @@ class SurfaceImportDeclaration(SurfaceDeclaration):
         return " ".join(parts)
 
 
-type SurfaceDeclarationRepr = (
-    SurfaceDataDeclaration |
-    SurfaceTermDeclaration |
-    SurfacePrimTypeDecl |
-    SurfacePrimOpDecl |
-    SurfaceImportDeclaration )
+type SurfaceDeclarationRepr = SurfaceDataDeclaration | SurfaceTermDeclaration | SurfacePrimTypeDecl | SurfacePrimOpDecl | SurfaceImportDeclaration
 
 
 

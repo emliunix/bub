@@ -117,7 +117,7 @@ class BoundTv(TyVar):
     Like GHC's TyVar with Internal NameSort. Stays as str — bound type vars
     don't need global identity.
     """
-    name: str
+    name: Name
 
 
 @dataclass(frozen=True, repr=False)
@@ -127,8 +127,7 @@ class SkolemTv(TyVar):
     Like GHC's TyVar with skolem details — rigid type variable introduced
     during polymorphic type checking.
     """
-    name: str
-    uniq: int
+    name: Name
 
 
 @dataclass(frozen=True, repr=False)
@@ -220,9 +219,9 @@ def _ty_repr(ty: Ty, prec: int) -> str:
     def _show() -> tuple[int, str]:
         match ty:
             case BoundTv(name=name):
-                return 1, name
-            case SkolemTv(name=name, uniq=uniq):
-                return 1, f"$s{uniq}_{name}"
+                return 1, name.surface
+            case SkolemTv(name=name):
+                return 1, f"${name.unique}_{name.surface}"
             case TyConApp(name=name, args=args):
                 if not args:
                     return 1, name.surface
@@ -232,7 +231,7 @@ def _ty_repr(ty: Ty, prec: int) -> str:
                 return 1, f"{_ty_repr(arg, 1)} -> {_ty_repr(res, 0)}"
             case TyForall(vars=vars, body=body):
                 var_strs = " ".join(
-                    v.name for v in vars if isinstance(v, (BoundTv, SkolemTv))
+                    v.name.surface for v in vars if isinstance(v, (BoundTv, SkolemTv))
                 )
                 return 0, f"forall {var_strs}. {_ty_repr(body, 0)}"
             case MetaTv(uniq=uniq):

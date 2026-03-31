@@ -2,219 +2,223 @@
 Reader environment for name resolution.
 
 Maps surface names (OccName) to resolved Names with provenance.
+
+Design based on GHC's GlobalRdrEnv:
+- ReaderEnv.table: dict[str, list[RdrElt]] (OccName -> RdrElts)
+- RdrElt split into LocalRdrElt (no import_specs) and ImportRdrElt (has import_specs)
+- Lookup filters by qualified/unqualified based on RdrName
 """
 
-from abc import ABC
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+import itertools
+
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import override
 
 from systemf.elab3.types import Name
 
-if TYPE_CHECKING:
-    from systemf.elab3.mod import Module
 
+# =============================================================================
+# RdrName (how user wrote the reference)
+# =============================================================================
 
-type RdrName = QualName | UnqualName
-
-
-@dataclass
-class QualName:
-    qual: str
-    name: str
-
-
-@dataclass
+@dataclass(frozen=True)
 class UnqualName:
+    """Unqualified name: foo"""
     name: str
 
-
-@dataclass
-class ImportList:
-    """Import only these specific items."""
-    items: list[str]
-
-
-@dataclass
-class HidingList:
-    """Import all except these specific items."""
-    items: list[str]
-
-
-@dataclass
-class ImportSpec:
-    """How a name entered scope via import.
-    
-    items field captures three cases:
-    - None: import all exported names
-    - ImportList([...]): import only these names
-    - HidingList([...]): import all except these names
-    """
-    module: str                    # Source module
-    qualified: bool                # Was imported qualified?
-    alias: str | None              # Import alias (e.g., 'as M')
-    items: ImportList | HidingList | None = None
-
-
-@dataclass
-class RdrElt:
-    """Reader environment element - a binding in scope.
-    
-    import_specs is a list because a name can be brought into scope
-    by multiple imports (e.g., import M; import M as N).
-    Empty list means locally defined.
-    """
-    name: Name
-    is_local: bool              # True if defined locally
-    import_specs: list[ImportSpec]  # Empty for local bindings
+    @override
+    def __repr__(self):
+        return self.name
 
 
 @dataclass(frozen=True)
+class QualName:
+    """Qualified name: M.foo"""
+    qual: str
+    name: str
+
+    @override
+    def __repr__(self):
+        return f"{self.qual}.{self.name}"
+
+
+type RdrName = UnqualName | QualName
+
+
+# =============================================================================
+# ImportSpec (how a name entered scope)
+# =============================================================================
+
+@dataclass(frozen=True)
+class ImportSpec:
+    """How an imported name entered scope."""
+    module_name: str        # Source module (e.g., "Data.Maybe")
+    alias: str | None       # Import alias if `as M` used
+    is_qual: bool           # Qualified-only? (changes during shadowing)
+
+
+# =============================================================================
+# RdrElt (one binding in scope)
+# =============================================================================
+
+@dataclass(frozen=True)
+class LocalRdrElt:
+    """Locally defined binding.
+    
+    Invariant: No import_specs (enforced by type system).
+    """
+    name: Name
+    
+    @staticmethod
+    def create(name: Name) -> LocalRdrElt:
+        return LocalRdrElt(name)
+
+
+@dataclass(frozen=True)
+class ImportRdrElt:
+    """Imported binding.
+    
+    Invariant: import_specs is non-empty (at least one import path).
+    """
+    name: Name
+    import_specs: list[ImportSpec]
+    
+    @staticmethod
+    def create(name: Name, spec: ImportSpec) -> ImportRdrElt:
+        return ImportRdrElt(name, [spec])
+
+
+RdrElt = LocalRdrElt | ImportRdrElt
+
+
+# =============================================================================
+# ReaderEnv (GlobalRdrEnv equivalent)
+# =============================================================================
+
 class ReaderEnv:
     """Maps surface names to resolved Names.
     
     Key is unqualified surface name (OccName).
-    Value is list of RdrElts (handles name clashes).
-    
-    Immutable - use factory methods to construct.
+    Value is list of RdrElts (handles name clashes/ambiguity).
     """
-    table: dict[str, list[RdrElt]] = field(default_factory=dict)
+    table: dict[str, list[RdrElt]]
     
-    def lookup(self, name: RdrName) -> list[RdrElt]:
-        """Look up all bindings with the given surface name."""
-        return self.table.get(surface, [])
+    def __init__(self, table: dict[str, list[RdrElt]]):
+        self.table = table
+    
+    def lookup(self, rdr_name: RdrName) -> list[RdrElt]:
+        """Look up by RdrName, filtered for qual/unqualified access."""
+
+        match rdr_name:
+            case UnqualName(occ):
+                occ_name = occ
+            case QualName(_, occ):
+                occ_name = occ
+        return [
+            elt
+            for elt in self.table.get(occ_name, [])
+            if _filter_by_spec(elt, rdr_name)
+        ]
+    
+    def merge(self, other: ReaderEnv) -> ReaderEnv:
+        """Merge two envs. Other shadows self (later bindings win)."""
+        return ReaderEnv.from_elts(list(
+            elt
+            for elts in itertools.chain(
+                    self.table.values(),
+                    other.table.values())
+            for elt in elts))
+
+    def __add__(self, other: ReaderEnv) -> ReaderEnv:
+        """env1 + env2 proxies to merge. Other shadows self."""
+        return self.merge(other)
+    
+    def shadow(self, new_names: set[Name]) -> ReaderEnv:
+        """Convert to qualified-only for names not in new_names.
+        
+        Old interactive bindings become accessible only via qualified syntax.
+        """
+        table = {
+            occ_name: [
+                _shadow_rdr_elt(elt) if elt.name in new_names else elt
+                for elt in elts
+            ]
+            for (occ_name, elts) in self.table.items()
+        }
+        return ReaderEnv(table)
     
     @staticmethod
-    def empty() -> "ReaderEnv":
+    def empty() -> ReaderEnv:
         """Create empty environment."""
         return ReaderEnv({})
-    
+
     @staticmethod
-    def from_module(module: Module, spec: ImportSpec) -> "ReaderEnv":
-        """Build ReaderEnv from a single module import.
-        
-        Args:
-            hpt: Home package table with loaded modules
-            module_name: Name of module to import from
-            spec: Import specification (qualified, alias, items/hiding)
-        
-        Returns:
-            ReaderEnv with bindings from this import
-        """
-        result: dict[str, list[RdrElt]] = {}
-        
-        module = hpt.get(module_name)
-        if module is None:
-            # Module not loaded - should have been loaded before this
-            raise ValueError(f"Module not found: {module_name}")
-        
-        # Determine which names to import
-        names_to_import = _filter_exports(module.exports, spec.items)
-        
-        for name in names_to_import:
-            # Create RdrElt for this import
-            rdr_elt = RdrElt(
-                name=name,
-                is_local=False,
-                import_specs=[spec]
-            )
+    def from_elts(elts: list[RdrElt]) -> ReaderEnv:
+        """Create environment from list of RdrElts."""
+        """Build from list of RdrElts, merging same-Name elts."""
+        table: dict[str, list[RdrElt]] = defaultdict(list)
+
+        for elt in elts:
+            occ = elt.name.surface
             
-            # Add under surface name
-            surface = name.surface
-            if surface not in result:
-                result[surface] = []
-            result[surface].append(rdr_elt)
-            
-            # If qualified or aliased, also add under qualified name
-            if spec.qualified or spec.alias:
-                alias = spec.alias if spec.alias else module_name
-                qualified_surface = f"{alias}.{surface}"
-                if qualified_surface not in result:
-                    result[qualified_surface] = []
-                result[qualified_surface].append(rdr_elt)
-        
-        return ReaderEnv(result)
-    
-    @staticmethod
-    def from_imports(modules: dict[str, Module], specs: list[ImportSpec]) -> "ReaderEnv":
-        """Build ReaderEnv from multiple imports.
-        
-        Merges all imports together. Later imports shadow earlier ones
-        in case of name clashes.
-        """
-        result = ReaderEnv.empty()
-        for spec in specs:
-            import_env = ReaderEnv.from_module(hpt, spec.module, spec)
-            result = result.merge(import_env)
-        return result
-    
-    def merge(self, other: "ReaderEnv") -> "ReaderEnv":
-        """Merge two environments (bag union - keeps duplicates).
-        
-        Later bindings (from `other`) appear after earlier bindings.
-        """
-        result: dict[str, list[RdrElt]] = {}
-        
-        # Copy self
-        for k, v in self.table.items():
-            result[k] = v.copy()
-        
-        # Merge other
-        for k, v in other.table.items():
-            if k not in result:
-                result[k] = []
-            result[k].extend(v)
-        
-        return ReaderEnv(result)
-    
-    def extend_local(self, name: Name) -> "ReaderEnv":
-        """Add a local binding to the environment.
-        
-        Returns new environment with the binding added.
-        """
-        result: dict[str, list[RdrElt]] = {}
-        
-        # Copy existing
-        for k, v in self.table.items():
-            result[k] = v.copy()
-        
-        # Add local binding
-        surface = name.surface
-        if surface not in result:
-            result[surface] = []
-        
-        rdr_elt = RdrElt(
-            name=name,
-            is_local=True,
-            import_specs=[]
-        )
-        result[surface].append(rdr_elt)
-        
-        return ReaderEnv(result)
+            # Check if same Name already exists (merge import specs)
+            for (i, e) in enumerate(table[occ]):
+                if elt.name.unique == e.name.unique:
+                    table[occ][i] = _merge_rdr_elts(elt, e)
+                    break
+            else: 
+                table[occ].append(elt)
+
+        return ReaderEnv(table)
 
 
-def _filter_exports(exports: list[Name], items: ImportList | HidingList | None) -> list[Name]:
-    """Filter module exports based on import specification.
+# =============================================================================
+# Helper functions (module level)
+# =============================================================================
+
+def _merge_rdr_elts(a: RdrElt, b: RdrElt) -> RdrElt:
+    """Merge two RdrElts for the same Name.
     
-    Args:
-        exports: List of exported Names from module
-        items: Import specification (None, ImportList, or HidingList)
-    
-    Returns:
-        Filtered list of names to actually import
+    Used when same Name arrives via multiple import paths.
     """
-    if items is None:
-        # Import everything
-        return list(exports)
-    
-    if isinstance(items, ImportList):
-        # Import only specific items
-        names_to_import = set(items.items)
-        return [n for n in exports if n.surface in names_to_import]
-    
-    if isinstance(items, HidingList):
-        # Import everything except specific items
-        names_to_hide = set(items.items)
-        return [n for n in exports if n.surface not in names_to_hide]
-    
-    # Shouldn't reach here
-    return list(exports)
+    match (a, b):
+        case (ImportRdrElt(name, specs_a), ImportRdrElt(_, specs_b)):
+            # Union the import specs
+            return ImportRdrElt(name, specs_a + specs_b)
+        case _:
+            raise ValueError(f"Only ImportRdrElts can be merged: {a}, {b}")
+
+
+def _filter_by_spec(elt: RdrElt, rdr_name: RdrName):
+    match (elt, rdr_name):
+        case (ImportRdrElt(_, specs), QualName(qual, _)):
+            if any(spec for spec in specs if spec.alias == qual or spec.module_name == qual):
+                return True
+        case (ImportRdrElt(_, specs), UnqualName()):
+            # allow unqualified access
+            if any(spec for spec in specs if not spec.is_qual):
+                return True
+        case (LocalRdrElt(), UnqualName()):
+            return True
+        case _:
+            return False
+
+
+def _shadow_rdr_elt(elt: RdrElt) -> RdrElt:
+    """Convert RdrElt to qualified-only (for REPL shadowing).
+
+    Old interactive bindings become accessible only via qualified name
+    (e.g., Repl3.x).
+    """
+    match elt:
+        case LocalRdrElt(name):
+            # Local becomes import with fake qualified spec
+            spec = ImportSpec(
+                module_name=name.mod,
+                alias=None,
+                is_qual=True  # Qualified-only!
+            )
+            return ImportRdrElt(name, [spec])
+        case _:
+            return elt
