@@ -380,7 +380,7 @@ class TestTypeConversionRules:
         ctx = TypeContext()
 
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
-        arrow = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
+        arrow = SurfaceTypeArrow(arg=int_type, ret=int_type, param_doc=None, location=DUMMY_LOC)
         core_type = elab._surface_to_core_type(arrow, ctx)
 
         assert isinstance(core_type, TypeArrow)
@@ -393,7 +393,7 @@ class TestTypeConversionRules:
         ctx = TypeContext()
 
         type_var = SurfaceTypeVar(name="a", location=DUMMY_LOC)
-        arrow = SurfaceTypeArrow(arg=type_var, ret=type_var, location=DUMMY_LOC)
+        arrow = SurfaceTypeArrow(arg=type_var, ret=type_var, param_doc=None, location=DUMMY_LOC)
         forall = SurfaceTypeForall(var="a", body=arrow, location=DUMMY_LOC)
         core_type = elab._surface_to_core_type(forall, ctx)
 

@@ -588,7 +588,7 @@ class TestCombinedGaps:
         ann_type = SurfaceTypeForall(
             var="a",
             body=SurfaceTypeArrow(
-                arg=SurfaceTypeVar(name="a", location=DUMMY_LOC),
+                arg=SurfaceTypeVar(name="a", param_doc=None, location=DUMMY_LOC),
                 ret=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),

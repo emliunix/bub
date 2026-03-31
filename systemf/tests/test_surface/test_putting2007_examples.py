@@ -105,7 +105,7 @@ class TestIntroductionExample:
         surface_id_type = SurfaceTypeForall(
             var="a",
             body=SurfaceTypeArrow(
-                arg=SurfaceTypeVar(name="a", location=DUMMY_LOC),
+                arg=SurfaceTypeVar(name="a", param_doc=None, location=DUMMY_LOC),
                 ret=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
@@ -171,7 +171,7 @@ class TestRankNTypes:
         id_type = SurfaceTypeForall(
             var="a",
             body=SurfaceTypeArrow(
-                arg=SurfaceTypeVar(name="a", location=DUMMY_LOC),
+                arg=SurfaceTypeVar(name="a", param_doc=None, location=DUMMY_LOC),
                 ret=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
@@ -226,8 +226,8 @@ class TestSubsumption:
 
         # The function expecting monomorphic type: \f:(Int->Int->Int). 42
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
-        int_arrow = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
-        int_arrow2 = SurfaceTypeArrow(arg=int_type, ret=int_arrow, location=DUMMY_LOC)
+        int_arrow = SurfaceTypeArrow(arg=int_type, ret=int_type, param_doc=None, location=DUMMY_LOC)
+        int_arrow2 = SurfaceTypeArrow(arg=int_type, ret=int_arrow, param_doc=None, location=DUMMY_LOC)
 
         body = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         abs_term = ScopedAbs(var_name="f", var_type=int_arrow2, body=body, location=DUMMY_LOC)
@@ -845,7 +845,7 @@ class TestPutting2007Integration:
         surface_id_type = SurfaceTypeForall(
             var="a",
             body=SurfaceTypeArrow(
-                arg=SurfaceTypeVar(name="a", location=DUMMY_LOC),
+                arg=SurfaceTypeVar(name="a", param_doc=None, location=DUMMY_LOC),
                 ret=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
