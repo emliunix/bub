@@ -375,13 +375,13 @@ class TestElab3SyntaxSample:
                                         scrutinee=SurfaceVar("ys"),
                                         branches=[
                                             SurfaceBranch(
-                                                pattern=SurfacePattern(constructor="Nil"),
+                                                pattern=SurfacePattern(constructor="Nil", vars=[]),
                                                 body=SurfaceVar("acc"),
                                             ),
                                             SurfaceBranch(
-                                                pattern=SurfacePattern(
-                                                    constructor="Cons", vars=["z", "zs"]
-                                                ),
+pattern=SurfacePattern(
+                                    constructor="Cons", vars=[SurfacePattern(constructor="z", vars=[]), SurfacePattern(constructor="zs", vars=[])]
+                                ),
                                                 body=SurfaceApp(
                                                     func=SurfaceApp(
                                                         func=SurfaceVar("go"),
@@ -427,7 +427,7 @@ class TestElab3SyntaxSample:
                                 body=SurfaceLit(prim_type="Int", value=1),
                             ),
                             SurfaceBranch(
-                                pattern=SurfacePattern(constructor="m"),
+                                pattern=SurfacePattern(constructor="m", vars=[]),
                                 body=SurfaceOp(
                                     left=SurfaceVar("m"),
                                     op="*",
@@ -465,7 +465,7 @@ class TestElab3SyntaxSample:
                                 ),
                             ),
                             SurfaceBranch(
-                                pattern=SurfacePattern(constructor="other"),
+                                pattern=SurfacePattern(constructor="other", vars=[]),
                                 body=SurfaceOp(
                                     left=SurfaceLit(
                                         prim_type="String", value="hello "
