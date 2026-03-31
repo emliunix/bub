@@ -348,7 +348,7 @@ class TestElab3SyntaxSample:
                     var="a",
                     body=SurfaceTypeArrow(
                         arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a")]),
-                        ret=SurfaceTypeConstructor(name="Int"),
+                        ret=SurfaceTypeConstructor(name="Int", args=[]),
                     ),
                 ),
                 body=SurfaceAbs(
@@ -360,12 +360,12 @@ class TestElab3SyntaxSample:
                                 type_ann=SurfaceTypeForall(
                                     var="a",
                                     body=SurfaceTypeArrow(
-                                        arg=SurfaceTypeConstructor(name="Int"),
+                                        arg=SurfaceTypeConstructor(name="Int", args=[]),
                                         ret=SurfaceTypeArrow(
                                             arg=SurfaceTypeConstructor(
                                                 name="List", args=[SurfaceTypeVar("a")]
                                             ),
-                                            ret=SurfaceTypeConstructor(name="Int"),
+                                            ret=SurfaceTypeConstructor(name="Int", args=[]),
                                         ),
                                     ),
                                 ),
@@ -414,8 +414,8 @@ pattern=SurfacePattern(
             SurfaceTermDeclaration(
                 name="factorial",
                 type_annotation=SurfaceTypeArrow(
-                    arg=SurfaceTypeConstructor(name="Int"),
-                    ret=SurfaceTypeConstructor(name="Int"),
+                    arg=SurfaceTypeConstructor(name="Int", args=[]),
+                    ret=SurfaceTypeConstructor(name="Int", args=[]),
                 ),
                 body=SurfaceAbs(
                     params=[("n", None)],
@@ -448,8 +448,8 @@ pattern=SurfacePattern(
             SurfaceTermDeclaration(
                 name="greet",
                 type_annotation=SurfaceTypeArrow(
-                    arg=SurfaceTypeConstructor(name="String"),
-                    ret=SurfaceTypeConstructor(name="String"),
+                    arg=SurfaceTypeConstructor(name="String", args=[]),
+                    ret=SurfaceTypeConstructor(name="String", args=[]),
                 ),
                 body=SurfaceAbs(
                     params=[("name", None)],
