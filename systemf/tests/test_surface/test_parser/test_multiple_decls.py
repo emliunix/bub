@@ -289,7 +289,7 @@ class TestElab3SyntaxSample:
                     body=SurfaceTypeArrow(arg=SurfaceTypeVar("a"), ret=SurfaceTypeVar("a")),
                 ),
                 body=SurfaceAbs(params=[("x", None)], body=SurfaceVar("x")),
-            ),
+            ),, docstring=None, pragma=None
             SurfaceTermDeclaration(
                 name="const",
                 type_annotation=SurfaceTypeForall(
@@ -309,7 +309,7 @@ class TestElab3SyntaxSample:
                     params=[("x", None), ("y", None)],
                     body=SurfaceVar("x"),
                 ),
-            ),
+            ),, docstring=None, pragma=None
             SurfaceTermDeclaration(
                 name="fromMaybe",
                 type_annotation=SurfaceTypeForall(
@@ -341,7 +341,7 @@ class TestElab3SyntaxSample:
                         ],
                     ),
                 ),
-            ),
+            ),, docstring=None, pragma=None
             SurfaceTermDeclaration(
                 name="length",
                 type_annotation=SurfaceTypeForall(
@@ -410,7 +410,7 @@ pattern=SurfacePattern(
                         ),
                     ),
                 ),
-            ),
+            ),, docstring=None, pragma=None
             SurfaceTermDeclaration(
                 name="factorial",
                 type_annotation=SurfaceTypeArrow(
@@ -444,7 +444,7 @@ pattern=SurfacePattern(
                         ],
                     ),
                 ),
-            ),
+            ),, docstring=None, pragma=None
             SurfaceTermDeclaration(
                 name="greet",
                 type_annotation=SurfaceTypeArrow(
@@ -477,7 +477,7 @@ pattern=SurfacePattern(
                         ],
                     ),
                 ),
-            ),
+            ),, docstring=None, pragma=None
         ]
 
         assert len(result) == len(expected)

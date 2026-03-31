@@ -412,7 +412,7 @@ class TestImportDeclaration:
         tokens = lex("import List")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="List")
+        expected = SurfaceImportDeclaration(module="List", alias=None, items=None)
         assert equals_ignore_location(result, expected)
 
     def test_qualified_import(self):
@@ -420,7 +420,7 @@ class TestImportDeclaration:
         tokens = lex("import qualified Data.Maybe")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="Data.Maybe", qualified=True)
+        expected = SurfaceImportDeclaration(module="Data.Maybe", qualified=True, alias=None, items=None)
         assert equals_ignore_location(result, expected)
 
     def test_aliased_import(self):
