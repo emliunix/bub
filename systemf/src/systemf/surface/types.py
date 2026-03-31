@@ -682,12 +682,13 @@ class SurfaceDeclaration(SurfaceNode):
 
 
 @dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True)
 class SurfaceConstructorInfo(SurfaceNode):
     """Data constructor with optional docstring."""
 
-    name: str = ""
-    args: list[SurfaceType] = field(default_factory=list)
-    docstring: str | None = None
+    name: str
+    args: list[SurfaceType]
+    docstring: str | None
 
 
 @dataclass(frozen=True, kw_only=True)

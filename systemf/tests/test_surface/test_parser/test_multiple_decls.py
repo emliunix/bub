@@ -255,32 +255,40 @@ class TestElab3SyntaxSample:
             SurfaceImportDeclaration(module="List"),
             SurfaceDataDeclaration(
                 name="Bool",
+                params=[],
                 constructors=[
-                    SurfaceConstructorInfo(name="True"),
-                    SurfaceConstructorInfo(name="False"),
+                    SurfaceConstructorInfo(name="True", args=[], docstring=None),
+                    SurfaceConstructorInfo(name="False", args=[], docstring=None),
                 ],
+                docstring=None,
+                pragma=None,
             ),
             SurfaceDataDeclaration(
                 name="Maybe",
                 params=["a"],
                 constructors=[
-                    SurfaceConstructorInfo(name="Nothing"),
-                    SurfaceConstructorInfo(name="Just", args=[SurfaceTypeVar("a")]),
+                    SurfaceConstructorInfo(name="Nothing", args=[], docstring=None),
+                    SurfaceConstructorInfo(name="Just", args=[SurfaceTypeVar("a")], docstring=None),
                 ],
+                docstring=None,
+                pragma=None,
             ),
             SurfaceDataDeclaration(
                 name="List",
                 params=["a"],
                 constructors=[
-                    SurfaceConstructorInfo(name="Nil"),
+                    SurfaceConstructorInfo(name="Nil", args=[], docstring=None),
                     SurfaceConstructorInfo(
                         name="Cons",
                         args=[
                             SurfaceTypeVar("a"),
                             SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a")]),
                         ],
+                        docstring=None,
                     ),
                 ],
+                docstring=None,
+                pragma=None,
             ),
             SurfaceTermDeclaration(
                 name="id",
