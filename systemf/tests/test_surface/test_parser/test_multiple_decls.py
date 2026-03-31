@@ -294,7 +294,7 @@ class TestElab3SyntaxSample:
                 name="id",
                 type_annotation=SurfaceTypeForall(
                     var="a",
-                    body=SurfaceTypeArrow(arg=SurfaceTypeVar("a"), ret=SurfaceTypeVar("a")),
+                    body=SurfaceTypeArrow(arg=SurfaceTypeVar("a", param_doc=None), ret=SurfaceTypeVar("a")),
                 ),
                 body=SurfaceAbs(params=[("x", None)], body=SurfaceVar("x")),
             ),, docstring=None, pragma=None
@@ -305,9 +305,9 @@ class TestElab3SyntaxSample:
                     body=SurfaceTypeForall(
                         var="b",
                         body=SurfaceTypeArrow(
-                            arg=SurfaceTypeVar("a"),
+                            arg=SurfaceTypeVar("a", param_doc=None),
                             ret=SurfaceTypeArrow(
-                                arg=SurfaceTypeVar("b"),
+                                arg=SurfaceTypeVar("b", param_doc=None),
                                 ret=SurfaceTypeVar("a"),
                             ),
                         ),
@@ -323,9 +323,9 @@ class TestElab3SyntaxSample:
                 type_annotation=SurfaceTypeForall(
                     var="a",
                     body=SurfaceTypeArrow(
-                        arg=SurfaceTypeVar("a"),
+                        arg=SurfaceTypeVar("a", param_doc=None),
                         ret=SurfaceTypeArrow(
-                            arg=SurfaceTypeConstructor(name="Maybe", args=[SurfaceTypeVar("a")]),
+                            arg=SurfaceTypeConstructor(name="Maybe", args=[SurfaceTypeVar("a", param_doc=None)]),
                             ret=SurfaceTypeVar("a"),
                         ),
                     ),
@@ -355,7 +355,7 @@ class TestElab3SyntaxSample:
                 type_annotation=SurfaceTypeForall(
                     var="a",
                     body=SurfaceTypeArrow(
-                        arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a")]),
+                        arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a", param_doc=None)]),
                         ret=SurfaceTypeConstructor(name="Int", args=[]),
                     ),
                 ),
@@ -368,10 +368,10 @@ class TestElab3SyntaxSample:
                                 type_ann=SurfaceTypeForall(
                                     var="a",
                                     body=SurfaceTypeArrow(
-                                        arg=SurfaceTypeConstructor(name="Int", args=[]),
+                                        arg=SurfaceTypeConstructor(name="Int", args=[], param_doc=None),
                                         ret=SurfaceTypeArrow(
                                             arg=SurfaceTypeConstructor(
-                                                name="List", args=[SurfaceTypeVar("a")]
+                                                name="List", args=[SurfaceTypeVar("a", param_doc=None)]
                                             ),
                                             ret=SurfaceTypeConstructor(name="Int", args=[]),
                                         ),
@@ -422,7 +422,7 @@ pattern=SurfacePattern(
             SurfaceTermDeclaration(
                 name="factorial",
                 type_annotation=SurfaceTypeArrow(
-                    arg=SurfaceTypeConstructor(name="Int", args=[]),
+                    arg=SurfaceTypeConstructor(name="Int", args=[], param_doc=None),
                     ret=SurfaceTypeConstructor(name="Int", args=[]),
                 ),
                 body=SurfaceAbs(
@@ -456,7 +456,7 @@ pattern=SurfacePattern(
             SurfaceTermDeclaration(
                 name="greet",
                 type_annotation=SurfaceTypeArrow(
-                    arg=SurfaceTypeConstructor(name="String", args=[]),
+                    arg=SurfaceTypeConstructor(name="String", args=[], param_doc=None),
                     ret=SurfaceTypeConstructor(name="String", args=[]),
                 ),
                 body=SurfaceAbs(

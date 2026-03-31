@@ -60,7 +60,7 @@ class TestBasicPipeline:
         # id : Int -> Int
         # id = \x -> x
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None)
 
         body = SurfaceAbs(
             var="x",
@@ -95,8 +95,8 @@ class TestBasicPipeline:
         outer_body = SurfaceAbs(var="x", var_type=int_type, body=inner_body, location=DUMMY_LOC)
 
         # Type: Int -> Int -> Int
-        arrow1 = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
-        arrow2 = SurfaceTypeArrow(arg=int_type, ret=arrow1, location=DUMMY_LOC)
+        arrow1 = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None)
+        arrow2 = SurfaceTypeArrow(arg=int_type, ret=arrow1, location=DUMMY_LOC, param_doc=None)
 
         decl = SurfaceTermDeclaration(
             name="const", type_annotation=arrow2, body=outer_body, location=DUMMY_LOC
@@ -126,7 +126,7 @@ class TestPolymorphism:
         type_abs = SurfaceTypeAbs(var="a", body=body, location=DUMMY_LOC)
 
         # Type: forall a. a -> a
-        arrow = SurfaceTypeArrow(arg=type_var, ret=type_var, location=DUMMY_LOC)
+        arrow = SurfaceTypeArrow(arg=type_var, ret=type_var, location=DUMMY_LOC, param_doc=None)
         forall_type = SurfaceTypeForall(var="a", body=arrow, location=DUMMY_LOC)
 
         decl = SurfaceTermDeclaration(
@@ -181,7 +181,7 @@ class TestLetBindings:
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
         int_plus_type = SurfaceTypeArrow(
             arg=int_type,
-            ret=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            ret=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None),
             location=DUMMY_LOC,
         )
 
@@ -213,7 +213,7 @@ class TestLetBindings:
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
         int_plus_type = SurfaceTypeArrow(
             arg=int_type,
-            ret=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            ret=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None),
             location=DUMMY_LOC,
         )
 
@@ -256,7 +256,7 @@ class TestMutualRecursion:
 
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
         bool_type = SurfaceTypeConstructor(name="Bool", args=[], location=DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(arg=int_type, ret=bool_type, location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=bool_type, location=DUMMY_LOC, param_doc=None)
 
         # Simplified: just test that both functions are visible
         # even = \n -> True (simplified)
@@ -299,7 +299,7 @@ class TestMutualRecursion:
         # g y = y
 
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(int_type, int_type, location=DUMMY_LOC, param_doc=None)
 
         # g = \y -> y
         g_body = SurfaceAbs(
@@ -308,7 +308,7 @@ class TestMutualRecursion:
             body=SurfaceVar(name="y", location=DUMMY_LOC),
             location=DUMMY_LOC,
         )
-        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None)
         g_decl = SurfaceTermDeclaration(
             name="g", type_annotation=arrow_type, body=g_body, location=DUMMY_LOC
         )
@@ -346,7 +346,7 @@ class TestLLMPragmaProcessing:
         # translate = \text -> @llm text
 
         str_type = SurfaceTypeConstructor(name="String", args=[], location=DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(arg=str_type, ret=str_type, location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=str_type, ret=str_type, location=DUMMY_LOC, param_doc=None)
 
         body = SurfaceAbs(
             var="text",
@@ -372,7 +372,7 @@ class TestLLMPragmaProcessing:
     def test_non_llm_function(self):
         """Function without LLM pragma should pass through unchanged."""
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
-        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC)
+        arrow_type = SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None)
 
         body = SurfaceAbs(
             var="x",
@@ -542,7 +542,7 @@ class TestModuleAssembly:
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None),
             body=body,
             location=DUMMY_LOC,
             docstring="Identity function",
@@ -561,7 +561,7 @@ class TestModuleAssembly:
 
         decl1 = SurfaceTermDeclaration(
             name="f1",
-            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None),
             body=SurfaceAbs(
                 var="x",
                 var_type=int_type,
@@ -573,7 +573,7 @@ class TestModuleAssembly:
 
         decl2 = SurfaceTermDeclaration(
             name="f2",
-            type_annotation=SurfaceTypeArrow(arg=bool_type, ret=bool_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=bool_type, ret=bool_type, location=DUMMY_LOC, param_doc=None),
             body=SurfaceAbs(
                 var="x",
                 var_type=bool_type,
@@ -604,7 +604,7 @@ class TestConvenienceFunction:
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None),
             body=body,
             location=DUMMY_LOC,
         )
@@ -633,9 +633,9 @@ class TestRealPrograms:
         # x : a
         # result: f (g x) : c
 
-        arrow_bc = SurfaceTypeArrow(arg=type_b, ret=type_c, location=DUMMY_LOC)
-        arrow_ab = SurfaceTypeArrow(arg=type_a, ret=type_b, location=DUMMY_LOC)
-        arrow_ac = SurfaceTypeArrow(arg=type_a, ret=type_c, location=DUMMY_LOC)
+        arrow_bc = SurfaceTypeArrow(arg=type_b, ret=type_c, location=DUMMY_LOC, param_doc=None)
+        arrow_ab = SurfaceTypeArrow(arg=type_a, ret=type_b, location=DUMMY_LOC, param_doc=None)
+        arrow_ac = SurfaceTypeArrow(arg=type_a, ret=type_c, location=DUMMY_LOC, param_doc=None)
 
         # g x
         g_app = SurfaceApp(
@@ -659,7 +659,7 @@ class TestRealPrograms:
         # Build inner type first
         inner_type = SurfaceTypeArrow(
             arg=arrow_bc,
-            ret=SurfaceTypeArrow(arg=arrow_ab, ret=arrow_ac, location=DUMMY_LOC),
+            ret=SurfaceTypeArrow(arg=arrow_ab, ret=arrow_ac, location=DUMMY_LOC, param_doc=None),
             location=DUMMY_LOC,
         )
         # Wrap in forall for each type variable (right to left)
@@ -684,10 +684,10 @@ class TestRealPrograms:
         type_b = SurfaceTypeVar(name="b", location=DUMMY_LOC)
         type_c = SurfaceTypeVar(name="c", location=DUMMY_LOC)
 
-        arrow_bc = SurfaceTypeArrow(arg=type_b, ret=type_c, location=DUMMY_LOC)
-        arrow_abc = SurfaceTypeArrow(arg=type_a, ret=arrow_bc, location=DUMMY_LOC)
-        arrow_ac = SurfaceTypeArrow(arg=type_a, ret=type_c, location=DUMMY_LOC)
-        arrow_bac = SurfaceTypeArrow(arg=type_b, ret=arrow_ac, location=DUMMY_LOC)
+        arrow_bc = SurfaceTypeArrow(arg=type_b, ret=type_c, location=DUMMY_LOC, param_doc=None)
+        arrow_abc = SurfaceTypeArrow(arg=type_a, ret=arrow_bc, location=DUMMY_LOC, param_doc=None)
+        arrow_ac = SurfaceTypeArrow(arg=type_a, ret=type_c, location=DUMMY_LOC, param_doc=None)
+        arrow_bac = SurfaceTypeArrow(arg=type_b, ret=arrow_ac, location=DUMMY_LOC, param_doc=None)
 
         # f y x
         f_y = SurfaceApp(
@@ -708,7 +708,7 @@ class TestRealPrograms:
 
         # Type: forall a b c. (a -> b -> c) -> b -> a -> c
         # Build inner type first
-        inner_type = SurfaceTypeArrow(arg=arrow_abc, ret=arrow_bac, location=DUMMY_LOC)
+        inner_type = SurfaceTypeArrow(arg=arrow_abc, ret=arrow_bac, location=DUMMY_LOC, param_doc=None)
         # Wrap in forall for each type variable (right to left)
         flip_type = SurfaceTypeForall(var="c", body=inner_type, location=DUMMY_LOC)
         flip_type = SurfaceTypeForall(var="b", body=flip_type, location=DUMMY_LOC)
@@ -739,7 +739,7 @@ class TestPipelineResult:
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None),
             body=body,
             location=DUMMY_LOC,
         )
@@ -778,7 +778,7 @@ class TestPipelineResult:
 
         decl = SurfaceTermDeclaration(
             name="id",
-            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC),
+            type_annotation=SurfaceTypeArrow(arg=int_type, ret=int_type, location=DUMMY_LOC, param_doc=None),
             body=body,
             location=DUMMY_LOC,
         )
