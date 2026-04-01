@@ -47,6 +47,7 @@ from systemf.surface.types import (
     SurfaceTypeConstructor,
     SurfaceTypeForall,
     SurfaceVarPattern,
+    ValBind,
 )
 from systemf.surface.inference import (
     BidiInference,
@@ -367,7 +368,7 @@ class TestLetBindings:
         # let x = 42 in x
         value = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
-        let_term = SurfaceLet(bindings=[("x", None, value)], body=body, location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[ValBind(name="x", type_ann=None, value=value, location=DUMMY_LOC)], body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 
@@ -381,7 +382,7 @@ class TestLetBindings:
         int_type = SurfaceTypeConstructor(name="Int", args=[], location=DUMMY_LOC)
         value = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         body = ScopedVar(index=0, debug_name="x", location=DUMMY_LOC)
-        let_term = SurfaceLet(bindings=[("x", int_type, value)], body=body, location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[ValBind(name="x", type_ann=int_type, value=value, location=DUMMY_LOC)], body=body, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 
@@ -392,8 +393,8 @@ class TestLetBindings:
         """Let with multiple sequential bindings."""
         # let x = 1, y = 2 in y
         bindings = [
-            ("x", None, SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC)),
-            ("y", None, SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC)),
+            ValBind(name="x", type_ann=None, value=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC), location=DUMMY_LOC),
+            ValBind(name="y", type_ann=None, value=SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC), location=DUMMY_LOC),
         ]
         body = ScopedVar(index=0, debug_name="y", location=DUMMY_LOC)  # y is most recent (index 0)
         let_term = SurfaceLet(bindings=bindings, body=body, location=DUMMY_LOC)
@@ -414,7 +415,7 @@ class TestLetBindings:
 
         # f is at index 0, so we use ScopedVar(0, "f")
         # But we're applying it, so we need to construct the application
-        bindings = [("f", None, lambda_term)]
+        bindings = [ValBind(name="f", type_ann=None, value=lambda_term, location=DUMMY_LOC)]
 
         # f 42
         app = SurfaceApp(
@@ -435,13 +436,13 @@ class TestLetBindings:
         # let x = 42 in let x = "hello" in x
         inner_let = SurfaceLet(
             bindings=[
-                ("x", None, SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC))
+                ValBind(name="x", type_ann=None, value=SurfaceLit(prim_type="String", value="hello", location=DUMMY_LOC), location=DUMMY_LOC)
             ],
             body=ScopedVar(index=0, debug_name="x", location=DUMMY_LOC),
             location=DUMMY_LOC,
         )
         outer_let = SurfaceLet(
-            bindings=[("x", None, SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC))],
+            bindings=[ValBind(name="x", type_ann=None, value=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC), location=DUMMY_LOC)],
             body=inner_let,
             location=DUMMY_LOC,
         )
@@ -838,7 +839,7 @@ class TestComplexExpressions:
             arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
             location=DUMMY_LOC,
         )
-        let_term = SurfaceLet(bindings=[("f", None, lambda_term)], body=app, location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[ValBind(name="f", type_ann=None, value=lambda_term, location=DUMMY_LOC)], body=app, location=DUMMY_LOC)
 
         core_term, ty = elab.infer(let_term, empty_ctx)
 

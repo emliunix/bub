@@ -28,6 +28,7 @@ from systemf.surface.types import (
     SurfaceTypeArrow,
     SurfaceTypeConstructor,
     SurfaceTypeVar,
+    ValBind,
     SurfaceVar,
     SurfaceVarPattern,
 )
@@ -374,13 +375,13 @@ class TestLetBindings:
         # let x = 42 in x
         value = SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC)
         body = SurfaceVar(name="x", location=DUMMY_LOC)
-        let_term = SurfaceLet(bindings=[("x", None, value)], body=body, location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[ValBind(name="x", type_ann=None, value=value, location=DUMMY_LOC)], body=body, location=DUMMY_LOC)
 
         result = checker.check_term(let_term, ctx)
 
         assert isinstance(result, SurfaceLet)
         assert len(result.bindings) == 1
-        assert isinstance(result.bindings[0][2], SurfaceLit)  # value
+        assert isinstance(result.bindings[0].value, SurfaceLit)  # value
         assert isinstance(result.body, ScopedVar)
         assert result.body.index == 0
 
@@ -391,8 +392,8 @@ class TestLetBindings:
 
         # let x = 1, y = 2 in x + y
         bindings = [
-            ("x", None, SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC)),
-            ("y", None, SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC)),
+            ValBind(name="x", type_ann=None, value=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC), location=DUMMY_LOC),
+            ValBind(name="y", type_ann=None, value=SurfaceLit(prim_type="Int", value=2, location=DUMMY_LOC), location=DUMMY_LOC),
         ]
         body = SurfaceOp(
             left=SurfaceVar(name="x", location=DUMMY_LOC),
@@ -416,8 +417,8 @@ class TestLetBindings:
 
         # let x = 1, y = x in y (y's value can reference x)
         bindings = [
-            ("x", None, SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC)),
-            ("y", None, SurfaceVar(name="x", location=DUMMY_LOC)),  # references x
+            ValBind(name="x", type_ann=None, value=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC), location=DUMMY_LOC),
+            ValBind(name="y", type_ann=None, value=SurfaceVar(name="x", location=DUMMY_LOC), location=DUMMY_LOC),  # references x
         ]
         body = SurfaceVar(name="y", location=DUMMY_LOC)
         let_term = SurfaceLet(bindings=bindings, body=body, location=DUMMY_LOC)
@@ -425,8 +426,8 @@ class TestLetBindings:
         result = checker.check_term(let_term, ctx)
 
         # y's value should have x at index 0 (only x in scope when checking value)
-        assert isinstance(result.bindings[1][2], ScopedVar)
-        assert result.bindings[1][2].index == 0
+        assert isinstance(result.bindings[1].value, ScopedVar)
+        assert result.bindings[1].value.index == 0
 
 
 # =============================================================================
@@ -897,7 +898,7 @@ class TestIntegration:
             arg=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC),
             location=DUMMY_LOC,
         )
-        let_term = SurfaceLet(bindings=[("f", None, lambda_term)], body=body, location=DUMMY_LOC)
+        let_term = SurfaceLet(bindings=[ValBind(name="f", type_ann=None, value=lambda_term, location=DUMMY_LOC)], body=body, location=DUMMY_LOC)
 
         result = checker.check_term(let_term, ctx)
 
@@ -934,7 +935,7 @@ class TestIntegration:
 
         # let x = 42 in x (inner x shadows outer)
         let_term = SurfaceLet(
-            bindings=[("x", None, SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC))],
+            bindings=[ValBind(name="x", type_ann=None, value=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC), location=DUMMY_LOC)],
             body=SurfaceVar(name="x", location=DUMMY_LOC),
             location=DUMMY_LOC,
         )
@@ -959,7 +960,7 @@ class TestIntegration:
         # let x = 42 in x
         # Local x shadows global x
         let_term = SurfaceLet(
-            bindings=[("x", None, SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC))],
+            bindings=[ValBind(name="x", type_ann=None, value=SurfaceLit(prim_type="Int", value=42, location=DUMMY_LOC), location=DUMMY_LOC)],
             body=SurfaceVar(name="x", location=DUMMY_LOC),
             location=DUMMY_LOC,
         )

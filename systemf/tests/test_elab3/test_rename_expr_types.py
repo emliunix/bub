@@ -7,7 +7,7 @@ Uses structural comparison with structural_equals for AST nodes.
 import pytest
 from parsy import eof
 
-from systemf.elab3.rename import RenameExpr
+from systemf.elab3.rename_expr import RenameExpr
 from systemf.elab3.builtins import (
     BUILTIN_TRUE, BUILTIN_FALSE, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL,
     BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR
@@ -190,27 +190,189 @@ def test_rename_type_forall():
     renamer = mk_rename_expr_with_builtins()
     ty = parse_type("forall a. a -> a")
     rn_ty = renamer.rename_type(ty)
-    
+
     assert isinstance(rn_ty, TyForall)
     assert len(rn_ty.vars) == 1
     assert isinstance(rn_ty.vars[0], BoundTv)
+
+    # Check that both occurrences of 'a' have the same unique ID
+    bound_a = rn_ty.vars[0]
     assert isinstance(rn_ty.body, TyFun)
+    arg_a = rn_ty.body.arg
+    result_a = rn_ty.body.result
+    assert isinstance(arg_a, BoundTv)
+    assert isinstance(result_a, BoundTv)
+    assert arg_a.name.unique == bound_a.name.unique
+    assert result_a.name.unique == bound_a.name.unique
 
 
 # =============================================================================
-# Additional Tests to Add
+# Additional Pattern Tests (Round 2)
 # =============================================================================
 
-# Pattern Tests (following the examples):
-# - Tuple pattern: (x, y) -> desugars to nested ConPat with BUILTIN_PAIR_MKPAIR
-# - Cons pattern: x : xs -> ConPat with BUILTIN_LIST_CONS
-# - Literal patterns: 42, "hello" -> LitPat
-# - Wildcard pattern: _ -> DefaultPat (from ast.py)
-# - Nested patterns: Cons (Pair x y) zs, Cons (Cons x xs) ys -> verify recursion
-# - Duplicate variable error: Cons x x -> should raise exception
+def test_rename_pattern_tuple():
+    """Tuple pattern (x, y) desugars to ConPat with BUILTIN_PAIR_MKPAIR."""
+    renamer = mk_rename_expr_with_builtins()
+    pat = parse_pattern("(x, y)")
+    names, rn_pat = renamer.rename_pattern(pat)
+    
+    # Build expected names list (bound variables: x, y)
+    expected_names = [
+        Name(mod="Test", surface="x", unique=-1),
+        Name(mod="Test", surface="y", unique=-1),
+    ]
+    assert names_equal_ignore_uniq(names, expected_names)
+    
+    # Build expected pattern structure
+    expected_pat = ConPat(
+        con=BUILTIN_PAIR_MKPAIR,
+        args=[
+            VarPat(name=Name(mod="Test", surface="x", unique=-1)),
+            VarPat(name=Name(mod="Test", surface="y", unique=-1)),
+        ]
+    )
+    assert structural_equals(rn_pat, expected_pat)
 
-# Type Tests (following the examples):
-# - Nested forall: forall a. forall b. a -> b -> a (higher-rank types)
-# - Type constructor with args: Pair Int String -> TyConApp
-# - Tuple types: (Int, String) -> nested TyConApp with BUILTIN_PAIR
-# - Polymorphic function types: (forall a. a -> a) -> Int
+
+def test_rename_pattern_cons():
+    """Cons pattern x : xs becomes ConPat with BUILTIN_LIST_CONS."""
+    renamer = mk_rename_expr_with_builtins()
+    pat = parse_pattern("x : xs")
+    names, rn_pat = renamer.rename_pattern(pat)
+    
+    # Build expected names list (bound variables: x, xs)
+    expected_names = [
+        Name(mod="Test", surface="x", unique=-1),
+        Name(mod="Test", surface="xs", unique=-1),
+    ]
+    assert names_equal_ignore_uniq(names, expected_names)
+    
+    # Build expected pattern structure
+    expected_pat = ConPat(
+        con=BUILTIN_LIST_CONS,
+        args=[
+            VarPat(name=Name(mod="Test", surface="x", unique=-1)),
+            VarPat(name=Name(mod="Test", surface="xs", unique=-1)),
+        ]
+    )
+    assert structural_equals(rn_pat, expected_pat)
+
+
+def test_rename_pattern_nested():
+    """Nested pattern Cons (Cons x xs) ys tests recursive descent."""
+    renamer = mk_rename_expr_with_builtins()
+    pat = parse_pattern("Cons (Cons x xs) ys")
+    names, rn_pat = renamer.rename_pattern(pat)
+
+    # Build expected names list (bound variables: x, xs, ys)
+    expected_names = [
+        Name(mod="Test", surface="x", unique=-1),
+        Name(mod="Test", surface="xs", unique=-1),
+        Name(mod="Test", surface="ys", unique=-1),
+    ]
+    assert names_equal_ignore_uniq(names, expected_names)
+
+    # Build expected nested pattern structure
+    expected_pat = ConPat(
+        con=BUILTIN_LIST_CONS,
+        args=[
+            ConPat(
+                con=BUILTIN_LIST_CONS,
+                args=[
+                    VarPat(name=Name(mod="Test", surface="x", unique=-1)),
+                    VarPat(name=Name(mod="Test", surface="xs", unique=-1)),
+                ]
+            ),
+            VarPat(name=Name(mod="Test", surface="ys", unique=-1)),
+        ]
+    )
+    assert structural_equals(rn_pat, expected_pat)
+
+    # Check that VarPat unique IDs match the names list
+    # rn_pat is ConPat(Cons, [inner_ConPat, VarPat(ys)])
+    inner_conpat = rn_pat.args[0]  # ConPat(Cons, [VarPat(x), VarPat(xs)])
+    varpat_x = inner_conpat.args[0]  # VarPat(x)
+    varpat_xs = inner_conpat.args[1]  # VarPat(xs)
+    varpat_ys = rn_pat.args[1]  # VarPat(ys)
+
+    assert varpat_x.name.unique == names[0].unique  # x
+    assert varpat_xs.name.unique == names[1].unique  # xs
+    assert varpat_ys.name.unique == names[2].unique  # ys
+
+
+def test_rename_pattern_duplicate_var_error():
+    """Duplicate variable names in pattern should raise exception."""
+    renamer = mk_rename_expr_with_builtins()
+    pat = parse_pattern("Cons x x")
+    
+    with pytest.raises(Exception, match="duplicate param names: x"):
+        renamer.rename_pattern(pat)
+
+
+# =============================================================================
+# Additional Type Tests (Round 2)
+# =============================================================================
+
+def test_rename_type_higher_rank():
+    """Higher-rank type forall a. forall b. a -> b -> a nests TyForall."""
+    renamer = mk_rename_expr_with_builtins()
+    ty = parse_type("forall a. forall b. a -> b -> a")
+    rn_ty = renamer.rename_type(ty)
+
+    assert isinstance(rn_ty, TyForall)
+    assert len(rn_ty.vars) == 1
+    assert isinstance(rn_ty.vars[0], BoundTv)
+    outer_a = rn_ty.vars[0]
+
+    # Inner forall
+    inner = rn_ty.body
+    assert isinstance(inner, TyForall)
+    assert len(inner.vars) == 1
+    assert isinstance(inner.vars[0], BoundTv)
+    inner_b = inner.vars[0]
+
+    # Function type inside: a -> b -> a
+    assert isinstance(inner.body, TyFun)
+    arg_a = inner.body.arg
+    rest = inner.body.result
+    assert isinstance(arg_a, BoundTv)
+    assert isinstance(rest, TyFun)
+    arg_b = rest.arg
+    result_a = rest.result
+    assert isinstance(arg_b, BoundTv)
+    assert isinstance(result_a, BoundTv)
+
+    # Check that all 'a' occurrences have the same unique ID
+    assert arg_a.name.unique == outer_a.name.unique
+    assert result_a.name.unique == outer_a.name.unique
+
+    # Check that 'b' has consistent unique ID
+    assert arg_b.name.unique == inner_b.name.unique
+
+
+def test_rename_type_constructor_app():
+    """Type constructor application Pair Int String becomes TyConApp."""
+    renamer = mk_rename_expr_with_builtins()
+    ty = parse_type("Pair Int String")
+    rn_ty = renamer.rename_type(ty)
+    
+    # Build expected type structure
+    expected_ty = TyConApp(
+        name=BUILTIN_PAIR,
+        args=[TyInt(), TyString()]
+    )
+    assert structural_equals(rn_ty, expected_ty)
+
+
+def test_rename_type_tuple():
+    """Tuple type (Int, String) desugars to TyConApp with BUILTIN_PAIR."""
+    renamer = mk_rename_expr_with_builtins()
+    ty = parse_type("(Int, String)")
+    rn_ty = renamer.rename_type(ty)
+    
+    # Build expected type structure
+    expected_ty = TyConApp(
+        name=BUILTIN_PAIR,
+        args=[TyInt(), TyString()]
+    )
+    assert structural_equals(rn_ty, expected_ty)

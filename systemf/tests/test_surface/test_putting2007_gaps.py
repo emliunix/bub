@@ -43,6 +43,7 @@ from systemf.surface.types import (
     SurfaceTypeConstructor,
     SurfaceTypeForall,
     GlobalVar,
+    ValBind,
 )
 from systemf.surface.inference import (
     BidiInference,
@@ -141,13 +142,13 @@ class TestGap1_LetPolymorphism:
         )
 
         inner_let = SurfaceLet(
-            bindings=[("unused", None, app_int)],
+            bindings=[ValBind(name="unused", type_ann=None, value=app_int, location=DUMMY_LOC)],
             body=app_bool,
             location=DUMMY_LOC,
         )
 
         outer_let = SurfaceLet(
-            bindings=[("id", None, id_fn)],
+            bindings=[ValBind(name="id", type_ann=None, value=id_fn, location=DUMMY_LOC)],
             body=inner_let,
             location=DUMMY_LOC,
         )
@@ -172,7 +173,7 @@ class TestGap1_LetPolymorphism:
         id_ref = ScopedVar(index=0, debug_name="id", location=DUMMY_LOC)
 
         let_term = SurfaceLet(
-            bindings=[("id", None, id_fn)],
+            bindings=[ValBind(name="id", type_ann=None, value=id_fn, location=DUMMY_LOC)],
             body=id_ref,
             location=DUMMY_LOC,
         )
@@ -562,7 +563,7 @@ class TestCombinedGaps:
         body = SurfaceApp(func=id_ref_fn, arg=id_ref_arg, location=DUMMY_LOC)
 
         let_term = SurfaceLet(
-            bindings=[("id", None, id_fn)],
+            bindings=[ValBind(name="id", type_ann=None, value=id_fn, location=DUMMY_LOC)],
             body=body,
             location=DUMMY_LOC,
         )
@@ -638,13 +639,13 @@ class TestCombinedGaps:
         body = SurfaceApp(func=succ_ref, arg=zero_ref, location=DUMMY_LOC)
 
         inner_let = SurfaceLet(
-            bindings=[("succ", None, succ_fn)],
+            bindings=[ValBind(name="succ", type_ann=None, value=succ_fn, location=DUMMY_LOC)],
             body=body,
             location=DUMMY_LOC,
         )
 
         outer_let = SurfaceLet(
-            bindings=[("zero", None, zero_fn)],
+            bindings=[ValBind(name="zero", type_ann=None, value=zero_fn, location=DUMMY_LOC)],
             body=inner_let,
             location=DUMMY_LOC,
         )
