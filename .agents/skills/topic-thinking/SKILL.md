@@ -199,6 +199,24 @@ These apply in ALL modes:
 - Question every concept: "Is this necessary?"
 - Compare against analyzed alternatives
 
+### Architecture First Principle
+**Correct Architecture Over Convenience**: When choosing between implementation approaches, prioritize structural correctness over implementation effort.
+
+**Key Principles:**
+- Good names reveal intention (`ValBind` vs anonymous tuple)
+- Type definitions exist for semantic clarity
+- Self-documenting structures reduce long-term maintenance burden
+- Correct structure first, effort evaluation second
+
+**Anti-Pattern: Effort-Based Decision Making**
+Choosing the "easier" path (fewer files to touch, less code to write) results in technical debt that wastes more effort later. Effort-based shortcuts accumulate into unmaintainable systems.
+
+**Correct Approach:**
+- Honor existing type definitions and architectural decisions
+- Use semantically meaningful structures even if they require more boilerplate
+- Prefer named attributes over positional indices
+- Accept that correct architecture may touch many files - this is a sign the structure matters, not a reason to avoid it
+
 ### When in Validation Mode
 - Assume claims are wrong until proven
 - Look for counter-examples
