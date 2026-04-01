@@ -33,6 +33,7 @@ from systemf.surface.types import (
     SurfaceTypeApp,
     SurfaceVar,
     SurfaceVarPattern,
+    ValBind,
 )
 
 
@@ -167,12 +168,17 @@ class ScopeChecker:
                 # Process bindings sequentially (each can refer to previous)
                 new_ctx = ctx
                 scoped_bindings = []
-                for var_name, var_type, value in bindings:
+                for b in bindings:
                     # Check value in current context
-                    scoped_value = self.check_term(value, new_ctx)
-                    scoped_bindings.append((var_name, var_type, scoped_value))
+                    scoped_value = self.check_term(b.value, new_ctx)
+                    scoped_bindings.append(ValBind(
+                        name=b.name,
+                        type_ann=b.type_ann,
+                        value=scoped_value,
+                        location=b.location
+                    ))
                     # Extend context for subsequent bindings and body
-                    new_ctx = new_ctx.extend_term(var_name)
+                    new_ctx = new_ctx.extend_term(b.name)
                 # Check body with all bindings in scope
                 scoped_body = self.check_term(body, new_ctx)
                 return SurfaceLet(bindings=scoped_bindings, body=scoped_body, location=location)

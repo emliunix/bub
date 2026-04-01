@@ -38,6 +38,7 @@ from systemf.surface.types import (
     SurfaceTypeApp,
     SurfaceVar,
     SurfaceVarPattern,
+    ValBind,
 )
 
 
@@ -195,14 +196,19 @@ def _check_term(term: SurfaceTerm, ctx: ScopeContext) -> Result[SurfaceTerm, Sco
             new_ctx = ctx
             scoped_bindings = []
 
-            for var_name, var_type, value in bindings:
-                value_result = _check_term(value, new_ctx)
+            for b in bindings:
+                value_result = _check_term(b.value, new_ctx)
                 match value_result:
                     case Err(error):
                         return Err(error)
                     case Ok(scoped_value):
-                        scoped_bindings.append((var_name, var_type, scoped_value))
-                        new_ctx = new_ctx.extend_term(var_name)
+                        scoped_bindings.append(ValBind(
+                            name=b.name,
+                            type_ann=b.type_ann,
+                            value=scoped_value,
+                            location=b.location
+                        ))
+                        new_ctx = new_ctx.extend_term(b.name)
 
             body_result = _check_term(body, new_ctx)
             match body_result:

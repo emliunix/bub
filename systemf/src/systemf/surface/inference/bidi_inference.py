@@ -64,6 +64,7 @@ from systemf.surface.types import (
     SurfaceLit,
     SurfaceOp,
     SurfaceToolCall,
+    ValBind,
 )
 from systemf.surface.inference.context import (
     TypeContext,
@@ -521,13 +522,13 @@ class BidiInference:
                 new_ctx = ctx
                 core_bindings = []
 
-                for var_name, var_type_ann, value in bindings:
+                for b in bindings:
                     # GEN1: Infer and generalise value type
-                    core_value, value_type = self.infer_sigma(value, new_ctx)
+                    core_value, value_type = self.infer_sigma(b.value, new_ctx)
 
                     # If there's a type annotation, check against it
-                    if var_type_ann is not None:
-                        ann_type = self._surface_to_core_type(var_type_ann, new_ctx)
+                    if b.type_ann is not None:
+                        ann_type = self._surface_to_core_type(b.type_ann, new_ctx)
                         ann_type = self._apply_subst(ann_type)
                         value_type = self._apply_subst(value_type)
                         self._unify(ann_type, value_type, location)
@@ -535,7 +536,7 @@ class BidiInference:
                     # Extend context with this binding
                     final_type = self._apply_subst(value_type)
                     new_ctx = new_ctx.extend_term(final_type)
-                    core_bindings.append((var_name, core_value))
+                    core_bindings.append((b.name, core_value))
 
                 # Infer body with all bindings
                 core_body, body_type = self.infer(body, new_ctx)
@@ -889,13 +890,13 @@ class BidiInference:
                 new_ctx = ctx
                 core_bindings = []
 
-                for var_name, var_type_ann, value in bindings:
+                for b in bindings:
                     # Infer value type
-                    core_value, value_type = self.infer(value, new_ctx)
+                    core_value, value_type = self.infer(b.value, new_ctx)
 
                     # If annotation present, check against it
-                    if var_type_ann is not None:
-                        ann_type = self._surface_to_core_type(var_type_ann, new_ctx)
+                    if b.type_ann is not None:
+                        ann_type = self._surface_to_core_type(b.type_ann, new_ctx)
                         ann_type = self._apply_subst(ann_type)
                         value_type = self._apply_subst(value_type)
                         self._unify(ann_type, value_type, location)
@@ -903,7 +904,7 @@ class BidiInference:
                     # Extend context
                     final_type = self._apply_subst(value_type)
                     new_ctx = new_ctx.extend_term(final_type)
-                    core_bindings.append((var_name, core_value))
+                    core_bindings.append((b.name, core_value))
 
                 # Check body against expected type
                 core_body = self.check(body, expected, new_ctx)

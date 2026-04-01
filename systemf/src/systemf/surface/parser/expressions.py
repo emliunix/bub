@@ -95,6 +95,7 @@ from systemf.surface.types import (
     SurfaceTypeApp,
     SurfaceVar,
     SurfaceVarPattern,
+    ValBind,
 )
 
 # Type variable for generic token parsers
@@ -1051,7 +1052,7 @@ def match_token_value_of(
 # =============================================================================
 
 
-def let_binding(constraint: ValidIndent) -> P[tuple[str, SurfaceType | None, SurfaceTerm]]:
+def let_binding(constraint: ValidIndent) -> P[ValBind]:
     """Parse a single let binding: ident [params] [: type] = expr.
 
     Supports:
@@ -1063,7 +1064,7 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, SurfaceType | None, Sur
         constraint: Layout constraint for the binding start column
 
     Returns:
-        Tuple of (var_name, optional_type, value)
+        ValBind with name, type_ann, value, and location
     """
 
     @generate
@@ -1104,7 +1105,12 @@ def let_binding(constraint: ValidIndent) -> P[tuple[str, SurfaceType | None, Sur
             for param in reversed(params):
                 value = SurfaceAbs(var=param, var_type=None, body=value, location=loc)
 
-        return (var_name, var_type, value)
+        return ValBind(
+            name=var_name,
+            type_ann=var_type,
+            value=value,
+            location=loc
+        )
 
     return parser
 
