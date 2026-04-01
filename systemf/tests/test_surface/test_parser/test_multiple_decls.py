@@ -10,6 +10,12 @@ from systemf.surface.types import (
     SurfaceTermDeclaration,
     SurfacePrimTypeDecl,
     SurfacePrimOpDecl,
+    SurfacePattern,
+    SurfaceBranch,
+    SurfaceVarPattern,
+    SurfaceAbs,
+    SurfaceCase,
+    SurfaceVar,
 )
 
 
@@ -340,13 +346,15 @@ class TestElab3SyntaxSample:
                         scrutinee=SurfaceVar("ma"),
                         branches=[
                             SurfaceBranch(
-                                pattern=SurfacePattern(constructor="Nothing", vars=[]),
+                                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="Nothing")]),
                                 body=SurfaceVar("default"),
                             ),
                             SurfaceBranch(
                                 pattern=SurfacePattern(
-                                    constructor="Just",
-                                    vars=[SurfacePattern(constructor="x")],
+                                    patterns=[
+                                        SurfaceVarPattern(name="Just"),
+                                        SurfacePattern(patterns=[SurfaceVarPattern(name="x")]),
+                                    ],
                                 ),
                                 body=SurfaceVar("x"),
                             ),
@@ -391,12 +399,16 @@ class TestElab3SyntaxSample:
                                         scrutinee=SurfaceVar("ys"),
                                         branches=[
                                             SurfaceBranch(
-                                                pattern=SurfacePattern(constructor="Nil", vars=[]),
+                                                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="Nil")]),
                                                 body=SurfaceVar("acc"),
                                             ),
                                             SurfaceBranch(
-pattern=SurfacePattern(
-                                    constructor="Cons", vars=[SurfacePattern(constructor="z", vars=[]), SurfacePattern(constructor="zs", vars=[])]
+                                                pattern=SurfacePattern(
+                                    patterns=[
+                                        SurfaceVarPattern(name="Cons"),
+                                        SurfacePattern(patterns=[SurfaceVarPattern(name="z")]),
+                                        SurfacePattern(patterns=[SurfaceVarPattern(name="zs")]),
+                                    ]
                                 ),
                                                 body=SurfaceApp(
                                                     func=SurfaceApp(
@@ -447,7 +459,7 @@ pattern=SurfacePattern(
                                 body=SurfaceLit(prim_type="Int", value=1),
                             ),
                             SurfaceBranch(
-                                pattern=SurfacePattern(constructor="m", vars=[]),
+                                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="m")]),
                                 body=SurfaceOp(
                                     left=SurfaceVar("m"),
                                     op="*",
@@ -489,7 +501,7 @@ pattern=SurfacePattern(
                                 ),
                             ),
                             SurfaceBranch(
-                                pattern=SurfacePattern(constructor="other", vars=[]),
+                                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="other")]),
                                 body=SurfaceOp(
                                     left=SurfaceLit(
                                         prim_type="String", value="hello "

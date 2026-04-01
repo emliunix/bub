@@ -46,6 +46,7 @@ from systemf.surface.types import (
     SurfaceTypeArrow,
     SurfaceTypeConstructor,
     SurfaceTypeForall,
+    SurfaceVarPattern,
 )
 from systemf.surface.inference import (
     BidiInference,
@@ -601,12 +602,12 @@ class TestConstructorsAndCases:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
@@ -638,8 +639,49 @@ class TestConstructorsAndCases:
         branches = [
             SurfaceBranch(
                 pattern=SurfacePattern(
-                    constructor="Pair",
-                    vars=[SurfacePattern(constructor="a"), SurfacePattern(constructor="b")],
+                    patterns=[
+                        SurfaceVarPattern(name="Pair", location=DUMMY_LOC),
+                        SurfacePattern(patterns=[SurfaceVarPattern(name="a", location=DUMMY_LOC)], location=DUMMY_LOC),
+                        SurfacePattern(patterns=[SurfaceVarPattern(name="b", location=DUMMY_LOC)], location=DUMMY_LOC),
+                    ],
+                    location=DUMMY_LOC,
+                ),
+                body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
+                location=DUMMY_LOC,
+            ),
+        ]
+        case_term = SurfaceCase(
+            scrutinee=SurfaceConstructor(name="True", args=[], location=DUMMY_LOC),
+            branches=branches,
+            location=DUMMY_LOC,
+        )
+
+        core_term, ty = elab.infer(case_term, ctx)
+
+        assert isinstance(core_term, core.Case)
+        assert len(core_term.branches) == 2
+        assert ty.name == "Int"
+
+    def test_case_with_pattern_bindings(self, elab, empty_ctx):
+        """Case with pattern variable bindings."""
+        # case x of Pair a b -> a
+        ctx = TypeContext(
+            constructors={
+                "Pair": TypeArrow(
+                    TypeVar("a"),
+                    TypeArrow(TypeVar("b"), TypeConstructor("Pair", [TypeVar("a"), TypeVar("b")])),
+                )
+            }
+        )
+
+        branches = [
+            SurfaceBranch(
+                pattern=SurfacePattern(
+                    patterns=[
+                        SurfaceVarPattern(name="Pair", location=DUMMY_LOC),
+                        SurfacePattern(patterns=[SurfaceVarPattern(name="a", location=DUMMY_LOC)], location=DUMMY_LOC),
+                        SurfacePattern(patterns=[SurfaceVarPattern(name="b", location=DUMMY_LOC)], location=DUMMY_LOC),
+                    ],
                     location=DUMMY_LOC,
                 ),
                 body=ScopedVar(
@@ -857,12 +899,12 @@ class TestComplexExpressions:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),

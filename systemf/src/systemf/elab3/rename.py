@@ -8,19 +8,20 @@ from dataclasses import dataclass
 from functools import reduce
 from typing import cast
 
-from systemf.elab3.builtins import BUILTIN_FALSE, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE
+from systemf.elab3.builtins import BUILTIN_FALSE, BUILTIN_BIN_OPS, BUILTIN_LIST_CONS, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE
+from systemf.utils import capture_return
 
 from .mod import Module
-from .types import LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
+from .types import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
 from .tything import ACon, TyThing
-from .ast import Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl, Lam, Let, LitExpr, RnDataDecl, RnTermDecl, Var
+from .ast import Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl, Lam, Let, LitExpr, LitPat, Pat, RnDataDecl, RnTermDecl, Var, VarPat
 
 from systemf.surface.types import (
-    SurfaceAbs, SurfaceAnn, SurfaceApp, SurfaceCase, SurfaceDataDeclaration, SurfaceDeclaration, SurfaceDeclarationRepr, SurfaceIf, SurfaceLet,
-    SurfaceLit, SurfaceTerm, SurfaceTermDeclaration, SurfaceTuple, SurfaceType, SurfaceTypeArrow,
+    SurfaceAbs, SurfaceAnn, SurfaceApp, SurfaceBranch, SurfaceCase, SurfaceDataDeclaration, SurfaceDeclaration, SurfaceDeclarationRepr, SurfaceIf, SurfaceLet,
+    SurfaceLit, SurfaceLitPattern, SurfaceOp, SurfacePattern, SurfacePatternBase, SurfacePatternCons, SurfacePatternTuple, SurfaceTerm, SurfaceTermDeclaration, SurfaceTuple, SurfaceType, SurfaceTypeArrow,
     SurfaceTypeConstructor, SurfaceTypeForall, SurfaceTypeTuple, SurfaceTypeVar,
-    SurfaceVar, ValBind
+    SurfaceVar, SurfaceVarPattern, ValBind
 )
 
 from systemf.utils.cons import Cons, lookup
@@ -87,11 +88,20 @@ class RenameExpr:
         self.local_env = []
         
     def lookup(self, name: RdrName, loc: Location | None = None) -> Name:
+        match self.lookup_maybe(name):
+            case [] | None:
+                raise Exception(f"unresolved variable: {name} at {loc}")
+            case [n]:
+                return n
+            case xs:
+                raise Exception(f"ambiguous name: {name} (candidates: {xs}) at {loc}")
+
+    def lookup_maybe(self, name: RdrName) -> list[Name] | None:
         match name:
             case UnqualName(name_) if (n := self.lookup_local_name(name_)) is not None:
-                return n
+                return [n]
             case _:
-                return self.lookup_gbl_name(name, loc)
+                return self.lookup_gbl_name(name)
 
     def lookup_local_name(self, name: str) -> Name | None:
         for (occ, n) in reversed(self.local_env):
@@ -99,14 +109,8 @@ class RenameExpr:
                 return n
         return None
 
-    def lookup_gbl_name(self, name: RdrName, loc: Location | None = None) -> Name:
-        match self.reader_env.lookup(name):
-            case []:
-                raise Exception(f"unresolved variable: {name} at {loc}")
-            case [n]:
-                return n.name
-            case xs:
-                raise Exception(f"ambiguous name: {name} (candidates: {xs}) at {loc}")
+    def lookup_gbl_name(self, name: RdrName) -> list[Name]:
+        return [n.name for n in self.reader_env.lookup(name)]
 
     def new_name(self, name: str, loc: Location | None = None) -> Name:
         return Name(mod=self.mod_name, surface=name, unique=self.uniq.make_uniq(), loc=loc)
@@ -124,13 +128,7 @@ class RenameExpr:
                 return Var(self.lookup(UnqualName(name), loc))
 
             case SurfaceLit(prim_type=prim_type, value=value):
-                match prim_type:
-                    case "string":
-                        return LitExpr(LitString(cast(str, value)))
-                    case "int":
-                        return LitExpr(LitInt(cast(int, value)))
-                    case _:
-                        raise Exception(f"unknown literal type: {prim_type}")
+                return LitExpr(prim_to_lit(prim_type, value))
 
             case SurfaceAbs(params=params, body=body, location=loc):
                 check_dups((n for (n, _) in params))
@@ -174,22 +172,88 @@ class RenameExpr:
                     CaseBranch(ConPat(BUILTIN_TRUE, []), self.rename_expr(then_b)),
                     CaseBranch(ConPat(BUILTIN_FALSE, []), self.rename_expr(else_b)),
                 ])
-            
-            # case SurfaceOp(left=left, op=op, right=right):
-            #     # Operator: a + b
-            #     pass
-            
+
+            case SurfaceOp(left=left, op=op, right=right):
+                if (op_f := BUILTIN_BIN_OPS.get(op)) is None:
+                    raise Exception(f"unknown operator: {op}")
+                return App(App(Var(op_f), self.rename_expr(left)), self.rename_expr(right))
+
             case SurfaceTuple(elements=elements):
                 return reduce(lambda acc, curr: App(App(Var(BUILTIN_PAIR_MKPAIR), curr), acc), reversed([
                     self.rename_expr(e) for e in elements
                 ]))
-            
+
             case SurfaceCase(scrutinee=scrutinee, branches=branches):
                 # Case: case x of Pat -> body
-                pass
-            
+                return Case(self.rename_expr(scrutinee), [
+                    self.rename_case_branch(b) for b in branches
+                ])
+
             case _:
                 raise Exception(f"unknown expr: {ast}")
+
+    def rename_case_branch(self, branch: SurfaceBranch) -> CaseBranch:
+        names, pat = self.rename_pattern(branch.pattern)
+        with self.extend_local(names):
+            body = self.rename_expr(branch.body)
+        return CaseBranch(pat, body)
+
+    def rename_pattern(self, pat: SurfacePatternBase) -> tuple[list[Name], Pat]:
+        """
+        Desugar and rename to ast.Pat
+        """
+
+        def _con_pat(con: Name, pats: list[SurfacePatternBase]) -> Generator[Name, None, Pat]:
+            res: list[Pat] = []
+            for pat in pats:
+                pat_ = yield from _rename_pat(pat)
+                res.append(pat_)
+            return ConPat(con, res)
+
+        def _rename_pat_tuple(els: list[SurfacePatternBase]) -> Generator[Name, None, Pat]:
+            match els:
+                case [e1, e2]:
+                    pat1 = yield from _rename_pat(e1)
+                    pat2 = yield from _rename_pat(e2)
+                    return ConPat(BUILTIN_PAIR_MKPAIR, [pat1, pat2])
+                case [e, *es]:
+                    pat1 = yield from _rename_pat(e)
+                    pat2 = yield from _rename_pat_tuple(es)
+                    return ConPat(BUILTIN_PAIR_MKPAIR, [pat1, pat2])
+                case _:
+                    raise Exception(f"invalid tuple pattern: {els}")
+
+        def _rename_pat(pat: SurfacePatternBase) -> Generator[Name, None, Pat]:
+            match pat:
+                case SurfacePattern(patterns=[SurfaceVarPattern(name=var, location=loc)]):
+                    match self.lookup_maybe(UnqualName(var)):
+                        case [] | None:
+                            name = self.new_name(var, loc)
+                            yield name
+                            return VarPat(name)
+                        case [name]:
+                            return ConPat(name, [])
+                        case xs:
+                            raise Exception(f"multiple definition found for {var} at {loc}: {xs}")
+                case SurfacePattern(patterns=[SurfaceVarPattern(name=con), *pats]):
+                    r = yield from _con_pat(self.lookup(UnqualName(con)), pats)
+                    return r
+                case SurfacePatternCons(head=x, tail=xs):
+                    r = yield from _con_pat(BUILTIN_LIST_CONS, [x, xs])
+                    return r
+                case SurfacePatternTuple(elements=els):
+                    r = yield from _rename_pat_tuple(els)
+                    return r
+                case SurfaceLitPattern(prim_type=prim_ty, value=val):
+                    return LitPat(prim_to_lit(prim_ty, val))
+                case _:
+                    raise Exception(f"unknown pattern: {pat}")
+
+        with capture_return(_rename_pat(pat)) as (gen_vars, res):
+            vars = list(gen_vars)
+            check_dups([v.surface for v in vars], pat.location)
+            names = [v for v in vars]
+            return names, res[0]
 
     def rename_type(self, ty: SurfaceType) -> Ty:
         match ty:
@@ -254,4 +318,13 @@ def check_dups(names: Iterable[str], loc: Location | None = None):
 
 def binding_names(bindings: Iterable[ValBind]) -> list[tuple[str, SurfaceType | None, Location | None]]:
     return [(b.name, b.type_ann, b.location) for b in bindings]
-    
+
+
+def prim_to_lit(prim_type: str, value: object) -> Lit:
+    match prim_type:
+        case "string":
+            return LitString(cast(str, value))
+        case "int":
+            return LitInt(cast(int, value))
+        case _:
+            raise Exception(f"unknown literal type: {prim_type}")

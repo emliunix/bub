@@ -16,6 +16,7 @@ from systemf.surface.types import (
     SurfaceDeclaration,
     SurfaceLet,
     SurfacePattern,
+    SurfacePatternBase,
     SurfacePatternCons,
     SurfacePatternTuple,
     SurfaceTerm,
@@ -28,6 +29,7 @@ from systemf.surface.types import (
     SurfaceTypeVar,
     SurfaceVar,
     SurfaceAnn,
+    SurfaceVarPattern,
 )
 
 # Lexer
@@ -110,8 +112,10 @@ __all__ = [
     "SurfaceCase",
     "SurfaceBranch",
     "SurfacePattern",
+    "SurfacePatternBase",
     "SurfacePatternTuple",
     "SurfacePatternCons",
+    "SurfaceVarPattern",
     "SurfaceDeclaration",
     "SurfaceDataDeclaration",
     "SurfaceTermDeclaration",

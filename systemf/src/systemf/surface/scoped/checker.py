@@ -32,34 +32,42 @@ from systemf.surface.types import (
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceVar,
+    SurfaceVarPattern,
 )
 
 
 def _collect_pattern_vars(
     pattern: SurfacePatternBase,
 ) -> list[str]:
-    """Collect variable names bound at the current pattern level."""
+    """Collect variable names bound at the current pattern level.
+
+    With flat pattern structure:
+    - SurfacePattern([VarPat(x)]) -> single variable pattern, returns [x]
+    - SurfacePattern([VarPat(Con), VarPat(x), ...]) -> constructor, collects from args
+    - SurfaceVarPattern(name) -> variable, returns [name]
+    """
     match pattern:
-        case SurfacePattern(constructor=constructor, vars=vars):
-            if not vars:
-                return [constructor]
-            return [
-                var.constructor
-                for var in vars
-                if isinstance(var, SurfacePattern) and not var.vars
-            ]
+        case SurfacePattern(patterns=patterns):
+            if len(patterns) == 1 and isinstance(patterns[0], SurfaceVarPattern):
+                # Single item: variable pattern
+                return [patterns[0].name]
+            else:
+                # Multiple items: constructor pattern, collect from args (skip constructor)
+                result = []
+                for pat in patterns[1:]:  # Skip constructor at patterns[0]
+                    result.extend(_collect_pattern_vars(pat))
+                return result
+        case SurfaceVarPattern(name=name):
+            return [name]
         case SurfacePatternTuple(elements=elements):
-            return [
-                elem.constructor
-                for elem in elements
-                if isinstance(elem, SurfacePattern) and not elem.vars
-            ]
+            result = []
+            for elem in elements:
+                result.extend(_collect_pattern_vars(elem))
+            return result
         case SurfacePatternCons(head=head, tail=tail):
             result = []
-            if isinstance(head, SurfacePattern) and not head.vars:
-                result.append(head.constructor)
-            if isinstance(tail, SurfacePattern) and not tail.vars:
-                result.append(tail.constructor)
+            result.extend(_collect_pattern_vars(head))
+            result.extend(_collect_pattern_vars(tail))
             return result
         case SurfaceLitPattern():
             return []

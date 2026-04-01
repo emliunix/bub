@@ -12,6 +12,7 @@ from systemf.surface.types import (
     SurfaceCase,
     SurfaceBranch,
     SurfacePattern,
+    SurfaceVarPattern,
 )
 
 
@@ -59,12 +60,12 @@ def if_to_case_pass(term: SurfaceTerm) -> Result[SurfaceTerm, DesugarError]:
                     scrutinee=cond,
                     branches=[
                         SurfaceBranch(
-                            pattern=SurfacePattern(constructor="True", vars=[], location=loc),
+                            pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=loc)], location=loc),
                             body=then_branch,
                             location=loc,
                         ),
                         SurfaceBranch(
-                            pattern=SurfacePattern(constructor="False", vars=[], location=loc),
+                            pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=loc)], location=loc),
                             body=else_branch,
                             location=loc,
                         ),

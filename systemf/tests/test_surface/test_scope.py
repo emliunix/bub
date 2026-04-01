@@ -29,6 +29,7 @@ from systemf.surface.types import (
     SurfaceTypeConstructor,
     SurfaceTypeVar,
     SurfaceVar,
+    SurfaceVarPattern,
 )
 from systemf.utils.location import Location
 
@@ -650,8 +651,8 @@ class TestComplexExpressions:
         ctx = ScopeContext(term_names=["x"])
 
         # case x of True -> 1 | False -> 0
-        pattern1 = SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC)
-        pattern2 = SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC)
+        pattern1 = SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC)
+        pattern2 = SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC)
         branches = [
             SurfaceBranch(
                 pattern=pattern1,
@@ -683,8 +684,11 @@ class TestComplexExpressions:
 
         # case x of Pair a b -> a
         pattern = SurfacePattern(
-            constructor="Pair",
-            vars=[SurfacePattern(constructor="a"), SurfacePattern(constructor="b")],
+            patterns=[
+                SurfaceVarPattern(name="Pair", location=DUMMY_LOC),
+                SurfacePattern(patterns=[SurfaceVarPattern(name="a", location=DUMMY_LOC)], location=DUMMY_LOC),
+                SurfacePattern(patterns=[SurfaceVarPattern(name="b", location=DUMMY_LOC)], location=DUMMY_LOC),
+            ],
             location=DUMMY_LOC,
         )
         # Body references 'a' which is bound by the pattern

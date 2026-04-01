@@ -530,17 +530,31 @@ class SurfacePatternBase(SurfaceNode):
 
 
 @dataclass(frozen=True, kw_only=True)
-class SurfacePattern(SurfacePatternBase):
-    """Pattern in a case branch: Con vars."""
+class SurfaceVarPattern(SurfacePatternBase):
+    """Variable pattern (or potential constructor name before rename): x."""
 
-    constructor: str
-    vars: list[SurfacePatternBase]
+    name: str
 
     @override
     def __str__(self) -> str:
-        if self.vars:
-            return f"{self.constructor} {' '.join(str(v) for v in self.vars)}"
-        return self.constructor
+        return self.name
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurfacePattern(SurfacePatternBase):
+    """Flat pattern list: [Con, arg1, arg2, ...] or [var].
+
+    All identifiers are SurfaceVarPattern at parse time.
+    Rename phase disambiguates:
+    - [VarPat("x")] -> single item: var or nullary con
+    - [VarPat("Cons"), VarPat("x"), ...] -> multi item: constructor pattern
+    """
+
+    patterns: list[SurfacePatternBase]
+
+    @override
+    def __str__(self) -> str:
+        return ' '.join(str(p) for p in self.patterns)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -804,7 +818,12 @@ class SurfaceImportDeclaration(SurfaceDeclaration):
         return " ".join(parts)
 
 
-type SurfaceDeclarationRepr = SurfaceDataDeclaration | SurfaceTermDeclaration | SurfacePrimTypeDecl | SurfacePrimOpDecl | SurfaceImportDeclaration
+type SurfaceDeclarationRepr = (
+    SurfaceDataDeclaration |
+    SurfaceTermDeclaration |
+    SurfacePrimTypeDecl |
+    SurfacePrimOpDecl |
+    SurfaceImportDeclaration )
 
 
 

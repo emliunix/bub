@@ -44,6 +44,7 @@ from systemf.surface.types import (
     SurfaceTypeArrow,
     SurfaceTypeConstructor,
     SurfaceTypeForall,
+    SurfaceVarPattern,
 )
 from systemf.surface.inference import (
     BidiInference,
@@ -345,12 +346,12 @@ class TestMultiBranchConstructs:
         # case True of True -> 1 | False -> 0
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
@@ -388,12 +389,12 @@ class TestMultiBranchConstructs:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=id_branch,
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=id_branch,
                 location=DUMMY_LOC,
             ),
@@ -422,12 +423,12 @@ class TestMultiBranchConstructs:
         # case True of True -> 1 | False -> 0
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
@@ -481,12 +482,12 @@ class TestMultiBranchConstructs:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch1,
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch2,
                 location=DUMMY_LOC,
             ),
@@ -533,12 +534,12 @@ class TestMultiBranchConstructs:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch1,
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch2,
                 location=DUMMY_LOC,
             ),
@@ -581,12 +582,12 @@ class TestMultiBranchConstructs:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch1,
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch2,
                 location=DUMMY_LOC,
             ),
@@ -652,12 +653,12 @@ class TestMultiBranchConstructs:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch1,
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=branch2,
                 location=DUMMY_LOC,
             ),
@@ -762,8 +763,10 @@ class TestHigherRankConstructors:
         branches = [
             SurfaceBranch(
                 pattern=SurfacePattern(
-                    constructor="MkT",
-                    vars=[SurfacePattern(constructor="v")],
+                    patterns=[
+                        SurfaceVarPattern(name="MkT", location=DUMMY_LOC),
+                        SurfacePattern(patterns=[SurfaceVarPattern(name="v", location=DUMMY_LOC)], location=DUMMY_LOC),
+                    ],
                     location=DUMMY_LOC,
                 ),
                 body=body,

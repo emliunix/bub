@@ -128,7 +128,7 @@ class Pat:
 @dataclass(frozen=True)
 class VarPat(Pat):
     """Variable pattern that binds an identifier: x."""
-    id: Id
+    name: Name
 
 
 @dataclass(frozen=True)

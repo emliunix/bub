@@ -27,6 +27,8 @@ from systemf.surface.types import (
     SurfacePattern,
     SurfaceLitPattern,
     SurfaceLet,
+    SurfaceVarPattern,
+    SurfaceOp,
 )
 from systemf.utils.ast_utils import equals_ignore_location
 
@@ -301,7 +303,7 @@ class TestCaseParser:
             scrutinee=SurfaceVar(name="n"),
             branches=[
                 SurfaceBranch(pattern=SurfaceLitPattern(prim_type="Int", value=0), body=SurfaceLit(prim_type="Int", value=1)),
-                SurfaceBranch(pattern=SurfacePattern(constructor="m", vars=[]), body=SurfaceOp(left=SurfaceVar(name="m"), op="*", right=SurfaceLit(prim_type="Int", value=2))),
+                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="m")]), body=SurfaceOp(left=SurfaceVar(name="m"), op="*", right=SurfaceLit(prim_type="Int", value=2))),
             ],
         )
         assert equals_ignore_location(result, expected)
@@ -317,7 +319,7 @@ class TestCaseParser:
             scrutinee=SurfaceVar(name="s"),
             branches=[
                 SurfaceBranch(pattern=SurfaceLitPattern(prim_type="String", value="hello"), body=SurfaceLit(prim_type="Int", value=1)),
-                SurfaceBranch(pattern=SurfacePattern(constructor="msg", vars=[]), body=SurfaceLit(prim_type="Int", value=0)),
+                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="msg")]), body=SurfaceLit(prim_type="Int", value=0)),
             ],
         )
         assert equals_ignore_location(result, expected)
@@ -333,9 +335,12 @@ class TestCaseParser:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         pattern = result.branches[0].pattern
-        assert pattern.constructor == "Pair"
-        # Should have 2 args: the tuple and z
-        assert len(pattern.vars) == 2
+        assert isinstance(pattern, SurfacePattern)
+        # Should have 3 items: Pair constructor + 2 args (tuple and z)
+        assert len(pattern.patterns) == 3
+        # First item is the constructor name
+        assert isinstance(pattern.patterns[0], SurfaceVarPattern)
+        assert pattern.patterns[0].name == "Pair"
 
     def test_nested_case_with_braces(self):
         """Parse nested case with outer layout and inner braces."""

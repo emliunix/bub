@@ -85,6 +85,7 @@ from systemf.surface.types import (
     SurfaceLit,
     SurfaceOp,
     SurfacePattern,
+    SurfacePatternBase,
     SurfacePatternCons,
     SurfacePatternTuple,
     SurfaceTerm,
@@ -93,6 +94,7 @@ from systemf.surface.types import (
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceVar,
+    SurfaceVarPattern,
 )
 
 # Type variable for generic token parsers
@@ -794,12 +796,15 @@ def pattern_atom_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePat
             yield match_token(RightParenToken)
             return inner
 
-        # Fall back to simple identifier
+        # Fall back to simple identifier - returns flat pattern structure
         name_token = yield match_token(IdentifierToken).optional()
         if name_token is None:
             yield fail("expected pattern")
 
-        return SurfacePattern(constructor=name_token.value, vars=[], location=name_token.location)
+        return SurfacePattern(
+            patterns=[SurfaceVarPattern(name=name_token.value, location=name_token.location)],
+            location=name_token.location
+        )
 
     return parser
 
@@ -807,19 +812,19 @@ def pattern_atom_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePat
 def pattern_base_parser() -> P[SurfacePattern]:
     """Parse a base pattern (variable or constructor with pattern args).
 
-    A base pattern is either:
-    - A variable pattern: just an identifier
-    - A constructor pattern: Constructor [arg1 arg2 ...]
-      where each arg can be: identifier, tuple, or grouped pattern
+    Returns a flat pattern list where all identifiers are SurfaceVarPattern.
+    The rename phase will disambiguate:
+    - [VarPat("x")] -> single item: variable or nullary constructor
+    - [VarPat("Cons"), VarPat("x"), ...] -> multiple items: constructor pattern
 
     Examples:
-        x                    -> SurfacePattern(constructor="x", vars=[])
-        Cons x xs           -> SurfacePattern(constructor="Cons", vars=[SurfacePattern("x"), SurfacePattern("xs")])
-        Cons (x, y) zs      -> SurfacePattern(constructor="Cons", vars=[tuple, SurfacePattern("zs")])
-        Pair (Cons x xs) y  -> SurfacePattern(constructor="Pair", vars=[cons, SurfacePattern("y")])
+        x                    -> SurfacePattern(patterns=[VarPat("x")])
+        Cons x xs           -> SurfacePattern(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
+        Cons (x, y) zs      -> SurfacePattern(patterns=[VarPat("Cons"), tuple, VarPat("zs")])
+        Pair (Cons x xs) y  -> SurfacePattern(patterns=[VarPat("Pair"), cons, VarPat("y")])
 
     Returns:
-        SurfacePattern for constructor or variable
+        SurfacePattern with flat pattern list
     """
 
     @generate
@@ -833,7 +838,7 @@ def pattern_base_parser() -> P[SurfacePattern]:
         loc = name_token.location
 
         # Parse pattern arguments (atoms: identifiers, tuples, grouped patterns)
-        args: list[SurfacePattern | SurfacePatternTuple | SurfacePatternCons] = []
+        args: list[SurfacePatternBase] = []
         while True:
             # Try to parse an atomic pattern
             arg = yield pattern_atom_parser().optional()
@@ -841,8 +846,11 @@ def pattern_base_parser() -> P[SurfacePattern]:
                 break
             args.append(arg)
 
-        # All args are now proper pattern AST nodes
-        return SurfacePattern(constructor=name, vars=args, location=loc)
+        # Build flat pattern list: [VarPat(name), arg1, arg2, ...]
+        # All identifiers are SurfaceVarPattern - rename phase disambiguates
+        patterns: list[SurfacePatternBase] = [SurfaceVarPattern(name=name, location=loc)]
+        patterns.extend(args)
+        return SurfacePattern(patterns=patterns, location=loc)
 
     return parser
 
@@ -889,10 +897,10 @@ def pattern_cons_parser() -> P[SurfacePattern | SurfacePatternCons]:
     Examples:
         x : xs                -> SurfacePatternCons(head=x, tail=xs)
         x : y : zs           -> SurfacePatternCons(head=x, tail=SurfacePatternCons(head=y, tail=zs))
-        Cons x xs            -> SurfacePattern(constructor="Cons", vars=[SurfacePattern("x"), SurfacePattern("xs")])
-        x                    -> SurfacePattern(constructor="x", vars=[])
-        (x)                  -> SurfacePattern(constructor="x", vars=[])
-        (Cons x xs)          -> SurfacePattern(constructor="Cons", vars=[SurfacePattern("x"), SurfacePattern("xs")])
+        Cons x xs            -> SurfacePattern(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
+        x                    -> SurfacePattern(patterns=[VarPat("x")])
+        (x)                  -> SurfacePattern(patterns=[VarPat("x")])
+        (Cons x xs)          -> SurfacePattern(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
         (x : xs)             -> SurfacePatternCons(head=x, tail=xs)
         x : (y : zs)         -> SurfacePatternCons(head=x, tail=SurfacePatternCons(head=y, tail=zs))
 

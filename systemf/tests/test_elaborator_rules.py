@@ -36,6 +36,7 @@ from systemf.surface.types import (
     SurfaceTypeConstructor,
     SurfaceTypeForall,
     SurfaceTypeVar,
+    SurfaceVarPattern,
 )
 
 # Test fixture location
@@ -237,12 +238,12 @@ class TestSynthesisRules:
 
         branches = [
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="True", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="True", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=1, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
             SurfaceBranch(
-                pattern=SurfacePattern(constructor="False", vars=[], location=DUMMY_LOC),
+                pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="False", location=DUMMY_LOC)], location=DUMMY_LOC),
                 body=SurfaceLit(prim_type="Int", value=0, location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),

@@ -84,35 +84,43 @@ from systemf.surface.inference.unification import (
 def _extract_pattern_var_names(
     pattern: object,
 ) -> list[str]:
-    """Extract variable names bound at the current pattern level."""
+    """Extract variable names bound at the current pattern level.
+
+    With flat pattern structure:
+    - SurfacePattern([VarPat(x)]) -> single variable pattern, returns [x]
+    - SurfacePattern([VarPat(Con), VarPat(x), ...]) -> constructor, collects from args
+    - SurfaceVarPattern(name) -> variable, returns [name]
+    """
     from systemf.surface.types import (
         SurfaceLitPattern,
         SurfacePattern,
         SurfacePatternCons,
         SurfacePatternTuple,
+        SurfaceVarPattern,
     )
 
     match pattern:
-        case SurfacePattern(constructor=constructor, vars=vars):
-            if not vars:
-                return [constructor]
-            return [
-                var.constructor
-                for var in vars
-                if isinstance(var, SurfacePattern) and not var.vars
-            ]
+        case SurfacePattern(patterns=patterns):
+            if len(patterns) == 1 and isinstance(patterns[0], SurfaceVarPattern):
+                # Single item: variable pattern
+                return [patterns[0].name]
+            else:
+                # Multiple items: constructor pattern, collect from args (skip constructor)
+                result = []
+                for pat in patterns[1:]:  # Skip constructor at patterns[0]
+                    result.extend(_extract_pattern_var_names(pat))
+                return result
+        case SurfaceVarPattern(name=name):
+            return [name]
         case SurfacePatternTuple(elements=elements):
-            return [
-                elem.constructor
-                for elem in elements
-                if isinstance(elem, SurfacePattern) and not elem.vars
-            ]
+            result = []
+            for elem in elements:
+                result.extend(_extract_pattern_var_names(elem))
+            return result
         case SurfacePatternCons(head=head, tail=tail):
             result = []
-            if isinstance(head, SurfacePattern) and not head.vars:
-                result.append(head.constructor)
-            if isinstance(tail, SurfacePattern) and not tail.vars:
-                result.append(tail.constructor)
+            result.extend(_extract_pattern_var_names(head))
+            result.extend(_extract_pattern_var_names(tail))
             return result
         case SurfaceLitPattern():
             return []

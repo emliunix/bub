@@ -68,7 +68,7 @@ BUILTIN_UNIQUES: dict[tuple[str, str], int] = build_builtins({
     ]
 })
 
-BUILTIN_OPS = {
+BUILTIN_BIN_OPS = {
     "+": BUILTIN_INT_PLUS,
     "-": BUILTIN_INT_MINUS,
     "*": BUILTIN_INT_MULTIPLY,
