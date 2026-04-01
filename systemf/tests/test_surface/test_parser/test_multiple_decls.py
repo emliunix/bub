@@ -294,10 +294,12 @@ class TestElab3SyntaxSample:
                 name="id",
                 type_annotation=SurfaceTypeForall(
                     var="a",
-                    body=SurfaceTypeArrow(arg=SurfaceTypeVar("a", param_doc=None), ret=SurfaceTypeVar("a")),
+                    body=SurfaceTypeArrow(arg=SurfaceTypeVar("a"), ret=SurfaceTypeVar("a")),
                 ),
                 body=SurfaceAbs(params=[("x", None)], body=SurfaceVar("x")),
-            ),, docstring=None, pragma=None
+                docstring=None,
+                pragma=None,
+            ),
             SurfaceTermDeclaration(
                 name="const",
                 type_annotation=SurfaceTypeForall(
@@ -305,9 +307,9 @@ class TestElab3SyntaxSample:
                     body=SurfaceTypeForall(
                         var="b",
                         body=SurfaceTypeArrow(
-                            arg=SurfaceTypeVar("a", param_doc=None),
+                            arg=SurfaceTypeVar("a"),
                             ret=SurfaceTypeArrow(
-                                arg=SurfaceTypeVar("b", param_doc=None),
+                                arg=SurfaceTypeVar("b"),
                                 ret=SurfaceTypeVar("a"),
                             ),
                         ),
@@ -317,15 +319,17 @@ class TestElab3SyntaxSample:
                     params=[("x", None), ("y", None)],
                     body=SurfaceVar("x"),
                 ),
-            ),, docstring=None, pragma=None
+                docstring=None,
+                pragma=None,
+            ),
             SurfaceTermDeclaration(
                 name="fromMaybe",
                 type_annotation=SurfaceTypeForall(
                     var="a",
                     body=SurfaceTypeArrow(
-                        arg=SurfaceTypeVar("a", param_doc=None),
+                        arg=SurfaceTypeVar("a"),
                         ret=SurfaceTypeArrow(
-                            arg=SurfaceTypeConstructor(name="Maybe", args=[SurfaceTypeVar("a", param_doc=None)]),
+                            arg=SurfaceTypeConstructor(name="Maybe", args=[SurfaceTypeVar("a")]),
                             ret=SurfaceTypeVar("a"),
                         ),
                     ),
@@ -349,13 +353,17 @@ class TestElab3SyntaxSample:
                         ],
                     ),
                 ),
-            ),, docstring=None, pragma=None
+
+                docstring=None,
+
+                pragma=None,
+             ),
             SurfaceTermDeclaration(
                 name="length",
                 type_annotation=SurfaceTypeForall(
                     var="a",
                     body=SurfaceTypeArrow(
-                        arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a", param_doc=None)]),
+                        arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar("a")]),
                         ret=SurfaceTypeConstructor(name="Int", args=[]),
                     ),
                 ),
@@ -368,10 +376,10 @@ class TestElab3SyntaxSample:
                                 type_ann=SurfaceTypeForall(
                                     var="a",
                                     body=SurfaceTypeArrow(
-                                        arg=SurfaceTypeConstructor(name="Int", args=[], param_doc=None),
+                                        arg=SurfaceTypeConstructor(name="Int", args=[]),
                                         ret=SurfaceTypeArrow(
                                             arg=SurfaceTypeConstructor(
-                                                name="List", args=[SurfaceTypeVar("a", param_doc=None)]
+                                                name="List", args=[SurfaceTypeVar("a")]
                                             ),
                                             ret=SurfaceTypeConstructor(name="Int", args=[]),
                                         ),
@@ -418,11 +426,15 @@ pattern=SurfacePattern(
                         ),
                     ),
                 ),
-            ),, docstring=None, pragma=None
+
+                docstring=None,
+
+                pragma=None,
+             ),
             SurfaceTermDeclaration(
                 name="factorial",
                 type_annotation=SurfaceTypeArrow(
-                    arg=SurfaceTypeConstructor(name="Int", args=[], param_doc=None),
+                    arg=SurfaceTypeConstructor(name="Int", args=[]),
                     ret=SurfaceTypeConstructor(name="Int", args=[]),
                 ),
                 body=SurfaceAbs(
@@ -452,11 +464,15 @@ pattern=SurfacePattern(
                         ],
                     ),
                 ),
-            ),, docstring=None, pragma=None
+
+                docstring=None,
+
+                pragma=None,
+             ),
             SurfaceTermDeclaration(
                 name="greet",
                 type_annotation=SurfaceTypeArrow(
-                    arg=SurfaceTypeConstructor(name="String", args=[], param_doc=None),
+                    arg=SurfaceTypeConstructor(name="String", args=[]),
                     ret=SurfaceTypeConstructor(name="String", args=[]),
                 ),
                 body=SurfaceAbs(
@@ -485,7 +501,11 @@ pattern=SurfacePattern(
                         ],
                     ),
                 ),
-            ),, docstring=None, pragma=None
+
+                docstring=None,
+
+                pragma=None,
+             ),
         ]
 
         assert len(result) == len(expected)

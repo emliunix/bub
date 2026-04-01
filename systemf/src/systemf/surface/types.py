@@ -682,7 +682,6 @@ class SurfaceDeclaration(SurfaceNode):
 
 
 @dataclass(frozen=True, kw_only=True)
-@dataclass(frozen=True, kw_only=True)
 class SurfaceConstructorInfo(SurfaceNode):
     """Data constructor with optional docstring."""
 

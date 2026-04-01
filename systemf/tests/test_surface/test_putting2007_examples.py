@@ -105,7 +105,7 @@ class TestIntroductionExample:
         surface_id_type = SurfaceTypeForall(
             var="a",
             body=SurfaceTypeArrow(
-                arg=SurfaceTypeVar(name="a", param_doc=None, location=DUMMY_LOC),
+                arg=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 ret=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
@@ -171,7 +171,7 @@ class TestRankNTypes:
         id_type = SurfaceTypeForall(
             var="a",
             body=SurfaceTypeArrow(
-                arg=SurfaceTypeVar(name="a", param_doc=None, location=DUMMY_LOC),
+                arg=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 ret=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
@@ -845,7 +845,7 @@ class TestPutting2007Integration:
         surface_id_type = SurfaceTypeForall(
             var="a",
             body=SurfaceTypeArrow(
-                arg=SurfaceTypeVar(name="a", param_doc=None, location=DUMMY_LOC),
+                arg=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 ret=SurfaceTypeVar(name="a", location=DUMMY_LOC),
                 location=DUMMY_LOC,
             ),
