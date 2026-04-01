@@ -332,7 +332,7 @@ class ValBind(SurfaceNode):
     """Single value binding in a let expression.
 
     Represents one binding: name : type = value
-    Used within ValBinds for both surface and scoped representations.
+    Used within SurfaceLet for both surface and scoped representations.
 
     Attributes:
         name: Variable name being bound
@@ -351,7 +351,7 @@ class ValBind(SurfaceNode):
 
 
 @dataclass(frozen=True, kw_only=True)
-class ValBinds(SurfaceTerm):
+class SurfaceLet(SurfaceTerm):
     """Local let binding with support for recursive groups.
 
     Syntax:
@@ -361,7 +361,7 @@ class ValBinds(SurfaceTerm):
           y = 2
         in x + y
 
-    All bindings in a ValBinds are mutually recursive - they can all reference
+    All bindings in a SurfaceLet are mutually recursive - they can all reference
     each other. This is detected via SCC analysis in the scope checking phase.
 
     Note: type annotation is optional for locals since they can be inferred.
@@ -383,7 +383,7 @@ class ValBinds(SurfaceTerm):
 class ValBindsScoped(SurfaceTerm):
     """Scoped let binding after name resolution.
 
-    This is the post-scope-checking representation of ValBinds.
+    This is the post-scope-checking representation of SurfaceLet.
     Variable references within bindings and body use de Bruijn indices
     via ScopedVar nodes.
 
@@ -404,7 +404,7 @@ class ValBindsScoped(SurfaceTerm):
 
 
 # Backwards compatibility alias
-SurfaceLet = ValBinds
+ValBinds = SurfaceLet  # DEPRECATED: Use SurfaceLet instead
 
 
 @dataclass(frozen=True, kw_only=True)
