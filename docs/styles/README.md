@@ -8,6 +8,7 @@ Language-specific and domain-specific coding conventions for the Bub project.
 |------|-------|
 | [`python.md`](python.md) | General Python conventions (imports, types, naming, error handling, async, testing) |
 | [`plain-objects.md`](plain-objects.md) | Data structure design patterns (equality, initialization, composition) |
+| [`testing-structural.md`](testing-structural.md) | Testing with structural comparison (template functions, AST comparison) |
 
 ## Quick Reference
 
@@ -25,3 +26,11 @@ See [`plain-objects.md`](plain-objects.md) for:
 - Dataclass initialization patterns
 - Factory method patterns
 - Composition with `__add__`
+
+### Testing with Structural Comparison
+See [`testing-structural.md`](testing-structural.md) for:
+- Building expected AST structures
+- Template functions for test setup
+- Using `structural_equals()` for comparison
+- Ignoring generated fields (unique IDs, locations)
+- Anti-patterns to avoid
