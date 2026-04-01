@@ -19,6 +19,7 @@ from systemf.surface.types import (
     SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceVar,
+    ValBind,
 )
 
 
@@ -119,8 +120,13 @@ def _desugar_children(term: SurfaceTerm) -> SurfaceTerm:
 
         case SurfaceLet(bindings=bindings, body=body, location=loc):
             new_bindings = [
-                (name, var_type, operator_to_prim_pass(value).unwrap())
-                for name, var_type, value in bindings
+                ValBind(
+                    name=b.name,
+                    type_ann=b.type_ann,
+                    value=operator_to_prim_pass(b.value).unwrap(),
+                    location=b.location
+                )
+                for b in bindings
             ]
             result_body = operator_to_prim_pass(body).unwrap()
             return SurfaceLet(bindings=new_bindings, body=result_body, location=loc)

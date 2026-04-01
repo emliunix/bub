@@ -56,8 +56,15 @@ def _desugar_children(term: SurfaceTerm, desugar_fn) -> SurfaceTerm:
 
         case SurfaceLet(bindings=bindings, body=body, location=loc):
             assert body is not None
+            from systemf.surface.types import ValBind
             new_bindings = [
-                (name, var_type, desugar_fn(value)) for name, var_type, value in bindings
+                ValBind(
+                    name=b.name,
+                    type_ann=b.type_ann,
+                    value=desugar_fn(b.value),
+                    location=b.location
+                )
+                for b in bindings
             ]
             return SurfaceLet(bindings=new_bindings, body=desugar_fn(body), location=loc)
 

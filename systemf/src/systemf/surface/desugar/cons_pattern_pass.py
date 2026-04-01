@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from systemf.surface.result import Result, Ok
 from systemf.surface.types import (
+    SurfaceLet,
     SurfaceTerm,
     SurfacePattern,
     SurfacePatternBase,
@@ -14,6 +15,7 @@ from systemf.surface.types import (
     SurfacePatternTuple,
     SurfaceLitPattern,
     SurfaceVarPattern,
+    ValBind,
 )
 
 
@@ -105,9 +107,14 @@ def _desugar_term(term: SurfaceTerm) -> SurfaceTerm:
                 return term
             new_body = _desugar_term(body)
             new_bindings = []
-            for name, var_type, value in bindings:
-                new_value = _desugar_term(value)
-                new_bindings.append((name, var_type, new_value))
+            for b in bindings:
+                new_value = _desugar_term(b.value)
+                new_bindings.append(ValBind(
+                    name=b.name,
+                    type_ann=b.type_ann,
+                    value=new_value,
+                    location=b.location
+                ))
             return SurfaceLet(bindings=new_bindings, body=new_body, location=loc)
 
         case SurfaceAnn(term=inner, type=type_ann, location=loc):

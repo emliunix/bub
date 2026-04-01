@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from systemf.surface.result import Result, Ok, Err
 from systemf.surface.types import (
+    SurfaceLet,
     SurfaceTerm,
     SurfaceTypeAbs,
+    ValBind,
 )
 
 
@@ -128,11 +130,16 @@ def _desugar_children(term: SurfaceTerm) -> SurfaceTerm:
                 return term
 
             new_bindings = []
-            for name, var_type, value in bindings:
-                value_result = multi_var_type_abs_pass(value)
+            for b in bindings:
+                value_result = multi_var_type_abs_pass(b.value)
                 if value_result.is_err():
                     return term
-                new_bindings.append((name, var_type, value_result.unwrap()))
+                new_bindings.append(ValBind(
+                    name=b.name,
+                    type_ann=b.type_ann,
+                    value=value_result.unwrap(),
+                    location=b.location
+                ))
 
             return SurfaceLet(bindings=new_bindings, body=body_result.unwrap(), location=loc)
 
