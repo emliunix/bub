@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from functools import reduce
 from typing import cast
 
+from systemf.elab3.rename_expr import RenameExpr
+
 from .builtins import BUILTIN_FALSE, BUILTIN_BIN_OPS, BUILTIN_LIST_CONS, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE
 
 from .mod import Module
@@ -51,6 +53,7 @@ class Rename:
         self.uniq = ctx.uniq
         self.reader_env = reader_env
         self.mod_name = mod_name
+        self.rename_expr = RenameExpr(reader_env, mod_name, ctx.uniq)
 
     def rename(self, ast: list[SurfaceDeclaration]) -> RenameResult:
         ast_imports, ast_datas, ast_terms = split_ast(ast)
