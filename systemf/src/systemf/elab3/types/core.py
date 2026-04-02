@@ -6,9 +6,8 @@ Core terms use Id (Name + Type) for all variable references.
 """
 
 from dataclasses import dataclass
-from typing import Any
 
-from systemf.elab3.types import Id, Lit, Name, Ty, TyVar, zonk_type
+from .ty import Id, Lit, Name, Ty, TyVar, zonk_type
 
 
 # =============================================================================

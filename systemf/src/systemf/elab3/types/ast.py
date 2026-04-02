@@ -228,7 +228,7 @@ def expr_names(expr: Expr) -> Generator[Name, None, None]:
             for b in bindings:
                 yield from expr_names(b.expr)
             yield from expr_names(body)
-        case Ann(expr, ty):
+        case Ann(expr, _):
             yield from expr_names(expr)  # ignore types for name collection
         case LitExpr(_):
             pass

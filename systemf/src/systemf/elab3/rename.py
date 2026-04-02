@@ -10,12 +10,11 @@ from dataclasses import dataclass
 from typing import cast
 
 from .rename_expr import RenameExpr
-from .mod import Module
-from .repl import REPLContext
-from .ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
-from .tything import ACon, TyThing
-from .ast import (
+from .types import REPLContext, Module
+from .types.ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
+from .types.tything import ACon, TyThing
+from .types.ast import (
     Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl,
     Lam, Let, LitExpr, LitPat, Pat, RnDataConDecl, RnDataDecl, RnTermDecl, Var, VarPat
 )

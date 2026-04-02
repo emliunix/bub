@@ -15,7 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import override
 
-from systemf.elab3.ty import Name
+from .types import Name
 
 
 # =============================================================================

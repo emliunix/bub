@@ -8,11 +8,11 @@ from typing import Protocol, cast
 
 from .builtins import BUILTIN_FALSE, BUILTIN_BIN_OPS, BUILTIN_LIST_CONS, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE
 
-from .mod import Module
-from .ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
-from .tything import ACon, TyThing
-from .ast import (
+from .types import Module
+from .types.ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
+from .types.tything import ACon, TyThing
+from .types.ast import (
     Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl,
     Lam, Let, LitExpr, LitPat, Pat, RnDataDecl, RnTermDecl, Var, VarPat
 )
@@ -29,7 +29,6 @@ from systemf.surface.types import (
 
 from systemf.utils import capture_return
 from systemf.utils.location import Location
-from systemf.utils.uniq import Uniq
 
 
 class NameGenerator(Protocol):
@@ -264,3 +263,11 @@ def prim_to_lit(prim_type: str, value: object) -> Lit:
             return LitInt(cast(int, value))
         case _:
             raise Exception(f"unknown literal type: {prim_type}")
+
+
+def check_dups(names: Iterable[str], loc: Location | None = None):
+    s: set[str] = set()
+    for n in names:
+        if n in s:
+            raise Exception(f"duplicate param names: {n} at {loc}")
+        s.add(n)

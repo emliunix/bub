@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Core types for the systemf elaborator (elab3).
 
@@ -11,6 +9,7 @@ Design:
 - Ty: type hierarchy with TyConApp using Name
 - Lit: runtime literal values
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar, override
@@ -131,7 +130,7 @@ class SkolemTv(TyVar):
 
 
 @dataclass(frozen=True, repr=False)
-class MetaTv(TyVar):
+class MetaTv(Ty):
     """Meta type variable (unification variable).
 
     Like GHC's TcTyVar — exists only during type inference, gets solved
@@ -199,8 +198,10 @@ class LitString(Lit):
 def zonk_type(ty: Ty) -> Ty:
     """Resolve all meta variables to their solutions."""
     match ty:
-        case TyVar() | TyLit() | TyPrim() | TyConApp():
+        case TyVar() | TyLit() | TyPrim():
             return ty
+        case TyConApp(name, args):
+            return TyConApp(name, [zonk_type(a) for a in args])
         case TyFun():
             return TyFun(zonk_type(ty.arg), zonk_type(ty.result))
         case TyForall():
@@ -218,6 +219,12 @@ def zonk_type(ty: Ty) -> Ty:
 def _ty_repr(ty: Ty, prec: int) -> str:
     def _show() -> tuple[int, str]:
         match ty:
+            case TyInt():
+                return 3, "Int"
+            case TyString():
+                return 3, "String"
+            case TyPrim(name=name):
+                return 3, name
             case BoundTv(name=name):
                 return 1, name.surface
             case SkolemTv(name=name):

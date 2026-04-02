@@ -1,10 +1,9 @@
-# =============================================================================
-# TyThing (type environment entries)
-# =============================================================================
+"""
+TyThing (type environment entries)
+"""
 from dataclasses import dataclass
 
 from .ty import (Name, Ty, BoundTv)
-from .core import CoreTm
 
 @dataclass
 class TyThing:
@@ -14,7 +13,6 @@ class TyThing:
 class AnId(TyThing):
     """Term-level binding: variable or function."""
     name: Name
-    term: CoreTm
     type: Ty
 
 @dataclass
@@ -32,3 +30,6 @@ class ACon(TyThing):
     arity: int
     field_types: list[Ty]
     parent: Name
+
+
+type TypeEnv = dict[Name, TyThing]
