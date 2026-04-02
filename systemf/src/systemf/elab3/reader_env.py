@@ -15,7 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import override
 
-from systemf.elab3.types import Name
+from systemf.elab3.ty import Name
 
 
 # =============================================================================
@@ -65,11 +65,11 @@ class ImportSpec:
 @dataclass(frozen=True)
 class LocalRdrElt:
     """Locally defined binding.
-    
+
     Invariant: No import_specs (enforced by type system).
     """
     name: Name
-    
+
     @staticmethod
     def create(name: Name) -> LocalRdrElt:
         return LocalRdrElt(name)
@@ -78,12 +78,12 @@ class LocalRdrElt:
 @dataclass(frozen=True)
 class ImportRdrElt:
     """Imported binding.
-    
+
     Invariant: import_specs is non-empty (at least one import path).
     """
     name: Name
     import_specs: list[ImportSpec]
-    
+
     @staticmethod
     def create(name: Name, spec: ImportSpec) -> ImportRdrElt:
         return ImportRdrElt(name, [spec])
@@ -98,15 +98,15 @@ RdrElt = LocalRdrElt | ImportRdrElt
 
 class ReaderEnv:
     """Maps surface names to resolved Names.
-    
+
     Key is unqualified surface name (OccName).
     Value is list of RdrElts (handles name clashes/ambiguity).
     """
     table: dict[str, list[RdrElt]]
-    
+
     def __init__(self, table: dict[str, list[RdrElt]]):
         self.table = table
-    
+
     def lookup(self, rdr_name: RdrName) -> list[RdrElt]:
         """Look up by RdrName, filtered for qual/unqualified access."""
 
@@ -120,7 +120,7 @@ class ReaderEnv:
             for elt in self.table.get(occ_name, [])
             if _filter_by_spec(elt, rdr_name)
         ]
-    
+
     def merge(self, other: ReaderEnv) -> ReaderEnv:
         """Merge two envs. Other shadows self (later bindings win)."""
         return ReaderEnv.from_elts(list(
@@ -133,10 +133,10 @@ class ReaderEnv:
     def __add__(self, other: ReaderEnv) -> ReaderEnv:
         """env1 + env2 proxies to merge. Other shadows self."""
         return self.merge(other)
-    
+
     def shadow(self, new_names: set[Name]) -> ReaderEnv:
         """Convert to qualified-only for names not in new_names.
-        
+
         Old interactive bindings become accessible only via qualified syntax.
         """
         table = {
@@ -147,7 +147,7 @@ class ReaderEnv:
             for (occ_name, elts) in self.table.items()
         }
         return ReaderEnv(table)
-    
+
     @staticmethod
     def empty() -> ReaderEnv:
         """Create empty environment."""
@@ -161,13 +161,13 @@ class ReaderEnv:
 
         for elt in elts:
             occ = elt.name.surface
-            
+
             # Check if same Name already exists (merge import specs)
             for (i, e) in enumerate(table[occ]):
                 if elt.name.unique == e.name.unique:
                     table[occ][i] = _merge_rdr_elts(elt, e)
                     break
-            else: 
+            else:
                 table[occ].append(elt)
 
         return ReaderEnv(table)
@@ -179,7 +179,7 @@ class ReaderEnv:
 
 def _merge_rdr_elts(a: RdrElt, b: RdrElt) -> RdrElt:
     """Merge two RdrElts for the same Name.
-    
+
     Used when same Name arrives via multiple import paths.
     """
     match (a, b):

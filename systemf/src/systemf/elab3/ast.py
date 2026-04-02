@@ -30,10 +30,9 @@ Styles:
 from __future__ import annotations
 
 from collections.abc import Generator
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
-from systemf.elab3.types import BoundTv, Id, Lit, Name, Ty
+from .ty import BoundTv, Lit, Name, Ty
 
 
 # =============================================================================
@@ -121,7 +120,7 @@ class Case(Expr):
 
 
 class Pat:
-    """Base for renamed patterns."""
+    """The pattern lanuage."""
     pass
 
 
@@ -167,40 +166,10 @@ class CaseBranch:
 
 
 @dataclass
-class DataConDecl:
-    """Renamed data constructor declaration."""
-    name: Name
-    fields: list[Ty]
-
-
-@dataclass
-class DataDecl:
-    """Renamed data type declaration.
-
-    tyvars are local type parameter binders (str).
-    """
-    name: Name
-    tyvars: list[str]
-    constructors: list[DataConDecl]
-
-
-@dataclass
-class TermDecl:
-    """Renamed term declaration."""
-    name: Name
-    type_ann: Ty | None
-    body: Expr
-
-
-# =============================================================================
-# Parsed Declarations (pre-renaming, str names)
-# =============================================================================
-
-
-@dataclass
 class RnDataConDecl:
     """Parsed data constructor (str names)."""
     name: Name
+    tycon: RnDataDecl
     fields: list[Ty]
 
 
@@ -247,11 +216,10 @@ class ModuleDecls:
 
 
 def expr_names(expr: Expr) -> Generator[Name, None, None]:
-    names = []
     match expr:
         case Var(name):
             yield name
-        case Lam(args, body):
+        case Lam(_, body):
             yield from expr_names(body)
         case App(func, arg):
             yield from expr_names(func)

@@ -1,7 +1,10 @@
 # =============================================================================
 # TyThing (type environment entries)
 # =============================================================================
-from .types import *
+from dataclasses import dataclass
+
+from .ty import (Name, Ty, BoundTv)
+from .core import CoreTm
 
 @dataclass
 class TyThing:

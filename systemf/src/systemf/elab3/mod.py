@@ -4,7 +4,7 @@ Module system: Module, NameCache.
 
 from dataclasses import dataclass
 
-from .types import Name
+from .ty import Name
 from .tything import TyThing
 from .builtins import BUILTIN_UNIQUES
 
