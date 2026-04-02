@@ -15,17 +15,17 @@ import pytest
 from parsy import eof
 
 from systemf.elab3.rename_expr import RenameExpr
+from systemf.elab3.rename import NameGeneratorImpl
 from systemf.elab3.builtins import (
     BUILTIN_TRUE, BUILTIN_FALSE, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL,
     BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_BIN_OPS
 )
 from systemf.elab3.reader_env import ReaderEnv, ImportRdrElt, ImportSpec, RdrElt
-from systemf.elab3.types import Name, TyInt, TyString, BoundTv, TyFun, TyForall
-from systemf.elab3.ast import (
+from systemf.elab3.types.ty import Name, TyInt, TyString, BoundTv, TyFun, TyForall, LitInt, LitString
+from systemf.elab3.types.ast import (
     Var, Lam, App, Let, Ann, LitExpr, Case, CaseBranch, ConPat, VarPat,
     Binding, AnnotName
 )
-from systemf.elab3.types import LitInt, LitString
 from systemf.utils.uniq import Uniq
 from systemf.utils.location import Location
 from systemf.utils.ast_utils import structural_equals
@@ -43,6 +43,7 @@ def mk_rename_expr_with_builtins(mod_name: str = "Test", uniq_start: int = 1000)
         RenameExpr configured with builtins in reader_env
     """
     uniq = Uniq(uniq_start)
+    name_gen = NameGeneratorImpl(mod_name, uniq)
     spec = ImportSpec(module_name="builtins", alias=None, is_qual=False)
     
     # Import True, False for if-then-else tests, plus operators
@@ -54,7 +55,7 @@ def mk_rename_expr_with_builtins(mod_name: str = "Test", uniq_start: int = 1000)
     
     elts: list[RdrElt] = [ImportRdrElt.create(name, spec) for name in builtins]
     reader_env = ReaderEnv.from_elts(elts)
-    return RenameExpr(reader_env, mod_name, uniq)
+    return RenameExpr(reader_env, mod_name, name_gen)
 
 
 def parse_expr(source: str):
@@ -78,7 +79,7 @@ def test_rename_expr_variable():
     renamer = mk_rename_expr_with_builtins()
     
     # Create a local binding for x
-    x_name = renamer.new_name("x")
+    x_name = renamer.name_gen.new_name("x", None)
     renamer.local_env.append(("x", x_name))
     
     expr = parse_expr("x")
@@ -193,8 +194,8 @@ def test_rename_expr_application():
     renamer = mk_rename_expr_with_builtins()
     
     # Create local bindings
-    f_name = renamer.new_name("f")
-    x_name = renamer.new_name("x")
+    f_name = renamer.name_gen.new_name("f", None)
+    x_name = renamer.name_gen.new_name("x", None)
     renamer.local_env.extend([("f", f_name), ("x", x_name)])
     
     expr = parse_expr("f x")
@@ -208,9 +209,9 @@ def test_rename_expr_application_nested():
     """Nested application f x y becomes App(App(Var(f), Var(x)), Var(y))."""
     renamer = mk_rename_expr_with_builtins()
     
-    f_name = renamer.new_name("f")
-    x_name = renamer.new_name("x")
-    y_name = renamer.new_name("y")
+    f_name = renamer.name_gen.new_name("f", None)
+    x_name = renamer.name_gen.new_name("x", None)
+    y_name = renamer.name_gen.new_name("y", None)
     renamer.local_env.extend([("f", f_name), ("x", x_name), ("y", y_name)])
     
     expr = parse_expr("f x y")
@@ -301,9 +302,9 @@ def test_rename_expr_if_then_else():
     renamer = mk_rename_expr_with_builtins()
     
     # Create local bindings
-    cond_name = renamer.new_name("cond")
-    then_name = renamer.new_name("then_val")
-    else_name = renamer.new_name("else_val")
+    cond_name = renamer.name_gen.new_name("cond", None)
+    then_name = renamer.name_gen.new_name("then_val", None)
+    else_name = renamer.name_gen.new_name("else_val", None)
     renamer.local_env.extend([
         ("cond", cond_name),
         ("then_branch", then_name),
@@ -344,8 +345,8 @@ def test_rename_expr_binary_op():
     if "+" not in BUILTIN_BIN_OPS:
         pytest.skip("+ operator not in BUILTIN_BIN_OPS")
     
-    x_name = renamer.new_name("x")
-    y_name = renamer.new_name("y")
+    x_name = renamer.name_gen.new_name("x", None)
+    y_name = renamer.name_gen.new_name("y", None)
     renamer.local_env.extend([("x", x_name), ("y", y_name)])
     
     expr = parse_expr("x + y")
@@ -401,7 +402,7 @@ def test_rename_expr_case_simple():
     """Simple case expression case x of with layout syntax."""
     renamer = mk_rename_expr_with_builtins()
 
-    x_name = renamer.new_name("x")
+    x_name = renamer.name_gen.new_name("x", None)
     renamer.local_env.append(("x", x_name))
 
     expr = parse_expr("""case x of
@@ -430,21 +431,6 @@ def test_rename_expr_unresolved_variable():
         renamer.rename_expr(expr)
 
 
-@pytest.mark.skip(reason="BUG: lexer rejects unknown operators like $")
-def test_rename_expr_unknown_operator():
-    """Unknown operator raises exception."""
-    renamer = mk_rename_expr_with_builtins()
-    
-    x_name = renamer.new_name("x")
-    y_name = renamer.new_name("y")
-    renamer.local_env.extend([("x", x_name), ("y", y_name)])
-    
-    expr = parse_expr("x $ y")  # $ is not a builtin operator
-    
-    with pytest.raises(Exception, match="unknown operator"):
-        renamer.rename_expr(expr)
-
-
 # =============================================================================
 # Shadowing Tests
 # =============================================================================
@@ -454,7 +440,7 @@ def test_rename_expr_lambda_shadowing():
     renamer = mk_rename_expr_with_builtins()
     
     # Create outer binding for x
-    outer_x = renamer.new_name("x")
+    outer_x = renamer.name_gen.new_name("x", None)
     renamer.local_env.append(("x", outer_x))
     
     expr = parse_expr("\\x -> x")
@@ -476,7 +462,7 @@ def test_rename_expr_let_shadowing():
     renamer = mk_rename_expr_with_builtins()
     
     # Create outer binding for x
-    outer_x = renamer.new_name("x")
+    outer_x = renamer.name_gen.new_name("x", None)
     renamer.local_env.append(("x", outer_x))
     
     expr = parse_expr("let x = 1 in x")

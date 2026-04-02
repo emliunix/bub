@@ -8,13 +8,14 @@ import pytest
 from parsy import eof
 
 from systemf.elab3.rename_expr import RenameExpr
+from systemf.elab3.rename import NameGeneratorImpl
 from systemf.elab3.builtins import (
     BUILTIN_TRUE, BUILTIN_FALSE, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL,
     BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR
 )
 from systemf.elab3.reader_env import ReaderEnv, ImportRdrElt, ImportSpec
-from systemf.elab3.types import Name, BoundTv, TyFun, TyForall, TyInt, TyString, TyConApp
-from systemf.elab3.ast import VarPat, ConPat, LitPat, DefaultPat
+from systemf.elab3.types.ty import Name, BoundTv, TyFun, TyForall, TyInt, TyString, TyConApp
+from systemf.elab3.types.ast import VarPat, ConPat, LitPat, DefaultPat
 from systemf.utils.uniq import Uniq
 from systemf.utils.location import Location
 from systemf.utils.ast_utils import structural_equals
@@ -33,6 +34,7 @@ def mk_rename_expr_with_builtins(mod_name: str = "Test", uniq_start: int = 1000)
         RenameExpr configured with builtins in reader_env
     """
     uniq = Uniq(uniq_start)
+    name_gen = NameGeneratorImpl(mod_name, uniq)
     
     # Create import specs for builtins (unqualified import)
     spec = ImportSpec(module_name="builtins", alias=None, is_qual=False)
@@ -47,7 +49,7 @@ def mk_rename_expr_with_builtins(mod_name: str = "Test", uniq_start: int = 1000)
     elts = [ImportRdrElt.create(name, spec) for name in builtins]
     reader_env = ReaderEnv.from_elts(elts)
     
-    return RenameExpr(reader_env, mod_name, uniq)
+    return RenameExpr(reader_env, mod_name, name_gen)
 
 
 def parse_pattern(source: str):
