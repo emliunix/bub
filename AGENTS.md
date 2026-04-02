@@ -252,6 +252,8 @@ When moving types between modules during refactoring:
 
 The repo uses `uv` + Ruff + mypy + pytest.
 
+**`uv` is located at `~/.local/bin/uv`.** If `uv` is not on PATH, use the full path.
+
 **Always use `uv run` to execute Python commands.** This ensures dependencies are properly managed:
 
 ```bash
@@ -320,7 +322,7 @@ The plan file must contain:
 
 **Append-only rule**: Change plans are append-only. If the design evolves, create a new file (e.g., `changes/2-add-literal-patterns-v2.md`) that references the previous plan. Never modify an existing change plan—doing so destroys the decision trail.
 
-**Mandatory subagent review**: After writing a change plan, you MUST spawn a subagent to review it before executing any code edits. The reviewer subagent should check for consistency with existing architecture, missing edge cases, and incorrect assumptions. Do not proceed to Phase 3 (Execute) until the review is complete and any issues are resolved.
+**Mandatory subagent review**: After writing a change plan, you MUST spawn a subagent to review it before executing any code edits. The reviewer subagent should check for consistency with existing architecture, missing edge cases, and incorrect assumptions. This review is automatic — do not wait for user approval to run it. However, proceeding to Phase 3 (Execute) requires explicit user approval. Do not execute code changes until the user approves.
 
 This rule exists to prevent "student-level engineer" behavior: jumping straight into code before the design is validated. The plan file is lightweight but mandatory.
 
