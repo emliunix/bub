@@ -11,6 +11,7 @@ Design:
 """
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar, override
 
@@ -138,6 +139,7 @@ class SkolemTv(TyVar):
     during polymorphic type checking.
     """
     name: Name
+    uniq: int
 
 
 @dataclass(frozen=True, repr=False)
@@ -225,6 +227,66 @@ def zonk_type(ty: Ty) -> Ty:
             return ty
         case _:
             raise ValueError(f"Unknown type: {ty}")
+
+def get_free_vars(tys: list[Ty]) -> list[TyVar]:
+    def _free_tv(ty: Ty) -> Generator[TyVar, None, None]:
+        match ty:
+            case TyVar():  # BoundTv | Skolem
+                yield ty
+            case TyFun(arg, res):
+                yield from _free_tv(arg)
+                yield from _free_tv(res)
+            case TyForall(vars, body):
+                for var in _free_tv(body):
+                    if var not in vars:  # ignore bound variables
+                        yield var
+            case MetaTv():
+                pass
+            case _:
+                pass
+
+    return [v for ty in tys for v in _free_tv(zonk_type(ty))]
+
+
+def get_meta_vars(tys: list[Ty]) -> list[MetaTv]:
+    def _meta_tv(ty: Ty) -> Generator[MetaTv, None, None]:
+        match ty:
+            case MetaTv():
+                yield ty
+            case TyFun(arg, res):
+                yield from _meta_tv(arg)
+                yield from _meta_tv(res)
+            case TyForall(_, body):
+                yield from _meta_tv(body)
+            case _:
+                pass
+
+    seen: set[int] = set()  # for deduplication
+    result: list[MetaTv] = []
+    for ty in tys:
+        for v in _meta_tv(zonk_type(ty)):
+            if v.uniq not in seen:
+                seen.add(v.uniq)
+                result.append(v)
+    return result
+
+
+def subst_ty(vars: list[TyVar], tys: list[Ty], ty: Ty) -> Ty:
+    def _subst(env: dict[TyVar, Ty], ty: Ty) -> Ty:
+        match ty:
+            case TyVar():
+                return env.get(ty, ty)
+            case TyFun(arg, res):
+                return TyFun(_subst(env, arg), _subst(env, res))
+            case TyForall(vars_, body):
+                env_ = {n: t for n, t in env.items() if n not in vars_}
+                return TyForall(vars_, _subst(env_, body))
+            case TyConApp(name, args):
+                return TyConApp(name, [_subst(env, a) for a in args])
+            case _:
+                return ty
+
+    return _subst({n: t for n, t in zip(vars, tys)}, ty)
 
 
 def _ty_repr(ty: Ty, prec: int) -> str:

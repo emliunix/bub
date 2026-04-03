@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from systemf.elab3.types.ty import (
     BoundTv, Id, LitInt, LitString, MetaTv, Name, Ref,
-    TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, zonk_type,
+    TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, subst_ty, zonk_type,
 )
 from systemf.elab3.types.tything import AnId, ATyCon, ACon, TyThing
 from systemf.elab3.types.core import CoreLet, CoreLit, CoreTm, CoreVar, NonRec, Rec
@@ -68,3 +68,27 @@ def test_corelet_rec():
     let_expr = CoreLet(binding=Rec(bindings=bindings), body=body)
     assert isinstance(let_expr.binding, Rec)
     assert len(let_expr.binding.bindings) == 2
+
+
+# ---
+# subst_ty — TyConApp case
+
+def test_subst_ty_substitutes_args_in_tyconapp():
+    """Variables in TyConApp args are substituted."""
+    list_name = mk_name("List", "Builtin", 10)
+    a = BoundTv(name=mk_name("a", "Test", 1))
+    # List a  =>  subst [a -> Int]  =>  List Int
+    ty = TyConApp(name=list_name, args=[a])
+    res = subst_ty([a], [TyInt()], ty)
+    assert res == TyConApp(name=list_name, args=[TyInt()])
+
+
+def test_subst_ty_substitutes_multiple_args_in_tyconapp():
+    """All args of a TyConApp are substituted."""
+    either_name = mk_name("Either", "Builtin", 11)
+    a = BoundTv(name=mk_name("a", "Test", 1))
+    b = BoundTv(name=mk_name("b", "Test", 2))
+    # Either a b  =>  subst [a -> Int, b -> String]  =>  Either Int String
+    ty = TyConApp(name=either_name, args=[a, b])
+    res = subst_ty([a, b], [TyInt(), TyString()], ty)
+    assert res == TyConApp(name=either_name, args=[TyInt(), TyString()])

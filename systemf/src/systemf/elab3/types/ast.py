@@ -148,7 +148,7 @@ class LitPat(Pat):
 
 
 @dataclass(frozen=True)
-class DefaultPat(Pat):
+class WildcardPat(Pat):
     """Default/wildcard pattern: _"""
     pass
 
