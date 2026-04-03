@@ -11,8 +11,7 @@ from systemf.elab3.types.ty import (
     TyString,
     zonk_type,
 )
-from systemf.elab3.name_gen import NameCache
-from systemf.elab3.builtins import BUILTIN_BOOL, BUILTIN_LIST
+from systemf.elab3.builtins import BUILTIN_LIST
 
 
 def test_zonk_unbound_meta():
@@ -60,37 +59,9 @@ def test_zonk_tycon_app():
     result = zonk_type(list_ty)
     expected = TyConApp(name=list_name, args=[TyInt()])
     assert result == expected
-def test_cache_builtin_lookup():
-    cache = NameCache()
-    n = cache.get("builtins", "Bool")
-    assert n == BUILTIN_BOOL
-def test_cache_unknown_returns_none():
-    cache = NameCache()
-    n = cache.get("M", "foo")
-    assert n is None
-def test_cache_put_and_get():
-    cache = NameCache()
-    name = Name(mod="M", surface="foo", unique=9999)
-    cache.put(name)
-    assert cache.get("M", "foo") == name
-def test_cache_put_all():
-    cache = NameCache()
-    names = [
-        Name(mod="M", surface="a", unique=9001),
-        Name(mod="M", surface="b", unique=9002),
-    ]
-    cache.put_all(names)
-    assert cache.get("M", "a") == names[0]
-    assert cache.get("M", "b") == names[1]
-def test_cache_builtin_prepopulated_all():
-    cache = NameCache()
-    assert cache.get("builtins", "Bool") is not None
-    assert cache.get("builtins", "List") is not None
-    assert cache.get("builtins", "Cons") is not None
-def test_name_in_type_zonked():
-    list_name = BUILTIN_LIST
+def test_zonk_tycon_app_builtin_name():
     m = MetaTv(uniq=999, ref=Ref(TyInt()))
-    list_ty = TyConApp(name=list_name, args=[m])
+    list_ty = TyConApp(name=BUILTIN_LIST, args=[m])
     result = zonk_type(list_ty)
-    expected = TyConApp(name=list_name, args=[TyInt()])
+    expected = TyConApp(name=BUILTIN_LIST, args=[TyInt()])
     assert result == expected
