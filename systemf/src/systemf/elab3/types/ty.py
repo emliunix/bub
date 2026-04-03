@@ -109,6 +109,17 @@ class TyVar(Ty):
     pass
 
 
+def varnames(vars: list[TyVar]) -> list[Name]:
+    def _name(v: TyVar) -> Name:
+        match v:
+            case BoundTv(name=name) | SkolemTv(name=name):
+                return name
+            case _:
+                raise TypeError(f"Expected a bound type variable, got {v}")
+
+    return [_name(v) for v in vars]
+
+
 @dataclass(frozen=True, repr=False)
 class BoundTv(TyVar):
     """Bound type variable (local binder in forall/tylam).
@@ -137,7 +148,7 @@ class MetaTv(Ty):
     (zonked) away before entering core terms.
     """
     uniq: int
-    ref: Ref[Ty] | None
+    ref: Ref[Ty]
 
 
 @dataclass(frozen=True, repr=False)
@@ -151,7 +162,7 @@ class TyConApp(Ty):
     oversaturated.
     """
     name: Name
-    args: list[Ty] = field(default_factory=list, compare=True, hash=False)
+    args: list[Ty]
 
 
 @dataclass(frozen=True, repr=False)

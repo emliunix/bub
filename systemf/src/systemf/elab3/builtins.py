@@ -34,15 +34,7 @@ BUILTIN_STRING_CONCAT = Name("builtins", "string_concat", 21)
 BUILTIN_ENDS = 1000
 
 
-def build_builtins(mod_names: dict[str, list[Name]]) -> dict[tuple[str, str], int]:
-    return {
-        (mod, name.surface): name.unique
-        for (mod, names) in mod_names.items()
-        for name in names
-    }
-
-
-BUILTIN_UNIQUES: dict[tuple[str, str], int] = build_builtins({
+BUILTIN_NAMES: dict[str, list[Name]] = {
     "builtins": [
         BUILTIN_BOOL,
         BUILTIN_TRUE,
@@ -66,7 +58,7 @@ BUILTIN_UNIQUES: dict[tuple[str, str], int] = build_builtins({
         BUILTIN_BOOL_OR,
         BUILTIN_STRING_CONCAT,
     ]
-})
+}
 
 BUILTIN_BIN_OPS = {
     "+": BUILTIN_INT_PLUS,

@@ -308,23 +308,43 @@ uv run pytest tests/test_bus.py
 
 ### Change Plan Requirement
 
-**Before modifying any code, you MUST create a plan file in `changes/1-somechange.md`.**
+**Before modifying any code, you MUST create a change plan. This applies to any non-trivial code change (new feature, bug fix, refactor, or parser/AST modification).**
 
-This applies to any non-trivial code change (new feature, bug fix, refactor, or parser/AST modification).
+**Workflow:**
 
-The plan file must contain:
-- **Facts**: What the existing project already does (relevant code paths, current behavior, constraints)
-- **Design**: The exact change you intend to make (new types, new functions, modified logic)
-- **Why it works**: Explanation of how the design integrates with existing code and why it is correct
-- **Files**: A concrete list of files to change, add, or delete
+1. **Initialize tracking**: Call `todowrite` to create an initial todo set with at least:
+   - One item to create the change file (e.g., "Create change file with facts and design")
+   - Additional items to track implementation progress
 
-**Example filename**: `changes/1-add-literal-patterns.md`
+2. **Create the change file**: Write the plan to `changes/1-<change-name>.md` containing:
+   - **Facts**: What the existing project already does (relevant code paths, current behavior, constraints)
+   - **Design**: The exact change you intend to make (new types, new functions, modified logic)
+   - **Why it works**: Explanation of how the design integrates with existing code and why it is correct
+   - **Files**: A concrete list of files to change, add, or delete
 
-**Append-only rule**: Change plans are append-only. If the design evolves, create a new file (e.g., `changes/2-add-literal-patterns-v2.md`) that references the previous plan. Never modify an existing change plan—doing so destroys the decision trail.
+3. **Get review**: Spawn a subagent to review the change plan before executing any code edits
 
-**Mandatory subagent review**: After writing a change plan, you MUST spawn a subagent to review it before executing any code edits. The reviewer subagent should check for consistency with existing architecture, missing edge cases, and incorrect assumptions. This review is automatic — do not wait for user approval to run it. However, proceeding to Phase 3 (Execute) requires explicit user approval. Do not execute code changes until the user approves.
+**Example:**
 
-This rule exists to prevent "student-level engineer" behavior: jumping straight into code before the design is validated. The plan file is lightweight but mandatory.
+```markdown
+# User: "We need to add retry logic to the bus client"
+
+# Step 1: Create initial todos
+todowrite([
+    {"content": "1. Create change file changes/1-add-bus-retry.md", "status": "in_progress", "priority": "high"},
+    {"content": "2. Review change plan with subagent", "status": "pending", "priority": "high"},
+    {"content": "3. Implement retry logic in bus client", "status": "pending", "priority": "high"},
+    {"content": "4. Add tests for retry behavior", "status": "pending", "priority": "medium"},
+])
+
+# Step 2: Create change file
+changes/1-add-bus-retry.md with Facts, Design, Why it works, Files
+```
+
+**Additional rules:**
+- **Example filename**: `changes/1-add-literal-patterns.md`
+- **Append-only**: If the design evolves, create a new file (e.g., `changes/2-add-literal-patterns-v2.md`). Never modify an existing change plan—doing so destroys the decision trail.
+- **Mandatory review**: The reviewer subagent checks for consistency with existing architecture, missing edge cases, and incorrect assumptions. This review is automatic—do not wait for user approval to run it. However, proceeding to Phase 3 (Execute) requires explicit user approval.
 
 ### Multi-File Change Protocol
 

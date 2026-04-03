@@ -9,9 +9,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import cast
 
-from .rename_expr import RenameExpr
+from systemf.elab3.name_gen import NAME_CACHE, NameGeneratorImpl
+
+from .rename_expr import RenameExpr, check_dups
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
-from .types import REPLContext, Module
+from .types import NameGenerator, REPLContext, Module
 from .types.ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
 from .types.tything import ACon, TyThing
 from .types.ast import (
@@ -44,7 +46,7 @@ class Rename:
     ctx: REPLContext
     reader_env: ReaderEnv
     mod_name: str
-    name_gen: NameGeneratorImpl
+    name_gen: NameGenerator
 
     """
     Assign unique to names lexically.
@@ -68,11 +70,11 @@ class Rename:
         # lhs
         lhs_datas = self.rename_lhs_datas(ast_datas)
         lhs_terms = self.rename_lhs_terms(ast_terms)
-        self.reader_env = self.reader_env + env_from_local_names(
-            itertools.chain(
+        lhs_names = itertools.chain(
                 [r.name for r in lhs_datas],
                 itertools.chain.from_iterable(r.datacons for r in lhs_datas),
-                [r.name for r in lhs_terms]))
+                [r.name for r in lhs_terms])
+        self.reader_env = self.reader_env + env_from_local_names(lhs_names)
 
         # rhs
         rn_datas = [self.rename_rhs_data(ld) for ld in lhs_datas]
@@ -89,9 +91,9 @@ class Rename:
 
     def rename_lhs_datas(self, datas: list[SurfaceDataDeclaration]) -> list[RnLhsDataResult]:
         def _go(decl: SurfaceDataDeclaration) -> RnLhsDataResult:
-            tycon_name = self.name_gen.new_name(decl.name, decl.location)
+            tycon_name = self.new_lhs_name(decl.name, decl.location)
             datacon_names = [
-                self.name_gen.new_name(con.name, con.location)
+                self.new_lhs_name(con.name, con.location)
                 for con in decl.constructors
             ]
             return RnLhsDataResult(tycon_name, datacon_names, decl)
@@ -99,12 +101,12 @@ class Rename:
 
     def rename_lhs_terms(self, terms: list[SurfaceTermDeclaration]) -> list[RnLhsTermResult]:
         return [
-            RnLhsTermResult(self.name_gen.new_name(decl.name, decl.location), decl)
+            RnLhsTermResult(self.new_lhs_name(decl.name, decl.location), decl)
             for decl in terms
         ]
 
     def rename_rhs_data(self, lhs_res: RnLhsDataResult) -> RnDataDecl:
-        var_names = self.name_gen.new_names(lhs_res.decl.params, lhs_res.decl.location)
+        var_names = self.new_lhs_names(lhs_res.decl.params, lhs_res.decl.location)
         rn_data = RnDataDecl(name=lhs_res.name, tyvars=[BoundTv(v) for v in var_names], constructors=[])
 
         def _go(con: SurfaceConstructorInfo, con_name: Name) -> RnDataConDecl:
@@ -128,6 +130,23 @@ class Rename:
             name=AnnotName(lhs_res.name, term_ty) if term_ty else lhs_res.name,
             expr=term
         )
+    
+    def new_lhs_name(self, name: str, loc: Location | None) -> Name:
+        """
+        Combined NAME_CACHE and NameGenerator
+        
+        when name is builtin, we return from the cache
+        otherwise we generate a new name and put it in the cache so later occ_name lookup finds it.
+        """
+        if (n := NAME_CACHE.get(self.mod_name, name)) is not None:
+            return n
+        n = self.name_gen.new_name(name, loc)
+        NAME_CACHE.put(n)
+        return n
+
+    def new_lhs_names(self, names: list[str], loc: Location | None) -> list[Name]:
+        check_dups(names, loc)
+        return [self.new_lhs_name(name, loc) for name in names]
 
 
 @dataclass
@@ -141,22 +160,6 @@ class RnLhsDataResult:
 class RnLhsTermResult:
     name: Name
     decl: SurfaceTermDeclaration
-
-
-class NameGeneratorImpl:
-    mod_name: str
-    uniq: Uniq
-
-    def __init__(self, mod_name: str, uniq: Uniq):
-        self.mod_name = mod_name
-        self.uniq = uniq
-
-    def new_name(self, name: str, loc: Location | None) -> Name:
-        return Name(self.mod_name, name, self.uniq.make_uniq(), loc)
-
-    def new_names(self, names: list[str], loc: Location | None) -> list[Name]:
-        check_dups(names, loc)
-        return [self.new_name(name, loc) for name in names]
 
 
 def split_ast(
@@ -210,11 +213,3 @@ def env_from_local_names(names: Iterable[Name]) -> ReaderEnv:
         LocalRdrElt(name=name)
         for name in names
     ])
-
-
-def check_dups(names: Iterable[str], loc: Location | None = None):
-    s: set[str] = set()
-    for n in names:
-        if n in s:
-            raise Exception(f"duplicate param names: {n} at {loc}")
-        s.add(n)

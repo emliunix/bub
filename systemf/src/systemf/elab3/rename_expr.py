@@ -9,7 +9,7 @@ from typing import Protocol, cast
 from .builtins import BUILTIN_FALSE, BUILTIN_BIN_OPS, BUILTIN_LIST_CONS, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE
 
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
-from .types import Module
+from .types import Module, NameGenerator
 from .types.ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
 from .types.tything import ACon, TyThing
 from .types.ast import (
@@ -31,11 +31,6 @@ from systemf.utils import capture_return
 from systemf.utils.location import Location
 
 
-class NameGenerator(Protocol):
-    def new_name(self, name: str, loc: Location | None) -> Name: ...
-    def new_names(self, names: list[str], loc: Location | None) -> list[Name]: ...
-
-
 class RenameExpr:
     reader_env: ReaderEnv
     local_env: list[tuple[str, Name]]
@@ -47,6 +42,13 @@ class RenameExpr:
         self.mod_name = mod_name
         self.name_gen = name_gen
         self.local_env = []
+
+    def new_name(self, name: str, loc: Location | None) -> Name:
+        return self.name_gen.new_name(name, loc)
+
+    def new_names(self, names: list[str], loc: Location | None) -> list[Name]:
+        check_dups(names, loc)
+        return [self.new_name(name, loc) for name in names]
 
     def lookup(self, name: RdrName, loc: Location | None = None) -> Name:
         match self.lookup_maybe(name):
@@ -89,7 +91,7 @@ class RenameExpr:
                 return LitExpr(prim_to_lit(prim_type, value))
 
             case SurfaceAbs(params=params, body=body, location=loc):
-                names = self.name_gen.new_names([
+                names = self.new_names([
                     param
                     for (param, _) in params
                 ], loc)
@@ -106,7 +108,7 @@ class RenameExpr:
 
             case SurfaceLet(bindings=bindings, body=body):
                 name_ty_locs = binding_names(bindings)
-                names = [self.name_gen.new_name(n, loc) for (n, _, loc) in name_ty_locs]
+                names = [self.new_name(n, loc) for (n, _, loc) in name_ty_locs]
                 anno_names = [
                     AnnotName(n, self.rename_type(ty)) if ty else n
                     for (n, (_, ty, _)) in zip (names, name_ty_locs)]
@@ -185,7 +187,7 @@ class RenameExpr:
                 case SurfacePattern(patterns=[SurfaceVarPattern(name=var, location=loc)]):
                     match self.lookup_maybe(UnqualName(var)):
                         case [] | None:
-                            name = self.name_gen.new_name(var, loc)
+                            name = self.new_name(var, loc)
                             yield name
                             return VarPat(name)
                         case [name]:
@@ -222,7 +224,7 @@ class RenameExpr:
                     self.rename_type(ret),
                 )
             case SurfaceTypeForall(var=var, body=body, location=loc):
-                name = self.name_gen.new_name(var, loc)
+                name = self.new_name(var, loc)
                 body_ = self.rename_forall_type([name], body)
                 return TyForall([BoundTv(name)], body_)
             case SurfaceTypeConstructor(name=name, args=args):

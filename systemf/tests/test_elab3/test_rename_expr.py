@@ -119,16 +119,14 @@ def test_rename_expr_lambda_simple():
     expr = parse_expr("\\x -> x")
     rn_expr = renamer.rename_expr(expr)
     
-    # Lambda binds x, body references the bound x
-    assert isinstance(rn_expr, Lam)
-    assert len(rn_expr.args) == 1
-    param = rn_expr.args[0]
-    assert isinstance(param, Name)
-    assert param.surface == "x"
+    # Build expected structure - param and body reference same name
+    expected_param = Name(mod="Test", surface="x", unique=-1)
+    expected = Lam(
+        args=[expected_param],
+        body=Var(name=expected_param)
+    )
     
-    # Body should be Var referencing the same name
-    assert isinstance(rn_expr.body, Var)
-    assert rn_expr.body.name.unique == param.unique
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_lambda_annotated():
@@ -137,13 +135,16 @@ def test_rename_expr_lambda_annotated():
     expr = parse_expr("\\(x :: Int) -> x")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Lam)
-    assert len(rn_expr.args) == 1
-    param = rn_expr.args[0]
-    assert isinstance(param, AnnotName)
-    assert param.name.surface == "x"
-    # Type should be TyInt
-    assert isinstance(param.type_ann, TyInt)
+    expected_param = AnnotName(
+        name=Name(mod="Test", surface="x", unique=-1),
+        type_ann=TyInt()
+    )
+    expected = Lam(
+        args=[expected_param],
+        body=Var(name=expected_param.name)
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_lambda_multiple_params():
@@ -152,14 +153,14 @@ def test_rename_expr_lambda_multiple_params():
     expr = parse_expr("\\x y -> x")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Lam)
-    assert len(rn_expr.args) == 2
-    param0 = rn_expr.args[0]
-    param1 = rn_expr.args[1]
-    assert isinstance(param0, Name)
-    assert isinstance(param1, Name)
-    assert param0.surface == "x"
-    assert param1.surface == "y"
+    x_param = Name(mod="Test", surface="x", unique=-1)
+    y_param = Name(mod="Test", surface="y", unique=-1)
+    expected = Lam(
+        args=[x_param, y_param],
+        body=Var(name=x_param)
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_lambda_nested():
@@ -168,21 +169,17 @@ def test_rename_expr_lambda_nested():
     expr = parse_expr("\\x -> \\y -> x")
     rn_expr = renamer.rename_expr(expr)
     
-    # Outer lambda binds x
-    assert isinstance(rn_expr, Lam)
-    outer_x = rn_expr.args[0]
-    assert isinstance(outer_x, Name)
-    assert outer_x.surface == "x"
+    x_param = Name(mod="Test", surface="x", unique=-1)
+    y_param = Name(mod="Test", surface="y", unique=-1)
+    expected = Lam(
+        args=[x_param],
+        body=Lam(
+            args=[y_param],
+            body=Var(name=x_param)
+        )
+    )
     
-    # Inner lambda binds y
-    assert isinstance(rn_expr.body, Lam)
-    inner_y = rn_expr.body.args[0]
-    assert isinstance(inner_y, Name)
-    assert inner_y.surface == "y"
-    
-    # Body references outer x (not y)
-    assert isinstance(rn_expr.body.body, Var)
-    assert rn_expr.body.body.name.unique == outer_x.unique
+    assert structural_equals(rn_expr, expected)
 
 
 # =============================================================================
@@ -209,24 +206,23 @@ def test_rename_expr_application_nested():
     """Nested application f x y becomes App(App(Var(f), Var(x)), Var(y))."""
     renamer = mk_rename_expr_with_builtins()
     
-    f_name = renamer.name_gen.new_name("f", None)
-    x_name = renamer.name_gen.new_name("x", None)
-    y_name = renamer.name_gen.new_name("y", None)
+    f_name = Name(mod="Test", surface="f", unique=-1)
+    x_name = Name(mod="Test", surface="x", unique=-1)
+    y_name = Name(mod="Test", surface="y", unique=-1)
     renamer.local_env.extend([("f", f_name), ("x", x_name), ("y", y_name)])
     
     expr = parse_expr("f x y")
     rn_expr = renamer.rename_expr(expr)
     
-    # Should be left-associative: (f x) y
-    assert isinstance(rn_expr, App)
-    assert isinstance(rn_expr.arg, Var)
-    assert rn_expr.arg.name.unique == y_name.unique
-    assert isinstance(rn_expr.func, App)
-    inner_app = rn_expr.func
-    assert isinstance(inner_app.arg, Var)
-    assert inner_app.arg.name.unique == x_name.unique
-    assert isinstance(inner_app.func, Var)
-    assert inner_app.func.name.unique == f_name.unique
+    expected = App(
+        func=App(
+            func=Var(name=f_name),
+            arg=Var(name=x_name)
+        ),
+        arg=Var(name=y_name)
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 # =============================================================================
@@ -239,8 +235,13 @@ def test_rename_expr_let_simple():
     expr = parse_expr("let x = 1 in x")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Let)
-    assert len(rn_expr.bindings) == 1
+    x_name = Name(mod="Test", surface="x", unique=-1)
+    expected = Let(
+        bindings=[Binding(name=x_name, expr=LitExpr(lit=LitInt(value=1)))],
+        body=Var(name=x_name)
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_let_annotated():
@@ -249,11 +250,16 @@ def test_rename_expr_let_annotated():
     expr = parse_expr("let x :: Int = 1 in x")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Let)
-    binding = rn_expr.bindings[0]
-    assert isinstance(binding.name, AnnotName)
-    assert binding.name.name.surface == "x"
-    assert isinstance(binding.name.type_ann, TyInt)
+    x_annot = AnnotName(
+        name=Name(mod="Test", surface="x", unique=-1),
+        type_ann=TyInt()
+    )
+    expected = Let(
+        bindings=[Binding(name=x_annot, expr=LitExpr(lit=LitInt(value=1)))],
+        body=Var(name=x_annot.name)
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_let_multiple():
@@ -265,8 +271,26 @@ def test_rename_expr_let_multiple():
 in x + y""")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Let)
-    assert len(rn_expr.bindings) == 2
+    x_name = Name(mod="Test", surface="x", unique=-1)
+    y_name = Name(mod="Test", surface="y", unique=-1)
+    
+    # The body is x + y which desugars to App(App(Var(+), Var(x)), Var(y))
+    # We just check structure without full expansion
+    expected = Let(
+        bindings=[
+            Binding(name=x_name, expr=LitExpr(lit=LitInt(value=1))),
+            Binding(name=y_name, expr=LitExpr(lit=LitInt(value=2)))
+        ],
+        body=App(
+            func=App(
+                func=Var(name=BUILTIN_BIN_OPS["+"]),
+                arg=Var(name=x_name)
+            ),
+            arg=Var(name=y_name)
+        )
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_let_mutual():
@@ -278,8 +302,18 @@ def test_rename_expr_let_mutual():
 in x""")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Let)
-    assert len(rn_expr.bindings) == 2
+    x_name = Name(mod="Test", surface="x", unique=-1)
+    y_name = Name(mod="Test", surface="y", unique=-1)
+    
+    expected = Let(
+        bindings=[
+            Binding(name=x_name, expr=Var(name=y_name)),
+            Binding(name=y_name, expr=LitExpr(lit=LitInt(value=1)))
+        ],
+        body=Var(name=x_name)
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_annotation():
@@ -288,9 +322,12 @@ def test_rename_expr_annotation():
     expr = parse_expr("1 :: Int")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Ann)
-    assert isinstance(rn_expr.expr, LitExpr)
-    assert isinstance(rn_expr.ty, TyInt)
+    expected = Ann(
+        expr=LitExpr(lit=LitInt(value=1)),
+        ty=TyInt()
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 # =============================================================================
@@ -302,9 +339,9 @@ def test_rename_expr_if_then_else():
     renamer = mk_rename_expr_with_builtins()
     
     # Create local bindings
-    cond_name = renamer.name_gen.new_name("cond", None)
-    then_name = renamer.name_gen.new_name("then_val", None)
-    else_name = renamer.name_gen.new_name("else_val", None)
+    cond_name = Name(mod="Test", surface="cond", unique=-1)
+    then_name = Name(mod="Test", surface="then_branch", unique=-1)
+    else_name = Name(mod="Test", surface="else_branch", unique=-1)
     renamer.local_env.extend([
         ("cond", cond_name),
         ("then_branch", then_name),
@@ -314,23 +351,22 @@ def test_rename_expr_if_then_else():
     expr = parse_expr("if cond then then_branch else else_branch")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Case)
-    assert len(rn_expr.branches) == 2
+    # Build expected case structure
+    expected = Case(
+        scrutinee=Var(name=cond_name),
+        branches=[
+            CaseBranch(
+                pattern=ConPat(con=BUILTIN_TRUE, args=[]),
+                body=Var(name=then_name)
+            ),
+            CaseBranch(
+                pattern=ConPat(con=BUILTIN_FALSE, args=[]),
+                body=Var(name=else_name)
+            )
+        ]
+    )
     
-    # First branch: True -> then_branch
-    true_branch = rn_expr.branches[0]
-    assert isinstance(true_branch, CaseBranch)
-    assert isinstance(true_branch.pattern, ConPat)
-    assert true_branch.pattern.con == BUILTIN_TRUE
-    assert isinstance(true_branch.body, Var)
-    assert true_branch.body.name.unique == then_name.unique
-    
-    # Second branch: False -> else_branch
-    false_branch = rn_expr.branches[1]
-    assert isinstance(false_branch.pattern, ConPat)
-    assert false_branch.pattern.con == BUILTIN_FALSE
-    assert isinstance(false_branch.body, Var)
-    assert false_branch.body.name.unique == else_name.unique
+    assert structural_equals(rn_expr, expected)
 
 
 # =============================================================================
@@ -345,25 +381,23 @@ def test_rename_expr_binary_op():
     if "+" not in BUILTIN_BIN_OPS:
         pytest.skip("+ operator not in BUILTIN_BIN_OPS")
     
-    x_name = renamer.name_gen.new_name("x", None)
-    y_name = renamer.name_gen.new_name("y", None)
+    x_name = Name(mod="Test", surface="x", unique=-1)
+    y_name = Name(mod="Test", surface="y", unique=-1)
     renamer.local_env.extend([("x", x_name), ("y", y_name)])
     
     expr = parse_expr("x + y")
     rn_expr = renamer.rename_expr(expr)
     
-    # Should be: App(App(Var(+), Var(x)), Var(y))
-    assert isinstance(rn_expr, App)
-    assert isinstance(rn_expr.func, App)
-    assert isinstance(rn_expr.func.func, Var)
-    # Operator name
-    assert rn_expr.func.func.name == BUILTIN_BIN_OPS["+"]
-    # First arg
-    assert isinstance(rn_expr.func.arg, Var)
-    assert rn_expr.func.arg.name.unique == x_name.unique
-    # Second arg
-    assert isinstance(rn_expr.arg, Var)
-    assert rn_expr.arg.name.unique == y_name.unique
+    # Build expected structure: App(App(Var(+), Var(x)), Var(y))
+    expected = App(
+        func=App(
+            func=Var(name=BUILTIN_BIN_OPS["+"]),
+            arg=Var(name=x_name)
+        ),
+        arg=Var(name=y_name)
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 # =============================================================================
@@ -376,11 +410,16 @@ def test_rename_expr_tuple_pair():
     expr = parse_expr("(1, 2)")
     rn_expr = renamer.rename_expr(expr)
     
-    # Should be: App(App(Var(BUILTIN_PAIR_MKPAIR), LitExpr(1)), LitExpr(2))
-    assert isinstance(rn_expr, App)
-    assert isinstance(rn_expr.func, App)
-    assert isinstance(rn_expr.func.func, Var)
-    assert rn_expr.func.func.name == BUILTIN_PAIR_MKPAIR
+    # Build expected structure: App(App(Var(BUILTIN_PAIR_MKPAIR), LitExpr(1)), LitExpr(2))
+    expected = App(
+        func=App(
+            func=Var(name=BUILTIN_PAIR_MKPAIR),
+            arg=LitExpr(lit=LitInt(value=1))
+        ),
+        arg=LitExpr(lit=LitInt(value=2))
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_tuple_triple():
@@ -389,9 +428,22 @@ def test_rename_expr_tuple_triple():
     expr = parse_expr("(1, 2, 3)")
     rn_expr = renamer.rename_expr(expr)
     
-    # Should be: App(App(Var(mkPair), 1), App(App(Var(mkPair), 2), 3))
-    # Or equivalent nested structure
-    assert isinstance(rn_expr, App)
+    # Build expected structure: App(App(Var(mkPair), 1), App(App(Var(mkPair), 2), 3))
+    expected = App(
+        func=App(
+            func=Var(name=BUILTIN_PAIR_MKPAIR),
+            arg=LitExpr(lit=LitInt(value=1))
+        ),
+        arg=App(
+            func=App(
+                func=Var(name=BUILTIN_PAIR_MKPAIR),
+                arg=LitExpr(lit=LitInt(value=2))
+            ),
+            arg=LitExpr(lit=LitInt(value=3))
+        )
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 # =============================================================================
@@ -402,7 +454,7 @@ def test_rename_expr_case_simple():
     """Simple case expression case x of with layout syntax."""
     renamer = mk_rename_expr_with_builtins()
 
-    x_name = renamer.name_gen.new_name("x", None)
+    x_name = Name(mod="Test", surface="x", unique=-1)
     renamer.local_env.append(("x", x_name))
 
     expr = parse_expr("""case x of
@@ -410,12 +462,22 @@ def test_rename_expr_case_simple():
   False -> 0""")
     rn_expr = renamer.rename_expr(expr)
     
-    assert isinstance(rn_expr, Case)
-    # Scrutinee
-    assert isinstance(rn_expr.scrutinee, Var)
-    assert rn_expr.scrutinee.name.unique == x_name.unique
-    # Two branches
-    assert len(rn_expr.branches) == 2
+    # Build expected case structure
+    expected = Case(
+        scrutinee=Var(name=x_name),
+        branches=[
+            CaseBranch(
+                pattern=ConPat(con=BUILTIN_TRUE, args=[]),
+                body=LitExpr(lit=LitInt(value=1))
+            ),
+            CaseBranch(
+                pattern=ConPat(con=BUILTIN_FALSE, args=[]),
+                body=LitExpr(lit=LitInt(value=0))
+            )
+        ]
+    )
+    
+    assert structural_equals(rn_expr, expected)
 
 
 # =============================================================================
@@ -440,21 +502,21 @@ def test_rename_expr_lambda_shadowing():
     renamer = mk_rename_expr_with_builtins()
     
     # Create outer binding for x
-    outer_x = renamer.name_gen.new_name("x", None)
+    outer_x = Name(mod="Test", surface="x", unique=-1)
     renamer.local_env.append(("x", outer_x))
     
     expr = parse_expr("\\x -> x")
     rn_expr = renamer.rename_expr(expr)
     
-    # Lambda creates new binding for x
-    assert isinstance(rn_expr, Lam)
-    inner_x = rn_expr.args[0]
-    assert isinstance(inner_x, Name)
-    assert inner_x.unique != outer_x.unique
+    # Build expected structure - lambda creates new binding for x
+    # Body references the inner (lambda-bound) x, not outer_x
+    expected_inner_x = Name(mod="Test", surface="x", unique=-1)
+    expected = Lam(
+        args=[expected_inner_x],
+        body=Var(name=expected_inner_x)
+    )
     
-    # Body references inner x
-    assert isinstance(rn_expr.body, Var)
-    assert rn_expr.body.name.unique == inner_x.unique
+    assert structural_equals(rn_expr, expected)
 
 
 def test_rename_expr_let_shadowing():
@@ -462,18 +524,21 @@ def test_rename_expr_let_shadowing():
     renamer = mk_rename_expr_with_builtins()
     
     # Create outer binding for x
-    outer_x = renamer.name_gen.new_name("x", None)
+    outer_x = Name(mod="Test", surface="x", unique=-1)
     renamer.local_env.append(("x", outer_x))
     
     expr = parse_expr("let x = 1 in x")
     rn_expr = renamer.rename_expr(expr)
     
-    # Let creates new binding for x
-    assert isinstance(rn_expr, Let)
-    let_x = rn_expr.bindings[0].name
-    assert isinstance(let_x, Name)
-    assert let_x.unique != outer_x.unique
+    # Build expected structure - let creates new binding for x
+    expected_let_x = Name(mod="Test", surface="x", unique=-1)
+    expected_binding = Binding(
+        name=expected_let_x,
+        expr=LitExpr(lit=LitInt(value=1))
+    )
+    expected = Let(
+        bindings=[expected_binding],
+        body=Var(name=expected_let_x)
+    )
     
-    # Body references let x
-    assert isinstance(rn_expr.body, Var)
-    assert rn_expr.body.name.unique == let_x.unique
+    assert structural_equals(rn_expr, expected)

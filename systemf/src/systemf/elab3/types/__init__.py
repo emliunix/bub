@@ -1,5 +1,7 @@
 from typing import Protocol
 
+from systemf.utils.location import Location
+
 from .mod import Module
 from .ty import Name, Ty
 from .tything import TyThing
@@ -11,6 +13,11 @@ class REPLContext(Protocol):
 
     def load(self, name: str) -> Module: ...
     def next_replmod_id(self) -> int: ...
+
+
+class NameGenerator(Protocol):
+    def new_name(self, name: str, loc: Location | None) -> Name: ...
+
 
 __all__ = [
     "REPLContext", "Name", "Ty", "Module", "TyThing"
