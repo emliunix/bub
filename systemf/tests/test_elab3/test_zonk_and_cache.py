@@ -18,26 +18,36 @@ def test_zonk_unbound_meta():
     m = MetaTv(uniq=1, ref=Ref(None))
     result = zonk_type(m)
     assert result is m
+
+
 def test_zonk_bound_meta():
     m = MetaTv(uniq=1, ref=Ref(TyInt()))
     result = zonk_type(m)
     assert result == TyInt()
+
+
 def test_zonk_meta_chain():
     m3 = MetaTv(uniq=3, ref=Ref(TyInt()))
     m2 = MetaTv(uniq=2, ref=Ref(m3))
     m1 = MetaTv(uniq=1, ref=Ref(m2))
     result = zonk_type(m1)
     assert result == TyInt()
+
+
 def test_zonk_path_compression():
     m2 = MetaTv(uniq=2, ref=Ref(TyInt()))
     m1 = MetaTv(uniq=1, ref=Ref(m2))
     result = zonk_type(m1)
     assert result == TyInt()
+
+
 def test_zonk_function_type():
     m = MetaTv(uniq=1, ref=Ref(TyInt()))
     fun = TyFun(m, TyString())
     result = zonk_type(fun)
     assert result == TyFun(TyInt(), TyString())
+
+
 def test_zonk_forall():
     m = MetaTv(uniq=1, ref=Ref(TyInt()))
     a = BoundTv(name=Name(mod="<local>", surface="a", unique=-1))
@@ -45,6 +55,8 @@ def test_zonk_forall():
     result = zonk_type(forall_ty)
     expected = TyForall(vars=[a], body=TyInt())
     assert result == expected
+
+
 def test_zonk_nested_fun():
     m1 = MetaTv(uniq=1, ref=Ref(TyInt()))
     m2 = MetaTv(uniq=2, ref=Ref(TyString()))
@@ -52,6 +64,8 @@ def test_zonk_nested_fun():
     result = zonk_type(nested)
     expected = TyFun(TyFun(TyInt(), TyString()), TyInt())
     assert result == expected
+
+
 def test_zonk_tycon_app():
     list_name = Name(mod="builtins", surface="List", unique=4)
     m = MetaTv(uniq=1, ref=Ref(TyInt()))
