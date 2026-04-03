@@ -73,6 +73,8 @@ def test_zonk_tycon_app():
     result = zonk_type(list_ty)
     expected = TyConApp(name=list_name, args=[TyInt()])
     assert result == expected
+
+
 def test_zonk_tycon_app_builtin_name():
     m = MetaTv(uniq=999, ref=Ref(TyInt()))
     list_ty = TyConApp(name=BUILTIN_LIST, args=[m])
