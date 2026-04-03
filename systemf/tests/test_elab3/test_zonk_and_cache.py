@@ -11,9 +11,8 @@ from systemf.elab3.types.ty import (
     TyString,
     zonk_type,
 )
-from systemf.elab3.name_cache import NameCache
-from systemf.elab3.builtins import BUILTIN_BOOL
-from systemf.utils.uniq import Uniq
+from systemf.elab3.name_gen import NameCache
+from systemf.elab3.builtins import BUILTIN_BOOL, BUILTIN_LIST
 
 
 def test_zonk_unbound_meta():
@@ -61,49 +60,35 @@ def test_zonk_tycon_app():
     result = zonk_type(list_ty)
     expected = TyConApp(name=list_name, args=[TyInt()])
     assert result == expected
-START_UNIQ = 1000
-def test_cache_allocates_new_unique():
-    cache = NameCache(Uniq(START_UNIQ))
-    name = cache.get("M", "foo")
-    assert name.mod == "M"
-    assert name.surface == "foo"
-    assert name.unique >= START_UNIQ
-def test_cache_stable_allocation():
-    cache = NameCache(Uniq(START_UNIQ))
-    n1 = cache.get("M", "foo")
-    n2 = cache.get("M", "foo")
-    assert n1.unique == n2.unique
-def test_cache_different_surface():
-    cache = NameCache(Uniq(START_UNIQ))
-    n1 = cache.get("M", "foo")
-    n2 = cache.get("M", "bar")
-    assert n2.unique == n1.unique + 1
-def test_cache_different_module():
-    cache = NameCache(Uniq(START_UNIQ))
-    n1 = cache.get("M", "foo")
-    n2 = cache.get("N", "foo")
-    assert n2.unique == n1.unique + 1
-def test_cache_builtin_unique():
-    cache = NameCache(Uniq(START_UNIQ))
+def test_cache_builtin_lookup():
+    cache = NameCache()
     n = cache.get("builtins", "Bool")
-    assert n.unique == BUILTIN_BOOL.unique
-def test_cache_builtin_stable():
-    cache = NameCache(Uniq(START_UNIQ))
-    n1 = cache.get("builtins", "Int")
-    n2 = cache.get("builtins", "Int")
-    assert n1.unique == n2.unique
-def test_cache_multiple_calls():
-    cache = NameCache(Uniq(START_UNIQ))
-    n1 = cache.get("M", "a")
-    n2 = cache.get("M", "b")
-    n3 = cache.get("M", "a")
-    n4 = cache.get("N", "a")
-    assert n3.unique == n1.unique
-    assert n2.unique == n1.unique + 1
-    assert n4.unique == n2.unique + 1
+    assert n == BUILTIN_BOOL
+def test_cache_unknown_returns_none():
+    cache = NameCache()
+    n = cache.get("M", "foo")
+    assert n is None
+def test_cache_put_and_get():
+    cache = NameCache()
+    name = Name(mod="M", surface="foo", unique=9999)
+    cache.put(name)
+    assert cache.get("M", "foo") == name
+def test_cache_put_all():
+    cache = NameCache()
+    names = [
+        Name(mod="M", surface="a", unique=9001),
+        Name(mod="M", surface="b", unique=9002),
+    ]
+    cache.put_all(names)
+    assert cache.get("M", "a") == names[0]
+    assert cache.get("M", "b") == names[1]
+def test_cache_builtin_prepopulated_all():
+    cache = NameCache()
+    assert cache.get("builtins", "Bool") is not None
+    assert cache.get("builtins", "List") is not None
+    assert cache.get("builtins", "Cons") is not None
 def test_name_in_type_zonked():
-    cache = NameCache(Uniq(START_UNIQ))
-    list_name = cache.get("builtins", "List")
+    list_name = BUILTIN_LIST
     m = MetaTv(uniq=999, ref=Ref(TyInt()))
     list_ty = TyConApp(name=list_name, args=[m])
     result = zonk_type(list_ty)

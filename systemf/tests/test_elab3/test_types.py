@@ -6,9 +6,7 @@ from systemf.elab3.types.ty import (
 )
 from systemf.elab3.types.tything import AnId, ATyCon, ACon, TyThing
 from systemf.elab3.types.core import CoreLet, CoreLit, CoreTm, CoreVar, NonRec, Rec
-from systemf.elab3.name_cache import NameCache
 from systemf.elab3.builtins import BUILTIN_BOOL
-from systemf.utils.uniq import Uniq
 
 
 def mk_name(surface: str, mod: str, unique: int) -> Name:
