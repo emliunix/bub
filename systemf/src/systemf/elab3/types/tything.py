@@ -3,17 +3,24 @@ TyThing (type environment entries)
 """
 from dataclasses import dataclass
 
-from .ty import (Name, Ty, BoundTv)
+from .ty import (Id, Name, Ty, BoundTv)
+
 
 @dataclass
 class TyThing:
     pass
 
+
 @dataclass
 class AnId(TyThing):
     """Term-level binding: variable or function."""
     name: Name
-    type: Ty
+    id: Id
+
+    @staticmethod
+    def from_id(id: Id) -> AnId:
+        return AnId(id.name, id)
+
 
 @dataclass
 class ATyCon(TyThing):
@@ -21,6 +28,7 @@ class ATyCon(TyThing):
     name: Name
     tyvars: list[BoundTv]
     constructors: list[ACon]
+
 
 @dataclass
 class ACon(TyThing):

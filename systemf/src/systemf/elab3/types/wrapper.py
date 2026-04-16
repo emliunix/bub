@@ -9,13 +9,11 @@ from .ty import Id, Ty, TyVar, TyFun, zonk_type
 from .core import CoreTm, C
 from .protocols import NameGenerator
 
-# ---
-# Wrapper
-#
-# like HsWrapper, the translation snippets from Surface to Core
-# produced by type inference
-#
+
 class Wrapper(ABC): ...
+"""
+like HsWrapper, the translation snippets from Surface to Core, produced by type inference
+"""
 
 
 @dataclass
@@ -137,32 +135,26 @@ class WrapperRunner:
     Run a wrapper to get a CoreTm.
     """
     name_gen: NameGenerator
-    gensym_counter: int
 
     def __init__(self, name_gen: NameGenerator):
         self.name_gen = name_gen
-        self.gensym_counter = 0
     
     def _make_uniq_var(self):
-        sym = self.gensym_counter
-        self.gensym_counter += 1
-        return self.name_gen.new_name(f"$_gensym_{sym}", None)
+        return self.name_gen.new_name(lambda i: f"$_gensym_{i}", None)
 
-    def run_wrapper(self, wp: Wrapper) -> Callable[[CoreTm], CoreTm]:
+    def run_wrapper(self, wp: Wrapper, term: CoreTm) -> CoreTm:
         """
-        This creates a thunk cause only after the typecheck finishes we can have all types zonked.
+        Run the wrapper on the term, producing a new CoreTm.
         """
-        
-        # TODO: fix dummy names
+    
         def _go(wp, e) -> CoreTm:
             match wp:
                 case WpHole():
                     return e
+                case WpCast(ty_from, ty_to) if ty_from == ty_to:
+                    return e
                 case WpCast(ty_from, ty_to):
-                    if ty_from == ty_to:
-                        return e
-                    else:
-                        raise Exception(f"type mismatch: expected {ty_from}, got {ty_to}")
+                    raise Exception(f"type mismatch: expected {ty_from}, got {ty_to}")
                 case WpFun(arg_ty, wp_arg, wp_res):
                     var = Id(self._make_uniq_var(), arg_ty)
                     arg = _go(wp_arg, C.var(var))
@@ -171,11 +163,11 @@ class WrapperRunner:
                 case WpTyApp(ty_arg):
                     return C.tyapp(e, ty_arg)
                 case WpTyLam(ty_var):
-                    # FIX: make core have proper type var type
+                    # BoundTv, SkolemTv, both are valid
                     return C.tylam(ty_var, e)
                 case WpCompose(wp_g, wp_f):
                     return _go(wp_g, _go(wp_f, e))
                 case _:
                     raise Exception("impossible")
 
-        return functools.partial(_go, wp)
+        return _go(wp, term)

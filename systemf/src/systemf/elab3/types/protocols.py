@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Callable, Protocol
 
 from systemf.utils.location import Location
 
@@ -15,5 +15,4 @@ class REPLContext(Protocol):
 
 
 class NameGenerator(Protocol):
-    def new_name(self, name: str, loc: Location | None) -> Name: ...
-
+    def new_name(self, name: str | Callable[[int], str], loc: Location | None) -> Name: ...

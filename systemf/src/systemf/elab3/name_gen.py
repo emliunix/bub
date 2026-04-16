@@ -1,7 +1,9 @@
+from typing import Callable
 from collections.abc import Iterable
 
 from systemf.elab3.types import Name, REPLContext
 from systemf.elab3.builtins import BUILTIN_NAMES
+from systemf.elab3.types.protocols import NameGenerator
 from systemf.utils.location import Location
 from systemf.utils.uniq import Uniq
 
@@ -36,7 +38,7 @@ class NameCache:
 NAME_CACHE = NameCache()
 
 
-class NameGeneratorImpl:
+class NameGeneratorImpl(NameGenerator):
     mod_name: str
     uniq: Uniq
 
@@ -44,8 +46,12 @@ class NameGeneratorImpl:
         self.mod_name = mod_name
         self.uniq = uniq
 
-    def new_name(self, name: str, loc: Location | None) -> Name:
-        return Name(self.mod_name, name, self.uniq.make_uniq(), loc)
+    def new_name(self, name: str | Callable[[int], str], loc: Location | None) -> Name:
+        if isinstance(name, str):
+            return Name(self.mod_name, name, self.uniq.make_uniq(), loc)
+        else:
+            u = self.uniq.make_uniq()
+            return Name(self.mod_name, name(u), u, loc)
 
 
 def check_dups(names: Iterable[str], loc: Location | None = None):

@@ -127,7 +127,7 @@ class Pat:
 @dataclass(frozen=True)
 class VarPat(Pat):
     """Variable pattern that binds an identifier: x."""
-    name: Name
+    name: Name | AnnotName
 
 
 @dataclass(frozen=True)

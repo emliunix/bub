@@ -2,10 +2,10 @@
 typecheck module
 """
 
-from systemf.src.systemf.elab3.types import NameGenerator, REPLContext, Name
-from systemf.src.systemf.elab3.types.ast import ModuleDecls, RnDataDecl
-from systemf.src.systemf.elab3.types.core import CoreTm
-from systemf.src.systemf.elab3.types.tything import TypeEnv, ATyCon, ACon
+from systemf.elab3.types import NameGenerator, REPLContext, Name
+from systemf.elab3.types.ast import ModuleDecls, RnDataDecl
+from systemf.elab3.types.core import CoreTm
+from systemf.elab3.types.tything import TypeEnv, ATyCon, ACon
 
 
 class Typecheck:

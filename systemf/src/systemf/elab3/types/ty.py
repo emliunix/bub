@@ -11,6 +11,7 @@ Design:
 """
 from __future__ import annotations
 
+from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar, override
@@ -140,6 +141,7 @@ class SkolemTv(TyVar):
     """
     name: Name
     uniq: int
+    level: int
 
 
 @dataclass(frozen=True, repr=False)
@@ -150,6 +152,7 @@ class MetaTv(Ty):
     (zonked) away before entering core terms.
     """
     uniq: int
+    level: int
     ref: Ref[Ty]
 
 
@@ -186,9 +189,11 @@ class TyForall(Ty):
 # =============================================================================
 
 
-class Lit:
+class Lit(ABC):
     """Base for runtime literal values."""
-    pass
+    
+    @property
+    def ty(self) -> Ty: ...
 
 
 @dataclass(frozen=True)
@@ -196,11 +201,21 @@ class LitInt(Lit):
     """Integer literal."""
     value: int
 
+    @property
+    @override
+    def ty(self) -> Ty:
+        return TyInt()
+
 
 @dataclass(frozen=True)
 class LitString(Lit):
     """String literal."""
     value: str
+
+    @property
+    @override
+    def ty(self) -> Ty:
+        return TyString()
 
 
 # =============================================================================
@@ -240,6 +255,9 @@ def get_free_vars(tys: list[Ty]) -> list[TyVar]:
                 for var in _free_tv(body):
                     if var not in vars:  # ignore bound variables
                         yield var
+            case TyConApp(args=args):
+                for a in args:
+                    yield from _free_tv(a)
             case MetaTv():
                 pass
             case _:
@@ -251,8 +269,8 @@ def get_free_vars(tys: list[Ty]) -> list[TyVar]:
 def get_meta_vars(tys: list[Ty]) -> list[MetaTv]:
     def _meta_tv(ty: Ty) -> Generator[MetaTv, None, None]:
         match ty:
-            case MetaTv():
-                yield ty
+            case MetaTv() as m:
+                yield m
             case TyFun(arg, res):
                 yield from _meta_tv(arg)
                 yield from _meta_tv(res)
@@ -264,6 +282,7 @@ def get_meta_vars(tys: list[Ty]) -> list[MetaTv]:
     seen: set[int] = set()  # for deduplication
     result: list[MetaTv] = []
     for ty in tys:
+        # zonk to make sure substitutions applied
         for v in _meta_tv(zonk_type(ty)):
             if v.uniq not in seen:
                 seen.add(v.uniq)

@@ -5,12 +5,12 @@ Module system: Module, NameCache.
 from dataclasses import dataclass
 
 from .ty import Name
-from .tything import TyThing
+from .tything import TyThing, TypeEnv
 
 @dataclass
 class Module:
     """Complete compilation result. Stored in HPT."""
     name: str
-    items: list[TyThing]
+    items: TypeEnv
     exports: list[Name]
     source_path: str | None = None

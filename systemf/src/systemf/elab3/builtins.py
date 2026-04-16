@@ -3,33 +3,35 @@
 
 from .types import Name
 
+BUILTIN_UNIT = Name("builtins", "Unit", 1)
+BUILTIN_MK_UNIT = Name("builtins", "MkUnit", 2)
 
-BUILTIN_BOOL = Name("builtins", "Bool", 1)
-BUILTIN_TRUE = Name("builtins", "True", 2)
-BUILTIN_FALSE = Name("builtins", "False", 3)
+BUILTIN_BOOL = Name("builtins", "Bool", 3)
+BUILTIN_TRUE = Name("builtins", "True", 4)
+BUILTIN_FALSE = Name("builtins", "False", 5)
 
-BUILTIN_LIST = Name("builtins", "List", 4)
-BUILTIN_LIST_CONS = Name("builtins", "Cons", 5)
-BUILTIN_LIST_NIL = Name("builtins", "Nil", 6)
+BUILTIN_LIST = Name("builtins", "List", 6)
+BUILTIN_LIST_CONS = Name("builtins", "Cons", 7)
+BUILTIN_LIST_NIL = Name("builtins", "Nil", 8)
 
-BUILTIN_PAIR = Name("builtins", "Pair", 7)
-BUILTIN_PAIR_MKPAIR = Name("builtins", "MkPair", 8)
+BUILTIN_PAIR = Name("builtins", "Pair", 9)
+BUILTIN_PAIR_MKPAIR = Name("builtins", "MkPair", 10)
 
-BUILTIN_INT_PLUS = Name("builtins", "int_plus", 9)
-BUILTIN_INT_MINUS = Name("builtins", "int_minus", 10)
-BUILTIN_INT_MULTIPLY = Name("builtins", "int_multiply", 11)
-BUILTIN_INT_DIVIDE = Name("builtins", "int_divide", 12)
-BUILTIN_INT_EQ = Name("builtins", "int_eq", 13)
-BUILTIN_INT_NEQ = Name("builtins", "int_neq", 14)
-BUILTIN_INT_LT = Name("builtins", "int_lt", 15)
-BUILTIN_INT_GT = Name("builtins", "int_gt", 16)
-BUILTIN_INT_LE = Name("builtins", "int_le", 17)
-BUILTIN_INT_GE = Name("builtins", "int_ge", 18)
+BUILTIN_INT_PLUS = Name("builtins", "int_plus", 11)
+BUILTIN_INT_MINUS = Name("builtins", "int_minus", 12)
+BUILTIN_INT_MULTIPLY = Name("builtins", "int_multiply", 13)
+BUILTIN_INT_DIVIDE = Name("builtins", "int_divide", 14)
+BUILTIN_INT_EQ = Name("builtins", "int_eq", 15)
+BUILTIN_INT_NEQ = Name("builtins", "int_neq", 16)
+BUILTIN_INT_LT = Name("builtins", "int_lt", 17)
+BUILTIN_INT_GT = Name("builtins", "int_gt", 18)
+BUILTIN_INT_LE = Name("builtins", "int_le", 19)
+BUILTIN_INT_GE = Name("builtins", "int_ge", 20)
 
-BUILTIN_BOOL_AND = Name("builtins", "bool_and", 19)
-BUILTIN_BOOL_OR = Name("builtins", "bool_or", 20)
+BUILTIN_BOOL_AND = Name("builtins", "bool_and", 21)
+BUILTIN_BOOL_OR = Name("builtins", "bool_or", 22)
 
-BUILTIN_STRING_CONCAT = Name("builtins", "string_concat", 21)
+BUILTIN_STRING_CONCAT = Name("builtins", "string_concat", 23)
 
 BUILTIN_ENDS = 1000
 

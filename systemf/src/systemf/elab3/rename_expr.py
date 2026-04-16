@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from functools import reduce
 from typing import Protocol, cast
 
+from systemf.elab3 import name_gen
+
 from .builtins import BUILTIN_FALSE, BUILTIN_BIN_OPS, BUILTIN_LIST_CONS, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE
 
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
@@ -47,7 +49,7 @@ class RenameExpr:
         return self.name_gen.new_name(name, loc)
 
     def new_names(self, names: list[str], loc: Location | None) -> list[Name]:
-        check_dups(names, loc)
+        name_gen.check_dups(names, loc)
         return [self.new_name(name, loc) for name in names]
 
     def lookup(self, name: RdrName, loc: Location | None = None) -> Name:
@@ -210,7 +212,7 @@ class RenameExpr:
 
         with capture_return(_rename_pat(pat)) as (gen_vars, res):
             vars = list(gen_vars)
-            check_dups([v.surface for v in vars], pat.location)
+            name_gen.check_dups([v.surface for v in vars], pat.location)
             names = [v for v in vars]
             return names, res[0]
 
@@ -265,11 +267,3 @@ def prim_to_lit(prim_type: str, value: object) -> Lit:
             return LitInt(cast(int, value))
         case _:
             raise Exception(f"unknown literal type: {prim_type}")
-
-
-def check_dups(names: Iterable[str], loc: Location | None = None):
-    s: set[str] = set()
-    for n in names:
-        if n in s:
-            raise Exception(f"duplicate param names: {n} at {loc}")
-        s.add(n)
