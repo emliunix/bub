@@ -24,6 +24,7 @@ General Python coding conventions for the Bub project.
 - Avoid wildcard imports (`from x import *`)
 - Group related imports: `from pathlib import Path, PurePath`
 - No local imports inside functions (use TYPE_CHECKING for type-only imports)
+- **Migrate imports, don't re-export**: When moving types between modules, update all affected imports to point to the new canonical location. Don't leave re-exports as compatibility shims — they hide the true source of types and break when the original module changes.
 
 ## Types & Type Hints
 

@@ -69,7 +69,35 @@ Start channel service:
 uv run bub message
 ```
 
-## 4) Docker Compose Deployment
+## 4) Systemd Production Deployment
+
+Use `./scripts/deploy-production.sh` for systemd-based process management.
+
+**Why systemd**: journalctl log aggregation, auto-restart on failure, consistent dev/prod config.
+
+```bash
+./scripts/deploy-production.sh start bus                # Start bus
+./scripts/deploy-production.sh start all                # Start all
+./scripts/deploy-production.sh logs bus                 # Follow logs
+./scripts/deploy-production.sh logs all                 # All component logs
+./scripts/deploy-production.sh logs bus -n 50           # Last 50 lines
+./scripts/deploy-production.sh status bus               # Check status
+./scripts/deploy-production.sh stop bus                 # Stop cleanly
+./scripts/deploy-production.sh stop all                 # Stop everything
+./scripts/deploy-production.sh list                     # List running components
+```
+
+Features:
+- Uses `systemd-run` with automatic cleanup
+- Auto-restart on failure (`Restart=always`, 5s delay, max 3 restarts/min)
+- Unit names persisted in `run/` directory
+- Logs via `journalctl --user -u <unit-name>`
+
+Do not run `uv run bub bus serve` directly — bypasses deployment, no journalctl logs. One-shot CLI commands (like `bub bus status`) are fine.
+
+See `.agents/skills/deployment/SKILL.md` for full command reference.
+
+## 5) Docker Compose Deployment
 
 The repository already provides `Dockerfile`, `docker-compose.yml`, and `entrypoint.sh`.
 
@@ -91,7 +119,7 @@ Default mounts in `docker-compose.yml`:
 - `${BUB_HOME:-${HOME}/.bub}:/data`
 - `${BUB_AGENT_HOME:-${HOME}/.agent}:/root/.agent`
 
-## 5) Operational Checks
+## 6) Operational Checks
 
 Health checklist:
 
@@ -104,7 +132,7 @@ Health checklist:
 4. Logs show channel startup:
    `uv run bub message` and confirm `channel.manager.start` output.
 
-## 6) Safe Upgrade Procedure
+## 7) Safe Upgrade Procedure
 
 ```bash
 git fetch --all --tags

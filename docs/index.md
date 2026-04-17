@@ -40,6 +40,28 @@ Bub is built for day-to-day coding tasks: run commands, edit files, debug failur
 ,tape.reset archive=true
 ```
 
+## Documentation Index
+
+| Topic | Path |
+|-------|------|
+| Components & relationships | `docs/components.md` |
+| Architecture & determinism | `docs/architecture.md` |
+| Agent protocol (transport) | `docs/agent-protocol.md` |
+| Agent messages (payload types) | `docs/agent-messages.md` |
+| Interactive CLI | `docs/cli.md` |
+| Scripts, testing, debugging | `docs/testing.md` |
+| Deployment | `docs/deployment.md` |
+| Security & configuration | `docs/security-and-settings.md` |
+
+## Style Guides
+
+| Topic | Path |
+|-------|------|
+| Python code style | `docs/styles/python.md` |
+| Plain objects pattern | `docs/styles/plain-objects.md` |
+| Structural testing | `docs/styles/testing-structural.md` |
+| Development style | `docs/styles/development.md` |
+
 ## Configuration
 
 Start from `env.example` in the repository root.
