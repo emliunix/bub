@@ -172,6 +172,21 @@ Then proceed with validation...
 
 These apply in ALL modes:
 
+### Structured Codebase Analysis Framework
+
+For deep analysis of complex codebases, apply the **Tiered Analysis Framework** (see `TIERED_ANALYSIS_FRAMEWORK.md`):
+
+| Tier | Purpose | When to Use |
+|------|---------|-------------|
+| **Base Theme** | Define 3-5 analytical dimensions | Before analyzing code |
+| **Main Theme** | Map component relationships | After establishing dimensions |
+| **Detailed Facts** | Analyze functions through dimensions | Throughout exploration |
+
+**Key insight:** Mode switching in this skill corresponds to moving between tiers:
+- **Analysis Mode** ↔ Establishing base dimensions, detailed facts
+- **Design Mode** ↔ Synthesizing main theme from validated facts
+- **Validation Mode** ↔ Cross-tier consistency checking
+
 ### Evidence Standard
 - Every claim must have supporting evidence
 - Evidence quality must match claim confidence

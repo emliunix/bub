@@ -5,18 +5,17 @@ description: Systematic codebase investigation with evidence-based claims. Use w
 
 # Exploration: Structured Codebase Research
 
-Guide for systematically exploring and documenting unfamiliar codebases.
-
 ## Core Concepts
 
-**Topic** - Investigation area with central question and scope boundaries
-**Claim** - Atomic, verifiable assertion with source attribution  
-**Evidence** - Exact code snippets with file paths and line numbers
-**Validated Notes** - Once exploration files are marked Validated, they can be cited as sources (secondary to source code, but authoritative for derived claims)
+- **Topic** — Investigation area with central question and scope boundaries
+- **Claim** — Atomic, verifiable assertion with source attribution
+- **Evidence** — Exact code snippets with `file:lines` references
+- **Validated Notes** — Exploration files marked Validated; citable as secondary sources
 
 ## Document Structure
 
-Exploration files: `{TOPIC_KEYWORD}_EXPLORATION.md`
+**Master file:** `{TOPIC_KEYWORD}_EXPLORATION.md`
+**Session file:** `{TOPIC}_{DATE}_{ID}_TEMP.md` (extends existing master; merges back in Phase 3)
 
 ```markdown
 # [Topic Title]
@@ -24,6 +23,18 @@ Exploration files: `{TOPIC_KEYWORD}_EXPLORATION.md`
 **Status:** In Progress | Validated | Archived
 **Last Updated:** YYYY-MM-DD
 **Central Question:** [What we're investigating]
+**Topics:** [tag1, tag2, tag3]
+
+## Planning
+
+**Scopes:** [What this exploration covers and what is excluded]
+
+**Entry Points:**
+- `path/to/file:line` — [description]
+
+**Assumptions:**
+- [ ] [Assumption 1]
+- [ ] [Assumption 2]
 
 ## Summary
 Brief overview (2-3 paragraphs).
@@ -34,10 +45,9 @@ Brief overview (2-3 paragraphs).
 **Statement:** [Atomic assertion]
 **Source:** `path/file:lines`
 **Evidence:**
-```haskell
 [Exact code snippet]
-```
 **Status:** Draft | Validated | Needs Revision
+**Confidence:** High | Medium | Low
 **Notes:** [Any issues or contradictions]
 
 ## Open Questions
@@ -45,226 +55,131 @@ Brief overview (2-3 paragraphs).
 
 ## Related Topics
 - [LINK_TO_OTHER.md]
+
+## Unconfirmed Hypotheses
+### Hypothesis N: [Title]
+**Reason:** [Why it could not be validated]
+**Source:** `path/file:lines` (if applicable)
 ```
 
-**Session files** (`{TOPIC}_{DATE}_{ID}_TEMP.md`): Same structure, add **Confidence:** field per claim.
+Session files should flag any claims copied from the master file with **Copied:** Yes.
 
-### Using Existing Exploration Notes
+## Workflow
 
-When previous validated exploration exists, it can serve as a starting point:
+### Pre-Workflow: Create Todo Items (Mandatory)
 
-**Evidence hierarchy:**
-1. **Source code** - Primary evidence (most authoritative)
-2. **Validated exploration notes** - Secondary source (claims marked "Validated" in master files)
-3. **Draft exploration notes** - Reference only (not authoritative)
+Before any phase, create todo items to track progress. These are phase-tracking todos that maintain master control over the exploration:
 
-**When citing validated notes:**
-```markdown
-**Claim:** [Derived assertion]
-**Source:** `analysis/TOPIC_EXPLORATION.md:Claim N` + `path/file:lines`
-**Evidence:**
-- From exploration: [validated finding]
-- From source: [code confirming the finding]
+- [ ] Explore: [topic] - [central questions, expand into multiple todo items]
+- [ ] (**subagent**) Validate **mandatory**: verify claims
+- [ ] (**subagent**) Merge: integrate into master file (**mandatory** if session file)
+
+Update these as you progress. Mark completed immediately when done. Add sub-items if scope expands.
+
+### Phase 1: Explore
+
+#### Step 0: Master File Decision
+
+| Condition | Action |
+|---|---|
+| No master file exists for topic | Create NEW master file, write directly |
+| Master exists but topic is unrelated | Create NEW master file, write directly |
+| Master exists and topic is related | Create SESSION file (TEMP), master stays as reference |
+
+**Rules:**
+- New master files skip Phase 3 (no merge needed)
+- Session files always merge back to master in Phase 3
+
+#### Step 1: Determine Work Strategy
+
+**Case A — Prior work exists in current session:**
+1. Structure findings into claim/evidence format
+2. Write to appropriate file (master or session)
+3. Proceed to Phase 2
+
+**Case B — New exploration needed:**
+
+**Step 1:** Create exploration file with:
+- Central Question
+- Scopes
+- Entry Points (files, functions, line numbers)
+- Assumptions
+- Claims (Draft claims serve as detailed, focused assumptions to validate)
+
+**Step 2:** Choose path:
+- Plan is detailed enough → write findings directly (becomes Case A)
+- Exploration required → spawn subagent
+
+**Subagent template (Phase 1):**
+```
+You are an exploration subagent.
+Working directory: [absolute path]
+
+Input (READ-ONLY): [plan file path] + [related exploration files]
+Output (WRITE TO): [target file path]
+
+Scopes: [what to cover and what to ignore]
+Entry points: [file:line references]
+
+Deliverable: Populate Claims section using claim format (statement + source + evidence + confidence).
 ```
 
-**Workflow:**
-- **Stage 1 (Explore):** Check existing validated notes first for relevant claims
-- **Stage 2 (Validate):** Verify both the source code AND check against existing validated claims for consistency
-- **Stage 3 (Merge):** Update cross-references between related topics
+#### Termination Criteria
 
-## Step 0: Scope Clarification
+Stop exploring when:
+- Central question is answered with evidence
+- 3+ dead-ends (scope too broad — refine question)
+- Recursion depth > 5 (circular dependencies)
+- Claims become speculative (no source evidence)
 
-Before exploring, define clear boundaries to prevent infinite exploration.
+If stuck: return partial findings + specific blockers. Don't guess.
 
-### Entry Point Selection
-Choose starting point based on investigation type:
-- **Error messages** → Stack traces → Source location
-- **APIs** → Interface definitions → Implementations  
-- **Data flow** → Input handlers → Processing → Output
-- **Architecture** → Core types → Relationships → Usage
+### Phase 2: Validate (subagent required)
 
-### Termination Criteria
+Verify claims against source code. Pass `REFERENCE.md` to the validation subagent.
 
-**Stop exploring when:**
-- [ ] Central question is answered with evidence
-- [ ] 3+ dead-ends encountered (scope too broad - refine question)
-- [ ] Recursion depth > 5 (circular dependencies or over-tracing)
-- [ ] Claims become speculative (no source evidence found)
-
-**If stuck:** Return with partial findings + specific blockers. Don't guess or hallucinate.
-
-### Scope Boundaries (IN/OUT)
-
-Define what's included and excluded:
-
+**Subagent template:**
 ```
-IN: [Specific functions, files, or concepts to cover]
-OUT: [Areas to ignore, even if related]
-```
+You are a validation subagent.
+Working directory: [absolute path]
 
-## Three-Stage Workflow
+Target: [exploration file path]
+Reference: [path to REFERENCE.md — read for claim quality standards and contradiction handling]
 
-### Stage 1: Explore
+For each claim, verify:
+1. Evidence exists at cited location
+2. Claim logically follows from evidence
+3. Consistent with other validated claims
 
-Create temp file with findings using subagent.
-
-**Spawn exploration subagent:**
-```
-You are an exploration subagent...
-
-**Input (READ-ONLY):**
-- Master: /path/to/{TOPIC}_EXPLORATION.md
-
-**Output (WRITE TO THIS):**
-/path/to/{TOPIC}_{DATE}_{ID}_TEMP.md
-
-**Topic:** [Specific aspect]
-**Central Question:** [What to answer]
-**Entry Point:** File + function + line
-**Scope:** IN [list], OUT [list]
-
-**Deliverable:** Follow claim format (statement + source + evidence)
+Annotate each claim with:
+- VALIDATED: Yes | No | Partial
+- Source Check: Verified | Mismatch at line X
+- Logic Check: Sound | Questionable
+- Notes: [issues found]
 ```
 
-**Checklist:**
-- [ ] Role definition
-- [ ] Input files marked (READ-ONLY)
-- [ ] Output temp file marked (WRITE TO THIS)
-- [ ] Topic and central question specified
-- [ ] Entry point (file + function + line)
-- [ ] IN scope list
-- [ ] OUT scope list
-- [ ] Working directory specified
+> **Note:** If validation reveals incorrect claims, fix the claims and regenerate the todo items to re-validate before proceeding.
 
----
+### Phase 3: Merge (subagent required, session files only)
 
-### Stage 2: Validate
+Skip this phase for new master files. Only for session files extending an existing master.
 
-Verify evidence against actual source code.
-
-**Spawn validation subagent:**
+**Subagent template:**
 ```
-You are a validation subagent...
+You are a merge subagent.
+Working directory: [absolute path]
 
-**Target:** /path/to/{TOPIC}_{DATE}_{ID}_TEMP.md
+Source: [validated session file path]
+Target: [master exploration file path — UPDATE THIS]
 
-**Validate:**
-1. Evidence verification (code exists at cited location?)
-2. Cross-check against existing validated claims (consistency with prior findings)
-3. Logic check (does claim follow from evidence?)
-4. Assess confidence (High/Medium/Low)
-
-**Add per claim:**
-- **VALIDATED:** Yes/No/Partial
-- **Source Check:** Verified/Mismatch at line X
-- **Logic Check:** Sound/Questionable
-- **Notes:** Any issues
-```
-
-**Checklist:**
-- [ ] Role definition
-- [ ] Target file specified
-- [ ] Validation criteria listed
-- [ ] Annotation format defined
-- [ ] Working directory specified
-
----
-
-### Stage 3: Merge
-
-Integrate validated findings into master file.
-
-**Spawn merge subagent:**
-```
-You are a merge subagent...
-
-**Source:** /path/to/{TOPIC}_{DATE}_{ID}_TEMP.md (validated)
-**Target:** /path/to/{TOPIC}_EXPLORATION.md (UPDATE THIS)
-
-**Merge rules:**
-- Validated claims → Add to Claims section
-- Failed claims → Add to "Unconfirmed Hypotheses" section with reason
-- Remove obsolete claims (mark deprecated first)
-- Deduplicate existing claims
+Merge rules:
+- Validated claims → add to master Claims section
+- Failed claims → add to "Unconfirmed Hypotheses" with reason
+- Deduplicate against existing claims
+- Mark obsolete claims as deprecated
 - Update cross-references
 
-**Update metadata:** Last Updated date, Status
+Update metadata: Last Updated date, Status.
 ```
 
-**Checklist:**
-- [ ] Role definition
-- [ ] Source file (validated)
-- [ ] Target file (UPDATE THIS)
-- [ ] Validation summary provided
-- [ ] Merge rules enumerated
-- [ ] Metadata updates listed
-
-**Post-merge:** Archive or delete temp file.
-
-## Critical: Single Channel Principle
-
-The subagent tool call is the **only** communication channel. Once spawned, the subagent cannot ask questions or request additional context.
-
-**Must include in initial prompt:**
-- Absolute file paths
-- Working directory
-- Read vs write file operations
-- Entry points and search patterns
-- Scope boundaries
-- Expected deliverable format
-
-**Insufficient context leads to:** wasted time, incorrect assumptions, incomplete findings.
-
-## Claim Quality Standards
-
-**Good claim characteristics:**
-- **Atomic** - One specific fact, not compound
-- **Verifiable** - Can be confirmed by reading source
-- **Attributed** - Linked to specific source location
-- **Dated** - When it was discovered
-
-**Example:**
-```markdown
-**Claim:** `runTcInteractive` copies `icReaderEnv icxt` to `tcg_rdr_env`.
-**Source:** `compiler/GHC/Tc/Module.hs:2675-2685`
-**Evidence:**
-```haskell
-runTcInteractive :: HscEnv -> InteractiveContext -> TcM a -> IO (Messages, Maybe a)
-runTcInteractive hsc_env icxt thing_inside = do
-    initTcWithGbl hsc_env gbl_env emptyVarEnv thing_inside
-  where
-    gbl_env = updInteractiveContext env (icReaderEnv icxt) env
-```
-**Discovered:** 2024-03-28
-```
-
-## Handling Contradictions
-
-When evidence contradicts existing claims:
-
-1. **Report it** - Document both old claim and contradictory evidence
-2. **Flag for review** - Add "CONTRADICTS: [old claim source]" to new finding
-3. **Stop** - Don't resolve contradictions at subagent level
-4. **Escalate** - Parent agent (user conversation) decides how to handle
-
-The outer scope determines whether to:
-- Keep both (different contexts/versions)
-- Replace old with new
-- Investigate further
-- Mark both as uncertain
-
-## Common Pitfalls
-
-- **Following too many branches** - Stay within scope boundaries
-- **Interface vs implementation** - Distinguish public API from internal details
-- **Similar names** - Don't assume `Foo` in file A is same as `Foo` in file B
-- **Cherry-picking evidence** - Report contradictions, don't hide them
-- **Over-confidence** - Mark speculative claims as Low confidence
-
-## Maintenance Rules
-
-1. **Atomic commits** - Each session appends new claims
-2. **No deletion** - Mark deprecated, don't remove
-3. **Date everything** - Every claim gets discovered/updated date
-4. **Link liberally** - Cross-reference related topics
-5. **Validate periodically** - Run validation when status changes to Validated
+Post-merge: archive or delete the temp session file.
