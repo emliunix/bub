@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from systemf.elab3.types import Name, REPLContext
 from systemf.elab3.builtins import BUILTIN_NAMES
 from systemf.elab3.types.protocols import NameGenerator
+from systemf.elab3.types.ty import Id, Ty
 from systemf.utils.location import Location
 from systemf.utils.uniq import Uniq
 
@@ -53,6 +54,9 @@ class NameGeneratorImpl(NameGenerator):
             u = self.uniq.make_uniq()
             return Name(self.mod_name, name(u), u, loc)
 
+    def new_id(self, name: str | Callable[[int], str], ty: Ty) -> Id:
+        return Id(self.new_name(name, None), ty)
+    
 
 def check_dups(names: Iterable[str], loc: Location | None = None):
     s: set[str] = set()

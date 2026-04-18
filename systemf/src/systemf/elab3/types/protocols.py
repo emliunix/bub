@@ -3,7 +3,7 @@ from typing import Callable, Protocol
 from systemf.utils.location import Location
 
 from .mod import Module
-from .ty import Name
+from .ty import Id, Name, Ty
 
 from systemf.utils.uniq import Uniq
 
@@ -16,3 +16,4 @@ class REPLContext(Protocol):
 
 class NameGenerator(Protocol):
     def new_name(self, name: str | Callable[[int], str], loc: Location | None) -> Name: ...
+    def new_id(self, name: str | Callable[[int], str], ty: Ty) -> Id: ...

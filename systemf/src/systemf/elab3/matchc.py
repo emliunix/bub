@@ -146,7 +146,7 @@ class MatchC:
             case PGCo(_):
                 pat_co = cast(XPatCo, pats[0])
                 co = self.wp_runner.run_wrapper(pat_co.co, C.var(v))
-                v2 = self.new_id(lambda i: f"_mc_co_{i}", pat_co.res_ty)
+                v2 = self.name_gen.new_id(lambda i: f"_mc_co_{i}", pat_co.res_ty)
                 return mr_map(
                     self.matchc([v2] + vs, ty, unshift_eqn([[cast(XPatCo, p).pat] for p in pats], eqns)),
                     mk_bndr(v2, co),
@@ -173,7 +173,7 @@ class MatchC:
     def mk_lit_alts(self, v: Id, ty: Ty, xs: list[tuple[Lit, MatchResult]]) -> MatchResult:
         def _go(eh: CoreTm) -> CoreTm:
             return C.case_lit(
-                C.var(v), self.new_id(lambda i: f"_mc_litalts_s_{i}", v.ty), ty,
+                C.var(v), self.name_gen.new_id(lambda i: f"_mc_litalts_s_{i}", v.ty), ty,
                 [(lit, mr_run(mr, eh)) for lit, mr in xs],
                 eh
             )
@@ -186,12 +186,13 @@ class MatchC:
                     return con
                 case _: raise Exception("unreachable")
 
+        # FIX: we must not use groupby (local grouping) here
         groups = itertools.groupby(zip(col, eqns), _by_con)
 
         def _go_grp(con: Name, pat_eqns: list[tuple[XPat, Equation]]) -> tuple[Name, list[Id], MatchResult]:
             _, eqns = unzip(pat_eqns)
             pat_con = cast(XPatCon, pat_eqns[0][0])
-            ids = [self.new_id(lambda i: f"_mc_con_{i}", ty) for ty in pat_con.arg_tys]
+            ids = [self.name_gen.new_id(lambda i: f"_mc_con_{i}", ty) for ty in pat_con.arg_tys]
             return (pat_con.con, ids, self.matchc(ids + vs, ty, unshift_eqn([cast(XPatCon, p).args for p, _ in pat_eqns], eqns)))
 
         return self.mk_con_alts(v, ty, [_go_grp(con, list(xs)) for con, xs in groups])
@@ -218,7 +219,7 @@ class MatchC:
 
         def _map_res(t: tuple[list[tuple[Name, list[Id], CoreTm]], None | CoreTm]) -> CoreTm:
             alts, defa = t
-            return C.case_data(C.var(v), self.new_id(lambda i: f"_mc_con_scrut_v_{i}", ty), ty, alts, defa)
+            return C.case_data(C.var(v), self.name_gen.new_id(lambda i: f"_mc_con_scrut_v_{i}", ty), ty, alts, defa)
         return mr_map(mr_bundle2(mr_alts, mr_default), _map_res)
     
     def with_shared_error_handler(self, ty: Ty, mr: MatchResult) -> MatchResult:
@@ -234,17 +235,14 @@ class MatchC:
     def mk_unit_fun(self, ty_body: Ty, body: CoreTm) -> tuple[DsWrapper, CoreTm]:
         ty_unit = TyConApp(BUILTIN_UNIT, [])
         ty = TyFun(ty_unit, ty_body)
-        fun = C.lam(self.new_id(lambda i: f"_mc_eh_unit_{i}", ty_unit), body)
-        v_eh = self.new_id(lambda i: f"_mc_eh_{i}", ty)
+        fun = C.lam(self.name_gen.new_id(lambda i: f"_mc_eh_unit_{i}", ty_unit), body)
+        v_eh = self.name_gen.new_id(lambda i: f"_mc_eh_{i}", ty)
         unit = C.var(Id(BUILTIN_MK_UNIT, ty_unit))
         return (
             lambda c: C.let(v_eh, fun, c),
             C.app(C.var(v_eh), unit)
         )
 
-    def new_id(self, name: str | Callable[[int], str], ty: Ty) -> Id:
-        return Id(self.name_gen.new_name(name, None), ty)
-    
     def tycon_datacons(self, tycon_name: Name) -> list[ACon]:
         tycon = self.ctx.lookup_tycon(tycon_name)
         return tycon.constructors

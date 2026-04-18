@@ -269,6 +269,7 @@ def get_free_vars(tys: list[Ty]) -> list[TyVar]:
 def get_meta_vars(tys: list[Ty]) -> list[MetaTv]:
     def _meta_tv(ty: Ty) -> Generator[MetaTv, None, None]:
         match ty:
+            # after zonking, only unsolved meta vars remain, so we can just check for MetaTv
             case MetaTv() as m:
                 yield m
             case TyFun(arg, res):

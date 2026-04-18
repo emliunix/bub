@@ -140,7 +140,7 @@ class WrapperRunner:
         self.name_gen = name_gen
     
     def _make_uniq_var(self):
-        return self.name_gen.new_name(lambda i: f"$_gensym_{i}", None)
+        return self.name_gen.new_name(lambda i: f"_gensym_{i}", None)
 
     def run_wrapper(self, wp: Wrapper, term: CoreTm) -> CoreTm:
         """

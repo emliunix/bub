@@ -76,11 +76,13 @@ type TyCkRes = TyCk[CoreTm]
 
 
 class TcCtx(ABC):
+    mod_name: str
     uniq: Uniq
     type_env: TypeEnv
     tc_level: int
 
-    def __init__(self, uniq: Uniq):
+    def __init__(self, mod_name: str, uniq: Uniq):
+        self.mod_name = mod_name
         self.uniq = uniq
         self.type_env = {}
         self.tc_level = 0
@@ -139,15 +141,25 @@ class TcCtx(ABC):
         lvl = gv_lvl if gv_lvl is not None else self.tc_level
         return MetaTv(self.uniq.make_uniq(), lvl, Ref())
 
-    def make_skolem(self, name: Name, gv_lvl: int | None = None) -> SkolemTv:
+    def make_skolem(self, name: Name | Callable[[int], str], gv_lvl: int | None = None) -> SkolemTv:
         lvl = gv_lvl if gv_lvl is not None else self.tc_level
-        return SkolemTv(name, self.uniq.make_uniq(), lvl)
+        uniq = self.uniq.make_uniq()
+        if callable(name):
+            name = Name(self.mod_name, name(uniq), uniq, None)
+        return SkolemTv(name, uniq, lvl)
+
+    # --
+    # infer cell
+
+    def make_infer(self, gv_lvl: int | None = None) -> Infer:
+        lvl = gv_lvl if gv_lvl is not None else self.tc_level
+        return Infer(lvl, Ref())
 
 
 class Unifier(TcCtx, ABC):
 
-    def __init__(self, uniq: Uniq):
-        super().__init__(uniq)
+    def __init__(self, mod_name: str, uniq: Uniq):
+        super().__init__(mod_name, uniq)
 
     # ---
     # subsumption check
@@ -160,7 +172,7 @@ class Unifier(TcCtx, ABC):
         The wrapper is sigma1 ~~> sigma2.
         """
         with self.push_level():
-            sks, rho2, sks_wrap = self.skolemise(sigma2)  # rho2 ~~> sigma2
+            _, rho2, sks_wrap = self.skolemise(sigma2)  # rho2 ~~> sigma2
             subs_wrap = self.subs_check_rho(sigma1, rho2)  # sigma1 ~~> rho2
         # skolem var escape is not possible by construction with levels
         return wp_compose(sks_wrap, subs_wrap)
@@ -192,7 +204,7 @@ class Unifier(TcCtx, ABC):
     # ---
     # helpers
 
-    def skolemise_shallow(self, ty: Ty, gv_lvl: int | None) -> tuple[list[SkolemTv], Ty, Wrapper]:
+    def skolemise_shallow(self, ty: Ty, gv_lvl: int | None = None) -> tuple[list[SkolemTv], Ty, Wrapper]:
 
         def _split_foralls(ty: Ty) -> tuple[list[TyVar], Ty]:
             match ty:
@@ -264,7 +276,7 @@ class Unifier(TcCtx, ABC):
 
     def exp_to_ty(self, exp: Expect) -> Ty:
         match exp:
-            case Infer(ref):
+            case Infer(ref=ref):
                 if (ty := ref.get()) is not None:
                     return ty
                 mty = self.make_meta()
