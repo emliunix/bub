@@ -5,7 +5,7 @@ import itertools
 from typing import Callable, TypeVar, cast
 
 from systemf.elab3.builtins import BUILTIN_MK_UNIT, BUILTIN_UNIT
-from systemf.elab3.typecheck_expr import TcCtx
+from systemf.elab3.tc_ctx import TcCtx
 from systemf.elab3.types.tything import ACon
 from systemf.utils import unzip
 
@@ -13,7 +13,7 @@ from .types import NameGenerator
 from .types.ty import Id, Lit, Name, Ty, TyConApp, TyFun
 from .types.core import Alt, CoreTm, C, DataAlt, DefaultAlt, LitAlt
 from .types.wrapper import WrapperRunner
-from .typecheck_expr2 import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
+from .types.xpat import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
 
 
 T = TypeVar("T")
