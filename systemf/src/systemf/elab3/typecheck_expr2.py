@@ -69,6 +69,19 @@ type XPat = XPatCo | XPatLit | XPatCon | XPatVar | XPatWild
 type CB[R] = Callable[[], R]
 
 
+@dataclass
+class InstFunArg:
+    ty: Ty
+
+
+@dataclass
+class InstFunWrap:
+    wrap: Wrapper
+
+
+type InstFun = InstFunArg | InstFunWrap
+
+
 class TypeChecker(Unifier):
     ctx: REPLContext
     name_gen: NameGenerator
@@ -145,13 +158,26 @@ class TypeChecker(Unifier):
         """
         fun, args = self.split_app(expr)
         fun_ty, fun_c = self.run_infer(lambda inf: self.expr(fun, inf))
-        arg_tys, res_ty, w_fun = self.inst_fun(fun_ty, len(args))
-        arg_cs = [
-            self.poly_check_expr(arg, arg_ty)
-            for arg, arg_ty in zip(args, arg_tys)]
+        arg_insts, res_ty = self.inst_fun(fun_ty, len(args))
+
+        args_stack = list(reversed(args))
+        res = fun_c
+        def _mk_app_c(fun: TyCkRes, arg: TyCkRes) -> TyCkRes:
+            return lambda: C.app(fun(), arg())
+        # applies all insts
+        for inst in arg_insts:
+            match inst:
+                case InstFunArg(arg_ty):
+                    arg_c = self.poly_check_expr(args_stack.pop(), arg_ty)
+                    res = _mk_app_c(res, arg_c)
+                case InstFunWrap(wrap):
+                    res = self.with_wrapper(wrap, res)
+                case _: raise Exception("unreachable")
+        if args_stack:
+            raise Exception("arity mismatch in app")
+        # now res should be the app of function with all args, of sigma type
         res_w = self.inst(res_ty, exp)
-        app_c = lambda: functools.reduce(lambda f, a: C.app(f, a()), arg_cs, self.with_wrapper(w_fun, fun_c)())
-        return self.with_wrapper(res_w, app_c)
+        return self.with_wrapper(res_w, res)
 
     def let(self, bindings: list[Binding], body: Expr, exp: Expect) -> TyCkRes:
         def _body(bindings_tc: list[tuple[Id, TyCkRes]]) -> TyCkRes:
@@ -208,8 +234,7 @@ class TypeChecker(Unifier):
         def _core() -> CoreTm:
             eqns = [([p], cast(MatchResult, MRInfallible(rhs()))) for p, rhs in brs]
             mr = self.matchc.matchc([scr_id], scr_ty, eqns)
-            # FIX: case on the scrutinee, we need to modify the builder, it's current distinguishing data/lit case is wrong
-            return mr_run(mr, C.lit(LitInt(0)))  # FIX: dummy error handler
+            return C.let(scr_id, scr_c(), mr_run(mr, C.lit(LitInt(0))))  # FIX: dummy error handler
 
         return _core
 
@@ -356,37 +381,44 @@ class TypeChecker(Unifier):
                 ws: list[Wrapper] = []
                 arg_tys: list[Ty] = []
                 res_ty: Ty = ty
-                for _ in range(arity):
-                    w, arg_ty, res_ty = _check1(res_ty)
-                    ws.append(w)
-                    arg_tys.append(arg_ty)
-                return (
-                    functools.reduce(lambda acc, c: wp_compose(c, acc), reversed(ws), WP_HOLE),
-                    arg_tys,
-                    res_ty,
-                    cb(list(map(Check, arg_tys)), Check(res_ty))
-                )
+                # NOTE: do we need to push more levels, say 1 per check1
+                # GHC creates nested levels, investigate why
+                # COMMENT: let's treat it like deep skolemisation. nested levels are only needed
+                # when you have expressions in between, which causes unification
+                # or for a simplified theoritical model
+                with self.push_level():
+                    for _ in range(arity):
+                        w, arg_ty, res_ty = _check1(res_ty)
+                        ws.append(w)
+                        arg_tys.append(arg_ty)
+                    return (
+                        functools.reduce(lambda acc, c: wp_compose(c, acc), reversed(ws), WP_HOLE),
+                        arg_tys,
+                        res_ty,
+                        cb(list(map(Check, arg_tys)), Check(res_ty))
+                    )
             case _: raise Exception("unreachable")
 
-    def inst_fun(self, ty: Ty, arity: int) -> tuple[list[Ty], Ty, Wrapper]:
-        def _inst(ty: Ty, arity: int) -> Generator[Ty, None, tuple[Wrapper, Ty]]:
+    def inst_fun(self, ty: Ty, arity: int) -> tuple[list[InstFun], Ty]:
+        def _inst(ty: Ty, arity: int) -> Generator[InstFun, None, Ty]:
             match ty:
-                case TyForall():
-                    # FIX: skolemise or instantiate, needs to check
-                    ty2, w = self.instantiate(ty)
-                    w2, res_ty = yield from _inst(ty2, arity)
-                    return wp_compose(w, w2), res_ty
-                case TyFun(ty_arg, ty_res):
-                    yield ty_arg
-                    w2, res_ty = yield from _inst(ty_res, arity - 1)
-                    # FIX: should we wrapping with WpFun?
-                    return WpFun(w2), ty_res
                 case _ if arity == 0:
-                    return WP_HOLE, ty
+                    return ty
+                case TyForall():
+                    # kind of like inst infer rule inlined
+                    ty2, w = self.instantiate(ty)
+                    yield InstFunWrap(w)
+                    res_ty = yield from _inst(ty2, arity)
+                    return res_ty
+                case TyFun(ty_arg, res_ty):
+                    yield InstFunArg(ty_arg)
+                    res_ty2 = yield from _inst(res_ty, arity - 1)
+                    return res_ty2
                 case _:
                     raise Exception(f"Expected a function type, got {ty}")
-        arg_tys, (w, res_ty) = run_capture_return(_inst(zonk_type(ty), arity))
-        return arg_tys, res_ty, w
+        
+        insts, ty = run_capture_return(_inst(zonk_type(ty), arity))
+        return insts, ty
     
     # poly (GEN1, GEN2)
 

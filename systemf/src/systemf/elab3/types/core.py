@@ -171,19 +171,9 @@ class CoreBuilder:
     def letrec(self, bindings: list[tuple[Id, CoreTm]], body: CoreTm) -> CoreTm:
         return CoreLet(Rec(bindings), body)
 
-    def case_lit(self, scrut: CoreTm, v: Id, res_ty: Ty,
-                 alts: list[tuple[Lit, CoreTm]], default: CoreTm | None) -> CoreTm:
-        alts_ = [(cast(Alt, LitAlt(lit)), rhs)for lit, rhs in alts]
-        if default is not None:
-            alts_.append((DefaultAlt(), default))
-        return CoreCase(scrut, v, res_ty, alts_)
-
-    def case_data(self, scrut: CoreTm, v: Id, res_ty: Ty,
-                  alts: list[tuple[Name, list[Id], CoreTm]], default: CoreTm | None) -> CoreTm:
-        alts_ = [(cast(Alt, DataAlt(con, vars)), rhs) for con, vars, rhs in alts]
-        if default is not None:
-            alts_.append((DefaultAlt(), default))
-        return CoreCase(scrut, v, res_ty, alts_)
+    def case_expr(self, scrut: CoreTm, v: Id, res_ty: Ty,
+                  alts: list[tuple[Alt, CoreTm]]) -> CoreTm:
+        return CoreCase(scrut, v, res_ty, alts)
 
     def subst(self, substs: dict[Id, CoreTm], expr: CoreTm) -> CoreTm:
         return subst_coretm(substs, expr)

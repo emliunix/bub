@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import dataclass
 import functools
 import itertools
@@ -10,7 +11,7 @@ from systemf.utils import unzip
 
 from .types import NameGenerator
 from .types.ty import Id, Lit, Name, Ty, TyConApp, TyFun
-from .types.core import Alt, CoreTm, C, DataAlt
+from .types.core import Alt, CoreTm, C, DataAlt, DefaultAlt, LitAlt
 from .types.wrapper import WrapperRunner
 from .typecheck_expr2 import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
 
@@ -162,20 +163,31 @@ class MatchC:
                 case (XPatLit(lit), _):
                     return lit
                 case _: raise Exception("unreachable")
-            
-        groups = itertools.groupby(zip(col, eqns), _by_lit)
+        
+        groups = defaultdict(list)
+        lit_order = []
+        for t in zip(col, eqns):
+            lit = _by_lit(t)
+            if lit not in groups:
+                lit_order.append(lit)
+            groups[lit].append(t)
+        
         def _go_grp(pat_eqns: list[tuple[XPat, Equation]]):
             _, eqns = unzip(pat_eqns)
             return self.matchc(vs, ty, eqns)
 
-        return self.mk_lit_alts(v, ty, [(lit, _go_grp(list(xs))) for lit, xs in groups])
+        return self.mk_lit_alts(v, ty, [(lit, _go_grp(list(groups[lit]))) for lit in lit_order])
 
     def mk_lit_alts(self, v: Id, ty: Ty, xs: list[tuple[Lit, MatchResult]]) -> MatchResult:
         def _go(eh: CoreTm) -> CoreTm:
-            return C.case_lit(
-                C.var(v), self.name_gen.new_id(lambda i: f"_mc_litalts_s_{i}", v.ty), ty,
-                [(lit, mr_run(mr, eh)) for lit, mr in xs],
-                eh
+            alts: list[tuple[Alt, CoreTm]] = []
+            alts.extend((LitAlt(lit), mr_run(mr, eh)) for lit, mr in xs)
+            alts.append((DefaultAlt(), eh))
+            return C.case_expr(
+                C.var(v),
+                self.name_gen.new_id(lambda i: f"_mc_litalts_s_{i}", v.ty),
+                ty,
+                alts
             )
         return self.with_shared_error_handler(ty, MRFallible(_go))
 
@@ -187,7 +199,13 @@ class MatchC:
                 case _: raise Exception("unreachable")
 
         # FIX: we must not use groupby (local grouping) here
-        groups = itertools.groupby(zip(col, eqns), _by_con)
+        groups = defaultdict(list)
+        con_order = []
+        for t in zip(col, eqns):
+            con = _by_con(t)
+            if con not in groups:
+                con_order.append(con)
+            groups[con].append(t)
 
         def _go_grp(con: Name, pat_eqns: list[tuple[XPat, Equation]]) -> tuple[Name, list[Id], MatchResult]:
             _, eqns = unzip(pat_eqns)
@@ -195,7 +213,7 @@ class MatchC:
             ids = [self.name_gen.new_id(lambda i: f"_mc_con_{i}", ty) for ty in pat_con.arg_tys]
             return (pat_con.con, ids, self.matchc(ids + vs, ty, unshift_eqn([cast(XPatCon, p).args for p, _ in pat_eqns], eqns)))
 
-        return self.mk_con_alts(v, ty, [_go_grp(con, list(xs)) for con, xs in groups])
+        return self.mk_con_alts(v, ty, [_go_grp(con, list(groups[con])) for con in con_order])
 
     def mk_con_alts(self, v: Id, ty: Ty, xs: list[tuple[Name, list[Id], MatchResult]]) -> MatchResult:
         def _mk_alt1(con: Name, ids: list[Id], mr: MatchResult) -> MatchResult1[tuple[Name, list[Id], CoreTm]]:
@@ -219,7 +237,16 @@ class MatchC:
 
         def _map_res(t: tuple[list[tuple[Name, list[Id], CoreTm]], None | CoreTm]) -> CoreTm:
             alts, defa = t
-            return C.case_data(C.var(v), self.name_gen.new_id(lambda i: f"_mc_con_scrut_v_{i}", ty), ty, alts, defa)
+            alts_: list[tuple[Alt, CoreTm]] = []
+            alts_.extend((DataAlt(con, ids), core) for con, ids, core in alts)
+            if defa is not None:
+                alts_.append((DefaultAlt(), defa))
+            return C.case_expr(
+                C.var(v),
+                self.name_gen.new_id(lambda i: f"_mc_con_scrut_v_{i}", v.ty),
+                ty,
+                alts_
+            )
         return mr_map(mr_bundle2(mr_alts, mr_default), _map_res)
     
     def with_shared_error_handler(self, ty: Ty, mr: MatchResult) -> MatchResult:
