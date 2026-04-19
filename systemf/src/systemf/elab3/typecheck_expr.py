@@ -1,29 +1,24 @@
 
 import functools
-import itertools
 
-from abc import ABC, abstractmethod
-from contextlib import contextmanager
-from collections.abc import Generator, Sequence
+from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Callable, Generic, TypeVar, cast, override
+from typing import Callable, TypeVar, cast, override
 
-from systemf.utils import capture_return, run_capture_return
+from systemf.utils import run_capture_return
 
-from .types import ast, Name, NameGenerator, REPLContext
+from .types import Name, NameGenerator, REPLContext
 from .types.ast import Ann, AnnotName, App, Binding, Case, CaseBranch, Expr, Lam, Let, LitExpr, Pat, ConPat, Var, VarPat, LitPat, WildcardPat
 from .types.core import C, CoreTm
-from .types.tything import ACon, ATyCon, AnId, TyThing, TypeEnv
-from .types.wrapper import WP_HOLE, WpCast, WpFun, WpTyApp, WpTyLam, Wrapper, WrapperRunner, mk_wp_ty_lams, wp_compose, wp_fun, zonk_wrapper
-from .types.ty import BoundTv, Id, Lit, LitInt, MetaTv, Ref, SkolemTv, Ty, TyConApp, TyForall, TyFun, TyVar, get_free_vars, get_meta_vars, subst_ty, varnames, zonk_type
+from .types.tything import AnId, TyThing, TypeEnv
+from .types.wrapper import WP_HOLE, Wrapper, WrapperRunner, mk_wp_ty_lams, wp_compose, zonk_wrapper
+from .types.ty import Id, Lit, LitInt, MetaTv, Ty, TyConApp, TyForall, TyFun, TyVar, get_meta_vars, subst_ty, zonk_type
 from .types.xpat import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
 
-from .scc import SccGroup
 from .matchc import MRInfallible, MatchC, MatchResult, mr_run
 from .reader_env import ReaderEnv
-from .tc_ctx import Expect, Infer, Check, TyCkRes, Unifier, TcCtx
+from .tc_ctx import Expect, Infer, Check, TyCkRes, Unifier
 
-from systemf.utils.uniq import Uniq
 
 
 T = TypeVar("T")
