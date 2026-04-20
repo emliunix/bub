@@ -978,7 +978,7 @@ class BidiInference:
             Tuple of (core branch, result type)
         """
         # Look up constructor and validate pattern
-        constr_name = branch.pattern.constructor
+        constr_name = branch.pattern.patterns[0].name
         arg_types: list[Type] = []
 
         if constr_name in ctx.constructors:
@@ -1024,7 +1024,7 @@ class BidiInference:
             core_body, body_type = self.infer(branch.body, branch_ctx)
 
         core_branch = core.Branch(
-            pattern=core.Pattern(branch.pattern.constructor, pattern_var_names),
+            pattern=core.Pattern(branch.pattern.patterns[0].name, pattern_var_names),
             body=core_body,
         )
 
@@ -1049,7 +1049,7 @@ class BidiInference:
             The elaborated core branch
         """
         # Look up constructor and validate pattern
-        constr_name = branch.pattern.constructor
+        constr_name = branch.pattern.patterns[0].name
         arg_types: list[Type] = []
 
         if constr_name in ctx.constructors:
@@ -1091,7 +1091,7 @@ class BidiInference:
         core_body = self.check(branch.body, expected_result, branch_ctx)
 
         return core.Branch(
-            pattern=core.Pattern(branch.pattern.constructor, pattern_var_names),
+            pattern=core.Pattern(branch.pattern.patterns[0].name, pattern_var_names),
             body=core_body,
         )
 

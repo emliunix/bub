@@ -337,7 +337,7 @@ class TestToolCallIntegration:
         pytest.skip("Uses old elaborator API")
 
         source = """result : Int = @identity 42"""
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         module = elaborate(decls)
 
         evaluator = Evaluator()

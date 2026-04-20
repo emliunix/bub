@@ -83,6 +83,7 @@ from systemf.surface.types import (
     SurfaceIf,
     SurfaceLet,
     SurfaceLit,
+    SurfaceLitPattern,
     SurfaceOp,
     SurfacePattern,
     SurfacePatternBase,
@@ -772,14 +773,43 @@ def lambda_parser(constraint: ValidIndent) -> P[SurfaceAbs]:
 # =============================================================================
 
 
-def pattern_atom_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePatternCons]:
-    """Parse atomic patterns: identifier, tuple, or grouped pattern.
+def pattern_literal_parser() -> P[SurfaceLitPattern]:
+    """Parse a literal pattern: 42 or \"hello\".
+
+    Deterministic: literal tokens (NumberToken, StringToken) are disjoint
+    from IdentifierToken, so there's no ambiguity with variable patterns.
+
+    Returns:
+        SurfaceLitPattern with prim_type and value
+    """
+
+    @generate
+    def parser():
+        num_token = yield match_token(NumberToken).optional()
+        if num_token is not None:
+            return SurfaceLitPattern(
+                prim_type="Int", value=int(num_token.value), location=num_token.location
+            )
+
+        str_token = yield match_token(StringToken).optional()
+        if str_token is not None:
+            return SurfaceLitPattern(
+                prim_type="String", value=str_token.value, location=str_token.location
+            )
+
+        yield fail("expected literal pattern")
+
+    return parser
+
+
+def pattern_atom_parser() -> P[SurfacePatternBase]:
+    """Parse atomic patterns: identifier, literal, tuple, or grouped pattern.
 
     Used as constructor arguments or standalone patterns.
     Does NOT handle cons operator - that's done at higher level.
 
     Returns:
-        SurfacePattern, SurfacePatternTuple, or SurfacePatternCons (for grouped cons)
+        SurfacePattern, SurfacePatternTuple, SurfacePatternCons, or SurfaceLitPattern
     """
 
     @generate
@@ -797,6 +827,11 @@ def pattern_atom_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePat
             yield match_token(RightParenToken)
             return inner
 
+        # Try literal pattern (deterministic: NumberToken/StringToken are disjoint from IdentifierToken)
+        lit = yield pattern_literal_parser().optional()
+        if lit is not None:
+            return lit
+
         # Fall back to simple identifier - returns flat pattern structure
         name_token = yield match_token(IdentifierToken).optional()
         if name_token is None:
@@ -810,10 +845,11 @@ def pattern_atom_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePat
     return parser
 
 
-def pattern_base_parser() -> P[SurfacePattern]:
-    """Parse a base pattern (variable or constructor with pattern args).
+def pattern_base_parser() -> P[SurfacePatternBase]:
+    """Parse a base pattern: variable, constructor with args, or literal.
 
-    Returns a flat pattern list where all identifiers are SurfaceVarPattern.
+    Returns a flat pattern list where all identifiers are SurfaceVarPattern,
+    or a SurfaceLitPattern for literal patterns.
     The rename phase will disambiguate:
     - [VarPat("x")] -> single item: variable or nullary constructor
     - [VarPat("Cons"), VarPat("x"), ...] -> multiple items: constructor pattern
@@ -823,13 +859,19 @@ def pattern_base_parser() -> P[SurfacePattern]:
         Cons x xs           -> SurfacePattern(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
         Cons (x, y) zs      -> SurfacePattern(patterns=[VarPat("Cons"), tuple, VarPat("zs")])
         Pair (Cons x xs) y  -> SurfacePattern(patterns=[VarPat("Pair"), cons, VarPat("y")])
+        42                  -> SurfaceLitPattern(prim_type="Int", value=42)
 
     Returns:
-        SurfacePattern with flat pattern list
+        SurfacePattern or SurfaceLitPattern
     """
 
     @generate
     def parser():
+        # Try literal pattern first (deterministic: disjoint token types)
+        lit = yield pattern_literal_parser().optional()
+        if lit is not None:
+            return lit
+
         # Parse pattern name (constructor or variable)
         name_token = yield match_token(IdentifierToken).optional()
         if name_token is None:
@@ -838,7 +880,7 @@ def pattern_base_parser() -> P[SurfacePattern]:
         name = name_token.value
         loc = name_token.location
 
-        # Parse pattern arguments (atoms: identifiers, tuples, grouped patterns)
+        # Parse pattern arguments (atoms: identifiers, literals, tuples, grouped patterns)
         args: list[SurfacePatternBase] = []
         while True:
             # Try to parse an atomic pattern
@@ -892,7 +934,7 @@ def pattern_tuple_parser() -> P[SurfacePattern]:
     return parser
 
 
-def pattern_cons_parser() -> P[SurfacePattern | SurfacePatternCons]:
+def pattern_cons_parser() -> P[SurfacePatternBase]:
     """Parse a cons pattern: head : tail (right-associative).
 
     Examples:
@@ -939,7 +981,7 @@ def pattern_cons_parser() -> P[SurfacePattern | SurfacePatternCons]:
     return parser
 
 
-def pattern_parser() -> P[SurfacePattern | SurfacePatternTuple | SurfacePatternCons]:
+def pattern_parser() -> P[SurfacePatternBase]:
     """Parse a pattern: tuple, cons, constructor, or variable pattern.
 
     Returns:

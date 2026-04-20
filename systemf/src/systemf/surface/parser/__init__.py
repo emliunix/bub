@@ -124,6 +124,7 @@ from systemf.surface.parser.expressions import (
 from systemf.surface.parser.declarations import (
     decl_parser,
     top_decl_parser,
+    top_import_parser,
     data_parser,
     term_parser,
     prim_type_parser,
@@ -131,6 +132,8 @@ from systemf.surface.parser.declarations import (
     import_decl_parser,
     constr_parser,
     match_ident,
+    consolidate,
+    RawDecl,
 )
 
 # Re-export type parser
@@ -138,11 +141,12 @@ from systemf.surface.parser.type_parser import type_parser
 
 
 # Convenience function for parsing expressions
-def parse_expression(source: str):
+def parse_expression(source: str, filename: str = "<stdin>"):
     """Parse an expression from source code.
 
     Args:
         source: The source code string to parse
+        filename: Optional filename for error reporting
 
     Returns:
         The parsed surface term
@@ -152,15 +156,19 @@ def parse_expression(source: str):
     """
     from parsy import eof
 
-    tokens = list(lex(source))
-    return (expressions.expr_parser(AnyIndent()) << eof).parse(tokens)
+    tokens = list(lex(source, filename))
+    try:
+        return (expressions.expr_parser(AnyIndent()) << eof).parse(tokens)
+    except Exception as e:
+        raise _extract_parse_error(e, tokens)
 
 
-def parse_declaration(source: str):
+def parse_declaration(source: str, filename: str = "<stdin>"):
     """Parse a declaration from source code.
 
     Args:
         source: The source code string to parse
+        filename: Optional filename for error reporting
 
     Returns:
         The parsed surface declaration
@@ -170,15 +178,19 @@ def parse_declaration(source: str):
     """
     from parsy import eof
 
-    tokens = list(lex(source))
-    return (declarations.decl_parser() << eof).parse(tokens)
+    tokens = list(lex(source, filename))
+    try:
+        return (declarations.decl_parser() << eof).parse(tokens)
+    except Exception as e:
+        raise _extract_parse_error(e, tokens)
 
 
-def parse_type(source: str):
+def parse_type(source: str, filename: str = "<stdin>"):
     """Parse a type from source code.
 
     Args:
         source: The source code string to parse
+        filename: Optional filename for error reporting
 
     Returns:
         The parsed surface type
@@ -186,30 +198,47 @@ def parse_type(source: str):
     Raises:
         ParseError: If parsing fails
     """
-    tokens = list(lex(source))
-    return (type_parser() << eof).parse(tokens)
+    tokens = list(lex(source, filename))
+    try:
+        return (type_parser() << eof).parse(tokens)
+    except Exception as e:
+        raise _extract_parse_error(e, tokens)
 
 
-def parse_program(source: str, filename: str = "<stdin>") -> list:
+def parse_program(source: str, filename: str = "<stdin>") -> tuple[
+    list[SurfaceImportDeclaration],
+    list[SurfaceDeclaration],
+]:
     """Parse a complete program from source code.
 
-    Convenience function that lexes and parses source code into a list
-    of surface declarations.
+    Parses imports first, then non-import declarations.
+    Returns a tuple of (imports, declarations).
 
     Args:
         source: The source code string to parse
         filename: Optional filename for error reporting
 
     Returns:
-        List of parsed surface declarations
+        Tuple of (list of import declarations, list of other declarations)
 
     Raises:
         ParseError: If parsing fails
     """
+    from systemf.surface.parser.types import ImportToken
+
     tokens = list(lex(source, filename))
     try:
-        result = top_decl_parser().parse(tokens)
-        return result if isinstance(result, list) else [result]
+        imports, rest = top_import_parser().parse_partial(tokens)
+        raw_decls, remainder = top_decl_parser().parse_partial(rest)
+        decls = consolidate(raw_decls)
+
+        # Preserve import ordering error from change #18
+        for token in remainder:
+            if isinstance(token, ImportToken):
+                loc = getattr(token, "location", None)
+                raise ParseError("import declarations must appear before other declarations", loc)
+
+        return imports, decls
     except Exception as e:
         raise _extract_parse_error(e, tokens)
 
@@ -237,67 +266,6 @@ def _extract_parse_error(e: Exception, tokens: list) -> ParseError:
         loc = getattr(tokens[idx], "location", None)
     return ParseError(str(e), loc)
 
-
-class Parser:
-    """Parser wrapper for parsing token streams.
-
-    Provides:
-    - Parser(tokens) - initialize with token list
-    - parse() - parse declarations
-    - parse_expression() - parse a single expression
-    - parse_type() - parse a single type
-    """
-
-    def __init__(self, tokens: list):
-        """Initialize parser with token list.
-
-        Args:
-            tokens: List of tokens from lexer
-        """
-        self.tokens = tokens
-
-    def parse(self):
-        """Parse token stream into declarations.
-
-        Returns:
-            List of parsed surface declarations
-
-        Raises:
-            ParseError: If parsing fails
-        """
-        try:
-            result = top_decl_parser().parse(self.tokens)
-            return result if isinstance(result, list) else [result]
-        except Exception as e:
-            raise _extract_parse_error(e, self.tokens)
-
-    def parse_expression(self):
-        """Parse a single expression.
-
-        Returns:
-            Parsed surface expression
-
-        Raises:
-            ParseError: If parsing fails
-        """
-        try:
-            return (expr_parser(AnyIndent()) << eof).parse(self.tokens)
-        except Exception as e:
-            raise _extract_parse_error(e, self.tokens)
-
-    def parse_type(self):
-        """Parse a single type.
-
-        Returns:
-            Parsed surface type
-
-        Raises:
-            ParseError: If parsing fails
-        """
-        try:
-            return (type_parser() << eof).parse(self.tokens)
-        except Exception as e:
-            raise _extract_parse_error(e, self.tokens)
 
 
 __all__ = [
@@ -372,6 +340,7 @@ __all__ = [
     # Declaration parsers
     "decl_parser",
     "top_decl_parser",
+    "top_import_parser",
     "data_parser",
     "term_parser",
     "prim_type_parser",
@@ -380,6 +349,8 @@ __all__ = [
     "type_parser",
     "constr_parser",
     "match_ident",
+    "consolidate",
+    "RawDecl",
     # Convenience functions
     "parse_expression",
     "parse_declaration",

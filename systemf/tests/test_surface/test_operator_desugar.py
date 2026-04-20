@@ -247,7 +247,7 @@ class TestDesugarInContext:
         from systemf.surface.parser import parse_program
 
         source = """sum :: Int = 1 + 2"""
-        decls = parse_program(source)
+        _, decls = parse_program(source)
 
         # The body should be the operator expression
         body = decls[0].body

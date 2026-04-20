@@ -24,7 +24,7 @@ class TestDeclarationScopedTypeVars:
         source = """
 id :: forall a. a -> a = \\x -> (x :: a)
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -39,7 +39,7 @@ f :: forall a. a -> a = \\x ->
   let y = (x :: a)
   in y
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -52,7 +52,7 @@ id :: forall a. a -> a = \\x -> x
 
 f :: forall b. b -> b = \\x -> id @b x
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -63,7 +63,7 @@ f :: forall b. b -> b = \\x -> id @b x
         source = """
 const :: forall a b. a -> b -> a = \\x y -> (x :: a)
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -75,7 +75,7 @@ const :: forall a b. a -> b -> a = \\x y -> (x :: a)
 -- 'b' is not bound by the declaration
 f :: forall a. a -> a = \\x -> (x :: b)
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -91,7 +91,7 @@ class TestAnnotationScopedTypeVars:
 -- The annotation forall a. a -> a binds 'a' in \\x -> x
 f :: Int -> Int = \\x -> ((\\y -> y) :: forall a. a -> a) x
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -103,7 +103,7 @@ f :: Int -> Int = \\x -> ((\\y -> y) :: forall a. a -> a) x
 f :: Int -> Int = \\x -> 
   ( (\\y -> (y :: forall b. b -> b) 42) :: forall a. a -> a ) x
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -118,7 +118,7 @@ class TestLambdaParamScopedTypeVars:
         source = """
 usePoly :: (forall a. a -> a) -> Int = \\(f :: forall a. a -> a) -> f 42
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -129,7 +129,7 @@ usePoly :: (forall a. a -> a) -> Int = \\(f :: forall a. a -> a) -> f 42
         source = """
 usePoly :: (forall a. a -> a) -> Int = \\(f :: forall a. a -> a) -> f @Int 42
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -141,7 +141,7 @@ usePoly :: (forall a. a -> a) -> Int = \\(f :: forall a. a -> a) -> f @Int 42
 applyToPoly :: (forall a. a -> a) -> Int -> Int = \\
   (f :: forall a. a -> a) (x :: Int) -> f @Int x
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -159,7 +159,7 @@ data PolyBox = PolyBox (forall a. a -> a)
 useBox :: PolyBox -> Int = \\
   (PolyBox f) -> f 42
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -173,7 +173,7 @@ data PolyBox = PolyBox (forall a. a -> a)
 useBox :: PolyBox -> (Int, Bool) = \\
   (PolyBox f) -> (f @Int 42, f @Bool True)
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -195,7 +195,7 @@ useId :: PolyBox -> Int = \\
     let g = \\(h :: forall b. b -> b) -> h @Int 42
     in g f
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -211,7 +211,7 @@ outer :: Int -> Int = \\x ->
   where
     id :: forall a. a -> a = \\y -> y
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -235,7 +235,7 @@ class TestScopedTypeVarsEdgeCases:
 f :: forall a. a -> (forall a. a -> a) = \\
   (x :: a) (f :: forall a. a -> a) -> f x
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 
@@ -251,7 +251,7 @@ f :: Int -> Int = \\x ->
       z = y  -- 'a' not available here
   in z
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         pipeline = Pipeline(module_name="test")
         result = pipeline.run(decls)
 

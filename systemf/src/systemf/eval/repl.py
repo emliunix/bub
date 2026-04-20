@@ -15,8 +15,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from systemf.surface.parser import Lexer
-from systemf.surface.parser import Parser, ParseError
+from systemf.surface.parser import ParseError, parse_expression, parse_program
 from systemf.surface.pipeline import ElaborationPipeline, PipelineResult
 from systemf.surface.scoped.context import ScopeContext
 from systemf.surface.inference.context import TypeContext
@@ -141,8 +140,7 @@ class REPL:
                 return LoadResult(success=True, count=0)
 
             # Files should contain full declarations only
-            tokens = Lexer(source, filename=str(filepath)).tokenize()
-            surface_decls = Parser(tokens).parse()
+            _, surface_decls = parse_program(source, filename=str(filepath))
 
             # Use the new pipeline for elaboration
             result = self.pipeline.run(
@@ -219,8 +217,7 @@ class REPL:
 
         # Try parsing as expression first
         try:
-            tokens = Lexer(source, filename=filename).tokenize()
-            surface_term = Parser(tokens).parse_expression()
+            surface_term = parse_expression(source, filename=filename)
 
             # Success - wrap as declaration `it : _ = <expr>`
             loc = Location(line=1, column=1, file=filename)
@@ -236,8 +233,8 @@ class REPL:
             pass
 
         # Try parsing as declarations
-        tokens = Lexer(source, filename=filename).tokenize()
-        return Parser(tokens).parse()
+        _, decls = parse_program(source, filename=filename)
+        return decls
 
     def _load_prelude(self) -> None:
         """Load the prelude file if it exists."""
@@ -406,11 +403,9 @@ class REPL:
         First tries to parse as declarations, then falls back to expressions.
         """
         try:
-            tokens = Lexer(source).tokenize()
-
             # Try parsing as declarations first
             try:
-                surface_decls = Parser(tokens).parse()
+                _, surface_decls = parse_program(source)
 
                 # If no declarations parsed, treat as expression
                 if not surface_decls:
@@ -465,9 +460,7 @@ class REPL:
 
             except ParseError:
                 # If declaration parsing fails, try as expression
-                # Re-tokenize for expression parsing
-                tokens = Lexer(source).tokenize()
-                surface_term = Parser(tokens).parse_expression()
+                surface_term = parse_expression(source)
 
                 # For expressions, we need to create a temporary declaration
                 # and run it through the pipeline (desugaring happens in pipeline)

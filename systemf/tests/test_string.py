@@ -14,7 +14,7 @@ from systemf.eval.machine import Evaluator
 from systemf.eval.value import VPrim
 from systemf.surface.pipeline import elaborate_module
 from systemf.surface.parser import lex
-from systemf.surface.parser import Parser, parse_expression
+from systemf.surface.parser import parse_expression
 from systemf.surface.parser.types import StringToken
 
 
@@ -73,8 +73,7 @@ class TestStringElaboration:
         """Elaborate string literal to core Lit."""
         source = 'x = "hello"'
 
-        tokens = lex(source)
-        surface_decls = Parser(tokens).parse()
+        _, surface_decls = parse_program(source)
         module = elaborate(surface_decls)
 
         assert len(module.declarations) == 1
@@ -88,8 +87,7 @@ class TestStringElaboration:
         msg = "hello"
         """
 
-        tokens = lex(source)
-        surface_decls = Parser(tokens).parse()
+        _, surface_decls = parse_program(source)
         module = elaborate(surface_decls)
 
         assert len(module.declarations) == 1
@@ -124,8 +122,7 @@ class TestStringTypeChecking:
         msg = "hello"
         """
 
-        tokens = lex(source)
-        surface_decls = Parser(tokens).parse()
+        _, surface_decls = parse_program(source)
         module = elaborate(surface_decls)
 
         checker = TypeChecker(primitive_types={"String": PrimitiveType("String")})
@@ -249,8 +246,7 @@ class TestStringFullPipeline:
         """
 
         # Parse
-        tokens = lex(source)
-        surface_decls = Parser(tokens).parse()
+        _, surface_decls = parse_program(source)
 
         # Elaborate
         module = elaborate(surface_decls)
@@ -321,8 +317,7 @@ class TestStringFullPipeline:
         third = "third"
         """
 
-        tokens = lex(source)
-        surface_decls = Parser(tokens).parse()
+        _, surface_decls = parse_program(source)
         module = elaborate(surface_decls)
 
         checker = TypeChecker(primitive_types={"String": PrimitiveType("String")})
@@ -344,8 +339,7 @@ class TestStringFullPipeline:
         msg = "hello\tworld\nline2"
         """
 
-        tokens = lex(source)
-        surface_decls = Parser(tokens).parse()
+        _, surface_decls = parse_program(source)
         module = elaborate(surface_decls)
 
         evaluator = Evaluator()
@@ -365,8 +359,7 @@ class TestStringErrorCases:
         source = '"hello'
 
         with pytest.raises(Exception):
-            tokens = lex(source)
-            Parser(tokens).parse_expression()
+            parse_expression(source)
 
     def test_string_concat_with_wrong_types(self):
         """String concat should fail with wrong argument types."""

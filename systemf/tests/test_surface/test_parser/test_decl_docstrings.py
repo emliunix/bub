@@ -12,6 +12,7 @@ from systemf.surface.parser import (
     prim_type_parser,
     prim_op_parser,
     lex,
+    parse_program,
 )
 from systemf.surface.types import (
     SurfaceDataDeclaration,
@@ -210,13 +211,8 @@ one :: Int = 1
 
 -- | Second declaration
 two :: Int = 2"""
-        tokens = lex(source)
 
-        # Use decl_parser to parse multiple declarations
-        from systemf.surface.parser import Parser
-
-        parser = Parser(tokens)
-        decls = parser.parse()
+        _, decls = parse_program(source)
 
         assert len(decls) == 2
         assert decls[0].docstring == "First declaration"

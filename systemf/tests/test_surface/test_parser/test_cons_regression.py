@@ -19,6 +19,7 @@ from systemf.surface.types import (
     SurfacePattern,
     SurfacePatternCons,
     SurfacePatternTuple,
+    SurfaceVarPattern,
 )
 
 
@@ -48,7 +49,7 @@ class TestTypeAnnotationRegression:
         instead of cons expressions.
         """
         source = "lst :: List Int = 1 : 2 : Nil"
-        result = parse_program(source)
+        _, result = parse_program(source)
         assert len(result) == 1
         body = result[0].body
         # Should be cons expression, not type annotation
@@ -84,7 +85,7 @@ class TestConsExpressionRegression:
     def test_simple_cons(self):
         """Simple cons: 1 : Nil"""
         source = "lst :: List Int = 1 : Nil"
-        result = parse_program(source)
+        _, result = parse_program(source)
         body = result[0].body
         assert isinstance(body, SurfaceOp)
         assert body.op == ":"
@@ -94,7 +95,7 @@ class TestConsExpressionRegression:
         from systemf.surface.types import SurfaceLit
 
         source = "lst :: List Int = 1 : 2 : Nil"
-        result = parse_program(source)
+        _, result = parse_program(source)
         body = result[0].body
         # Should be 1 : (2 : Nil), not (1 : 2) : Nil
         assert isinstance(body, SurfaceOp)
@@ -146,7 +147,7 @@ class TestGroupedPatternRegression:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         # Should be equivalent to just 'x'
-        assert result.branches[0].pattern.constructor == "x"
+        assert result.branches[0].pattern.patterns[0].name == "x"
 
     def test_grouped_constructor(self):
         """Grouped constructor: (Cons x xs)"""
@@ -159,8 +160,8 @@ class TestGroupedPatternRegression:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         pattern = result.branches[0].pattern
-        assert pattern.constructor == "Cons"
-        var_constructors = [v.constructor for v in pattern.vars if isinstance(v, SurfacePattern)]
+        assert pattern.patterns[0].name == "Cons"
+        var_constructors = [v.patterns[0].name for v in pattern.patterns[1:] if isinstance(v, SurfacePattern)]
         assert "x" in var_constructors
         assert "xs" in var_constructors
 
@@ -200,9 +201,9 @@ class TestConstructorPatternArgs:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         pattern = result.branches[0].pattern
-        assert pattern.constructor == "Pair"
+        assert pattern.patterns[0].name == "Pair"
         # Should have 2 args
-        assert len(pattern.vars) == 2
+        assert len(pattern.patterns[1:]) == 2
 
     def test_constructor_with_grouped_cons_arg(self):
         """Constructor with grouped cons arg: Cons (x : xs) ys"""
@@ -213,7 +214,7 @@ class TestConstructorPatternArgs:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         pattern = result.branches[0].pattern
-        assert pattern.constructor == "Cons"
+        assert pattern.patterns[0].name == "Cons"
 
 
 class TestDeclarationBoundaryRegression:
@@ -227,7 +228,7 @@ class TestDeclarationBoundaryRegression:
         """
         source = """lst :: List Int = 1 : 2 : Nil
 next :: Int = 42"""
-        result = parse_program(source)
+        _, result = parse_program(source)
         assert len(result) == 2
         assert result[0].name == "lst"
         assert result[1].name == "next"

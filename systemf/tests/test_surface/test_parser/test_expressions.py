@@ -210,8 +210,8 @@ class TestCaseParser:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         assert len(result.branches) == 2
-        assert result.branches[0].pattern.constructor == "True"
-        assert result.branches[1].pattern.constructor == "False"
+        assert result.branches[0].pattern.patterns[0].name == "True"
+        assert result.branches[1].pattern.patterns[0].name == "False"
 
     def test_case_with_braces_multiple_patterns(self):
         """Parse case with braces and multiple patterns."""
@@ -263,7 +263,7 @@ class TestCaseParser:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         # Grouped pattern should be equivalent to just 'x'
-        assert result.branches[0].pattern.constructor == "x"
+        assert result.branches[0].pattern.patterns[0].name == "x"
 
     def test_case_with_grouped_cons(self):
         """Parse case with grouped cons pattern: (x : xs)."""
@@ -370,13 +370,103 @@ class TestCaseParser:
         assert len(layout_result.branches) == len(braces_result.branches) == 2
         # Branch patterns should be equivalent (check constructor name)
         assert (
-            layout_result.branches[0].pattern.constructor
-            == braces_result.branches[0].pattern.constructor
+            layout_result.branches[0].pattern.patterns[0].name
+            == braces_result.branches[0].pattern.patterns[0].name
         )
         assert (
-            layout_result.branches[1].pattern.constructor
-            == braces_result.branches[1].pattern.constructor
+            layout_result.branches[1].pattern.patterns[0].name
+            == braces_result.branches[1].pattern.patterns[0].name
         )
+
+
+class TestLiteralPattern:
+    """Test literal pattern parsing in case expressions."""
+
+    def test_multiple_literal_branches(self):
+        """Parse case with multiple int literal branches."""
+        source = """case x of
+  0 → 1
+  1 → 2"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="x"),
+            branches=[
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="Int", value=0), body=SurfaceLit(prim_type="Int", value=1)),
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="Int", value=1), body=SurfaceLit(prim_type="Int", value=2)),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_string_literal_pattern(self):
+        """Parse case with string literal pattern."""
+        source = """case s of
+  "hello" → 0
+  other → 1"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="s"),
+            branches=[
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="String", value="hello"), body=SurfaceLit(prim_type="Int", value=0)),
+                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="other")]), body=SurfaceLit(prim_type="Int", value=1)),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_constructor_with_literal_arg(self):
+        """Parse case with constructor taking literal arg: Cons 0 xs."""
+        source = """case xs of
+  Cons 0 rest → rest
+  Nil → Nil"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePattern(patterns=[
+                        SurfaceVarPattern(name="Cons"),
+                        SurfaceLitPattern(prim_type="Int", value=0),
+                        SurfacePattern(patterns=[SurfaceVarPattern(name="rest")]),
+                    ]),
+                    body=SurfaceVar(name="rest"),
+                ),
+                SurfaceBranch(
+                    pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="Nil")]),
+                    body=SurfaceVar(name="Nil"),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_multiple_literal_braces(self):
+        """Parse case with multiple int literal branches in braces."""
+        source = "case x of { 0 → 1 | 1 → 2 }"
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="x"),
+            branches=[
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="Int", value=0), body=SurfaceLit(prim_type="Int", value=1)),
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="Int", value=1), body=SurfaceLit(prim_type="Int", value=2)),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_string_literal_braces(self):
+        """Parse case with string literal pattern in braces."""
+        source = 'case s of { "hello" → 0 | other → 1 }'
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="s"),
+            branches=[
+                SurfaceBranch(pattern=SurfaceLitPattern(prim_type="String", value="hello"), body=SurfaceLit(prim_type="Int", value=0)),
+                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="other")]), body=SurfaceLit(prim_type="Int", value=1)),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
 
 class TestLetParser:

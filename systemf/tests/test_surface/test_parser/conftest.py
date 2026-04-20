@@ -171,36 +171,30 @@ data Maybe a = Nothing | Just a
 
 data List a = Nil | Cons a (List a)
 
-id :: forall a. a -> a
-id = λx -> x
+id :: forall a. a -> a = λx -> x
 
-const :: forall a b. a -> b -> a
-const = λx y -> x
+const :: forall a b. a -> b -> a = λx y -> x
 
-fromMaybe :: forall a. a -> Maybe a -> a
-fromMaybe = λdefault ma ->
+fromMaybe :: forall a. a -> Maybe a -> a = λdefault ma ->
   case ma of
     Nothing -> default
     Just x -> x
 
-length :: forall a. List a -> Int
-length = λxs ->
-  let
-    go :: forall a. Int -> List a -> Int
-    go acc ys = case ys of
-      Nil -> acc
-      Cons z zs -> go (acc + 1) zs
-  in go 0 xs
+length :: forall a. List a -> Int =
+  λxs ->
+    let
+      go acc ys = case ys of
+        Nil -> acc
+        Cons z zs -> go (acc + 1) zs
+    in go 0 xs
 
-factorial :: Int -> Int
-factorial = λn ->
+factorial :: Int -> Int = λn ->
   case n of
     0 -> 1
     m -> m * factorial (m - 1)
 
- greet :: String -> String
- greet = λname ->
-   case name of
-     "world" -> "hello world"
-     other -> "hello " ++ other
+greet :: String -> String = λname ->
+  case name of
+    "world" -> "hello world"
+    other -> "hello " ++ other
 """

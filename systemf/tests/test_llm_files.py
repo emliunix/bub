@@ -26,7 +26,7 @@ LLM_EXAMPLE_FILES = [
 def load_primitive_types() -> PipelineResult:
     """Load minimal primitive types for testing."""
     source = "prim_type String\nprim_type Int"
-    decls = parse_program(source)
+    _, decls = parse_program(source)
     return elaborate_module(decls, module_name="test")
 
 
@@ -43,7 +43,7 @@ def test_parse_llm_file(filename: str, test_data_dir: Path) -> None:
     source = filepath.read_text()
 
     # Parse
-    decls = parse_program(source)
+    _, decls = parse_program(source)
 
     # Verify we got some declarations
     assert len(decls) > 0, f"Expected at least one declaration in {filename}"
@@ -61,7 +61,7 @@ def test_elaborate_llm_file(filename: str, test_data_dir: Path) -> None:
     source = filepath.read_text()
 
     # Parse and elaborate (with primitive types loaded)
-    decls = parse_program(source)
+    _, decls = parse_program(source)
     prim_result = load_primitive_types()
     result = elaborate_module(
         decls, module_name="test", constructors=prim_result.module.constructor_types
@@ -98,7 +98,7 @@ def test_llm_examples_content(test_data_dir: Path) -> None:
     filepath = test_data_dir / "llm_examples.sf"
     source = filepath.read_text()
 
-    decls = parse_program(source)
+    _, decls = parse_program(source)
     prim_result = load_primitive_types()
     result = elaborate_module(
         decls, module_name="test", constructors=prim_result.module.constructor_types
@@ -144,7 +144,7 @@ def test_llm_multiparam_content(test_data_dir: Path) -> None:
     filepath = test_data_dir / "llm_multiparam.sf"
     source = filepath.read_text()
 
-    decls = parse_program(source)
+    _, decls = parse_program(source)
     prim_result = load_primitive_types()
     result = elaborate_module(
         decls, module_name="test", constructors=prim_result.module.constructor_types

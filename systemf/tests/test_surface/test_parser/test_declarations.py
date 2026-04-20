@@ -428,7 +428,7 @@ class TestImportDeclaration:
         tokens = lex("import List as L")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="List", alias="L")
+        expected = SurfaceImportDeclaration(module="List", alias="L", items=None)
         assert equals_ignore_location(result, expected)
 
     def test_qualified_aliased_import(self):
@@ -436,7 +436,7 @@ class TestImportDeclaration:
         tokens = lex("import qualified List as L")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="List", qualified=True, alias="L")
+        expected = SurfaceImportDeclaration(module="List", qualified=True, alias="L", items=None)
         assert equals_ignore_location(result, expected)
 
     def test_explicit_items(self):
@@ -444,7 +444,7 @@ class TestImportDeclaration:
         tokens = lex("import List (map, filter)")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="List", items=["map", "filter"])
+        expected = SurfaceImportDeclaration(module="List", alias=None, items=["map", "filter"])
         assert equals_ignore_location(result, expected)
 
     def test_hiding_items(self):
@@ -452,7 +452,7 @@ class TestImportDeclaration:
         tokens = lex("import List hiding (internal)")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="List", items=["internal"], hiding=True)
+        expected = SurfaceImportDeclaration(module="List", alias=None, items=["internal"], hiding=True)
         assert equals_ignore_location(result, expected)
 
     def test_empty_explicit_items(self):
@@ -460,7 +460,7 @@ class TestImportDeclaration:
         tokens = lex("import List ()")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="List", items=[])
+        expected = SurfaceImportDeclaration(module="List", alias=None, items=[])
         assert equals_ignore_location(result, expected)
 
     def test_empty_hiding_items(self):
@@ -468,7 +468,7 @@ class TestImportDeclaration:
         tokens = lex("import List hiding ()")
         result = import_decl_parser().parse(tokens)
         assert isinstance(result, SurfaceImportDeclaration)
-        expected = SurfaceImportDeclaration(module="List", items=[], hiding=True)
+        expected = SurfaceImportDeclaration(module="List", alias=None, items=[], hiding=True)
         assert equals_ignore_location(result, expected)
 
 

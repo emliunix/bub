@@ -224,7 +224,7 @@ class TestDeclScope:
 
         code = "id :: forall a. a -> a = \\x -> (x :: a)"
 
-        decls = parse_program(code)
+        _, decls = parse_program(code)
         result = elaborate_module(decls)
 
         assert result.success, f"Expected compilation to succeed, got errors: {result.errors}"
@@ -236,7 +236,7 @@ class TestDeclScope:
 
         code = "const :: forall a b. a -> b -> a = \\x y -> (x :: a)"
 
-        decls = parse_program(code)
+        _, decls = parse_program(code)
         result = elaborate_module(decls)
 
         assert result.success, f"Expected compilation to succeed, got errors: {result.errors}"

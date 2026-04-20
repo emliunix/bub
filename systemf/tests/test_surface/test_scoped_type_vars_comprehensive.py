@@ -13,7 +13,7 @@ class TestBasicDeclScope:
         source = """
 id :: forall a. a -> a = \\x -> (x :: a)
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_ok(), f"Failed: {result.unwrap_err()}"
 
@@ -23,7 +23,7 @@ id :: forall a. a -> a = \\x -> (x :: a)
 f :: forall a. a -> a = \\x ->
   let y = (x :: a) in y
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_ok()
 
@@ -36,7 +36,7 @@ class TestMultiVarDeclScope:
         source = """
 const :: forall a b. a -> b -> a = \\x y -> (x :: a)
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_ok()
 
@@ -50,7 +50,7 @@ class TestDeclScopeErrors:
         source = """
 f :: forall a. a -> a = \\x -> (x :: b)
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_err()
 
@@ -64,7 +64,7 @@ class TestLamAnnScope:
 usePoly :: (forall a. a -> a) -> Int =
   \\(f :: forall a. a -> a) -> f 42
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_ok()
 
@@ -74,7 +74,7 @@ usePoly :: (forall a. a -> a) -> Int =
 usePoly :: (forall a. a -> a) -> Int =
   \\(f :: forall a. a -> a) -> f @Int 42
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_ok()
 
@@ -91,7 +91,7 @@ useBox :: PolyBox -> Int =
   \\pb -> case pb of
     PolyBox f -> f 42
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_ok()
 
@@ -112,6 +112,6 @@ useId :: PolyBox -> Int =
       let g = \\(h :: forall b. b -> b) -> h @Int 42
       in g f
 """
-        decls = parse_program(source)
+        _, decls = parse_program(source)
         result = run_pipeline(decls, module_name="test")
         assert result.is_ok()

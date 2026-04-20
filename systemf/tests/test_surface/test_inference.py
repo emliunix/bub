@@ -60,6 +60,7 @@ from systemf.surface.inference.errors import (
     TypeMismatchError,
     UnificationError,
 )
+from systemf.surface.parser import parse_program
 from systemf.utils.location import Location
 
 
@@ -1007,7 +1008,6 @@ class TestPolymorphicConstructors:
 
     def test_basic_constructor_usage(self):
         """Simple constructor application should work."""
-        from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import elaborate_module
 
         source = """
@@ -1015,8 +1015,7 @@ class TestPolymorphicConstructors:
         x :: Maybe Int = Just 42
         """
 
-        tokens = Lexer(source).tokenize()
-        decls = Parser(tokens).parse()
+        _, decls = parse_program(source)
         result = elaborate_module(decls, module_name="test")
 
         assert result.success, f"Elaboration failed: {result.errors}"
@@ -1024,7 +1023,6 @@ class TestPolymorphicConstructors:
 
     def test_pattern_matching_same_type(self):
         """Pattern matching without type transformation."""
-        from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import elaborate_module
 
         source = """
@@ -1034,15 +1032,13 @@ class TestPolymorphicConstructors:
           case m of { Nothing → Nothing | Just x → Just x }
         """
 
-        tokens = Lexer(source).tokenize()
-        decls = Parser(tokens).parse()
+        _, decls = parse_program(source)
         result = elaborate_module(decls, module_name="test")
 
         assert result.success, f"Elaboration failed: {result.errors}"
 
     def test_pattern_matching_type_abstraction_same(self):
         """Pattern matching with type abstraction (same type)."""
-        from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import elaborate_module
 
         source = """
@@ -1052,15 +1048,13 @@ class TestPolymorphicConstructors:
           case m of { Nothing → Nothing | Just x → Just x }
         """
 
-        tokens = Lexer(source).tokenize()
-        decls = Parser(tokens).parse()
+        _, decls = parse_program(source)
         result = elaborate_module(decls, module_name="test")
 
         assert result.success, f"Elaboration failed: {result.errors}"
 
     def test_mapMaybe_without_transformation(self):
         """mapMaybe returning Nothing (no transformation)."""
-        from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import elaborate_module
 
         source = """
@@ -1071,8 +1065,7 @@ class TestPolymorphicConstructors:
             case m of { Nothing → Nothing | Just x → Nothing }
         """
 
-        tokens = Lexer(source).tokenize()
-        decls = Parser(tokens).parse()
+        _, decls = parse_program(source)
         result = elaborate_module(decls, module_name="test")
 
         assert result.success, f"Elaboration failed: {result.errors}"
@@ -1086,7 +1079,6 @@ class TestPolymorphicConstructors:
         3. Type transformation (a → b) works in case branches
         4. Function application (f x) respects expected types
         """
-        from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import elaborate_module
 
         source = """
@@ -1097,8 +1089,7 @@ class TestPolymorphicConstructors:
             case m of { Nothing → Nothing | Just x → Just (f x) }
         """
 
-        tokens = Lexer(source).tokenize()
-        decls = Parser(tokens).parse()
+        _, decls = parse_program(source)
         result = elaborate_module(decls, module_name="test")
 
         assert result.success, f"Elaboration failed: {result.errors}"
@@ -1111,7 +1102,6 @@ class TestPolymorphicConstructors:
 
     def test_either_type_mapRight(self):
         """Test Either type with mapRight (transforms Right, keeps Left)."""
-        from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import elaborate_module
 
         source = """
@@ -1122,15 +1112,13 @@ class TestPolymorphicConstructors:
             case e of { Left x → Left x | Right y → Right (f y) }
         """
 
-        tokens = Lexer(source).tokenize()
-        decls = Parser(tokens).parse()
+        _, decls = parse_program(source)
         result = elaborate_module(decls, module_name="test")
 
         assert result.success, f"Elaboration failed: {result.errors}"
 
     def test_list_map(self):
         """Test List type with map function."""
-        from systemf.surface.parser import Lexer, Parser
         from systemf.surface.pipeline import elaborate_module
 
         source = """
@@ -1144,8 +1132,7 @@ class TestPolymorphicConstructors:
             }
         """
 
-        tokens = Lexer(source).tokenize()
-        decls = Parser(tokens).parse()
+        _, decls = parse_program(source)
         result = elaborate_module(decls, module_name="test")
 
         # This may fail due to recursion not being in scope
