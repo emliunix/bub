@@ -50,7 +50,7 @@ const columns = columnConfigs.map((config, columnIndex) => ({
     <SectionHeading eyebrow={eyebrow} heading={heading} align="center" />
 
     <div class="testimonials-wrapper relative" data-testimonials>
-      <div class="testimonials-columns testimonials-fade grid h-[320px] gap-3 overflow-hidden sm:h-[380px] sm:grid-cols-2 lg:h-[440px] lg:grid-cols-3">
+      <div class="testimonials-columns testimonials-fade grid h-80 gap-3 overflow-hidden sm:h-[380px] sm:grid-cols-2 lg:h-[440px] lg:grid-cols-3">
         {columns.map((column) => (
           <div class:list={[column.className, column.directionClass]}>
             <div class="flex flex-col gap-3">
@@ -97,6 +97,11 @@ const columns = columnConfigs.map((config, columnIndex) => ({
 
   :global([data-testimonials-playing]) .testimonial-col > div {
     animation-play-state: running;
+  }
+
+  :global([data-testimonials-playing]:hover) .testimonial-col > div,
+  :global([data-testimonials-playing]:focus-within) .testimonial-col > div {
+    animation-play-state: paused;
   }
 
   @keyframes scroll-up {
