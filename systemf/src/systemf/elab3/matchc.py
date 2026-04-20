@@ -288,11 +288,11 @@ def mr_chain(resx: list[MatchResult]) -> MatchResult:
     return functools.reduce(lambda r, l: _merge2(l, r), reversed(resx))
 
 
-def _chain_mr_fi(left: MRFallible, right: MRInfallible) -> MRInfallible:
+def _chain_mr_fi(left: MRFallible[CoreTm], right: MRInfallible[CoreTm]) -> MRInfallibleF[CoreTm]:
     return MRInfallible(left.with_errorh(right.core))
 
 
-def _chain_mr_ff(left: MRFallible, right: MRFallible) -> MRFallible:
+def _chain_mr_ff(left: MRFallible[CoreTm], right: MRFallible[CoreTm]) -> MRFallible[CoreTm]:
     return MRFallible(lambda eh: left.with_errorh(right.with_errorh(eh)))
 
 
@@ -350,5 +350,3 @@ def wrap_rhs(eqn: Equation, dw: DsWrapper) -> Equation:
 
 def mk_bndr(bndr: Id, rhs: CoreTm) -> Callable[[CoreTm], CoreTm]:
     return lambda c: C.let(bndr, rhs, c)
-
-
