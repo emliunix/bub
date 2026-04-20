@@ -138,6 +138,7 @@ from systemf.surface.parser.declarations import (
 
 # Re-export type parser
 from systemf.surface.parser.type_parser import type_parser
+from systemf.surface.types import SurfaceDeclaration, SurfaceImportDeclaration
 
 
 # Convenience function for parsing expressions

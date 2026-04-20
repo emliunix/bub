@@ -17,7 +17,7 @@ from .types import NameGenerator, REPLContext, Module
 from .types.ty import Name, BoundTv
 from .types.ast import (
     Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl,
-    Lam, Let, LitExpr, LitPat, Pat, RnDataConDecl, RnDataDecl, RnTermDecl, Var, VarPat
+    Lam, Let, LitExpr, LitPat, ModuleDecls, Pat, RnDataConDecl, RnDataDecl, RnTermDecl, Var, VarPat
 )
 
 from systemf.surface.types import (
@@ -36,8 +36,7 @@ from systemf.utils.location import Location
 
 @dataclass
 class RenameResult:
-    data_decls: list[RnDataDecl]
-    term_decls: list[RnTermDecl]
+    rn_mod: ModuleDecls
 
 
 class Rename:
@@ -49,21 +48,21 @@ class Rename:
     """
     Assign unique to names lexically.
     """
-    def __init__(self, ctx: REPLContext, reader_env: ReaderEnv, mod_name: str):
+    def __init__(self, ctx: REPLContext, reader_env: ReaderEnv, mod_name: str, name_gen: NameGenerator):
         self.ctx = ctx
         self.reader_env = reader_env
         self.mod_name = mod_name
-        self.name_gen = NameGeneratorImpl(mod_name, self.ctx.uniq)
+        self.name_gen = name_gen
 
     @property
     def rename_expr(self):
         """fresh new RenameExpr with local env"""
         return RenameExpr(self.reader_env, self.mod_name, self.name_gen)
 
-    def rename(self, ast: list[SurfaceDeclaration]) -> RenameResult:
-        ast_imports, ast_datas, ast_terms = split_ast(ast)
+    def rename(self, imports: list[SurfaceImportDeclaration], ast: list[SurfaceDeclaration]) -> RenameResult:
+        ast_datas, ast_terms = split_ast(ast)
         # imports
-        self.do_imports(get_imports(ast_imports))
+        self.do_imports(get_imports(imports))
 
         # lhs
         lhs_datas = self.rename_lhs_datas(ast_datas)
@@ -78,7 +77,7 @@ class Rename:
         rn_datas = [self.rename_rhs_data(ld) for ld in lhs_datas]
         rn_terms = [self.rename_rhs_term(lt) for lt in lhs_terms]
 
-        return RenameResult(rn_datas, rn_terms)
+        return RenameResult(ModuleDecls(rn_datas, rn_terms))
 
     def do_imports(self, imports: list[ImportDecl]):
         # TODO: implement import handling
@@ -163,24 +162,20 @@ class RnLhsTermResult:
 def split_ast(
     ast: list[SurfaceDeclaration]
 ) -> tuple[
-    list[SurfaceImportDeclaration],
     list[SurfaceDataDeclaration],
     list[SurfaceTermDeclaration]
 ]:
-    imports: list[SurfaceImportDeclaration]  = []
     datas: list[SurfaceDataDeclaration] = []
     terms: list[SurfaceTermDeclaration] = []
     for decl in ast:
         match decl:
-            case SurfaceImportDeclaration():
-                imports.append(decl)
             case SurfaceDataDeclaration():
                 datas.append(decl)
             case SurfaceTermDeclaration():
                 terms.append(decl)
             case _:
                 raise Exception(f"unexpected declaration: {decl}")
-    return imports, datas, terms
+    return datas, terms
 
 def get_imports(imports: list[SurfaceImportDeclaration]) -> list[ImportDecl]:
     return [ImportDecl(
