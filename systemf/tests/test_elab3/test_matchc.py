@@ -7,8 +7,8 @@ reasonable CoreCase shapes without crashing.
 import pytest
 
 from systemf.elab3.matchc import MatchC, MRInfallible, MRFallible, Equation, mr_run
-from systemf.elab3.typecheck_expr2 import XPatLit, XPatCon, XPatVar, XPatWild, XPatCo
-from systemf.elab3.typecheck_expr import TcCtx
+from systemf.elab3.types.xpat import XPatLit, XPatCon, XPatVar, XPatWild, XPatCo
+from systemf.elab3.tc_ctx import TcCtx
 from systemf.elab3.name_gen import NameGeneratorImpl
 from systemf.elab3.types.ty import Id, LitInt, Name, Ty, TyConApp, TyFun
 from systemf.elab3.types.tything import ATyCon, ACon
@@ -25,7 +25,7 @@ class FakeCtx(TcCtx):
     """TcCtx with hard-coded Bool, Pair and Tree types for match testing."""
 
     def __init__(self) -> None:
-        super().__init__(Uniq(1000))
+        super().__init__("Test", Uniq(1000))
         self.bool_name = Name("Test", "Bool", 1)
         self.true_name = Name("Test", "True", 2)
         self.false_name = Name("Test", "False", 3)
@@ -342,7 +342,7 @@ def test_different_arities_in_same_column():
 
 
 def test_non_consecutive_constructor_grouping():
-    """Python's itertools.groupby is consecutive; True split into two groups."""
+    """Same constructors in non-consecutive positions are merged into one group."""
     mc = mk_matchc()
     bool_ty = TyConApp(mc.ctx.bool_name, [])
     x = make_id("x", bool_ty)
@@ -362,8 +362,8 @@ def test_non_consecutive_constructor_grouping():
     assert isinstance(result, MRInfallible)
     core = result.core
     assert isinstance(core, CoreCase)
-    # Three alternatives due to consecutive grouping
-    assert len(core.alts) == 3
+    # True patterns are merged into a single group, so only 2 alts
+    assert len(core.alts) == 2
 
 
 def test_wildcards_in_middle_columns():

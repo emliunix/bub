@@ -9,13 +9,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import cast
 
-from systemf.elab3.name_gen import NAME_CACHE, NameGeneratorImpl
+from systemf.elab3.name_gen import NAME_CACHE, NameGeneratorImpl, check_dups
 
-from .rename_expr import RenameExpr, check_dups
+from .rename_expr import RenameExpr
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
 from .types import NameGenerator, REPLContext, Module
-from .types.ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, BoundTv
-from .types.tything import ACon, TyThing
+from .types.ty import Name, BoundTv
 from .types.ast import (
     Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl,
     Lam, Let, LitExpr, LitPat, Pat, RnDataConDecl, RnDataDecl, RnTermDecl, Var, VarPat
@@ -33,7 +32,6 @@ from systemf.surface.types import (
 )
 
 from systemf.utils.location import Location
-from systemf.utils.uniq import Uniq
 
 
 @dataclass

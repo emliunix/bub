@@ -1,4 +1,3 @@
-
 import functools
 
 from collections.abc import Generator
@@ -16,16 +15,11 @@ from .types.ty import Id, Lit, LitInt, MetaTv, Ty, TyConApp, TyForall, TyFun, Ty
 from .types.xpat import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
 
 from .matchc import MRInfallible, MatchC, MatchResult, mr_run
-from .reader_env import ReaderEnv
 from .tc_ctx import Expect, Infer, Check, TyCkRes, Unifier
-
 
 
 T = TypeVar("T")
 R = TypeVar("R")
-
-
-type Checker[I, O, R] = Callable[[I, Callable[[], R]], tuple[O, R]]
 
 
 type CB[R] = Callable[[], R]
@@ -49,14 +43,12 @@ class TypeChecker(Unifier):
     name_gen: NameGenerator
     wrapper_runner: WrapperRunner
     matchc: MatchC
-    reader_env: ReaderEnv
     gbl_type_env: TypeEnv
 
     def __init__(self,
                  ctx: REPLContext, 
                  mod_name: str,
                  name_gen: NameGenerator,
-                 reader_env: ReaderEnv,
                  gbl_type_env: TypeEnv,
                  ):
         super().__init__(mod_name, ctx.uniq)
@@ -64,7 +56,6 @@ class TypeChecker(Unifier):
         self.name_gen = name_gen
         self.wrapper_runner = WrapperRunner(name_gen)
         self.matchc = MatchC(self, name_gen)
-        self.reader_env = reader_env
         self.gbl_type_env = gbl_type_env
 
     @override
@@ -131,7 +122,6 @@ class TypeChecker(Unifier):
                     res = _mk_app_c(res, arg_c)
                 case InstFunWrap(wrap):
                     res = self.with_wrapper(wrap, res)
-                case _: raise Exception("unreachable")
         if args_stack:
             raise Exception("arity mismatch in app")
         # now res should be the app of function with all args, of sigma type
@@ -270,7 +260,6 @@ class TypeChecker(Unifier):
                 return WP_HOLE
             case Check(res_ty):
                 return self.subs_check(res_ty, ty)
-            case _: raise Exception("unreachable")
 
     def mk_co_pat(self, co: Wrapper, ty: Ty, pat: XPat) -> XPat:
         if co == WP_HOLE:
@@ -356,7 +345,6 @@ class TypeChecker(Unifier):
                         res_ty,
                         cb(list(map(Check, arg_tys)), Check(res_ty))
                     )
-            case _: raise Exception("unreachable")
 
     def inst_fun(self, ty: Ty, arity: int) -> tuple[list[InstFun], Ty]:
         def _inst(ty: Ty, arity: int) -> Generator[InstFun, None, Ty]:
@@ -412,7 +400,7 @@ class TypeChecker(Unifier):
         The inst judgment - instantiate a polymorphic type.
         """
         match exp:
-            case Infer(ref):
+            case Infer():
                 # instantiate by inserts type applications
                 instantiated, wrap = self.instantiate(ty)
                 self.fill_infer(exp, instantiated)
@@ -421,7 +409,6 @@ class TypeChecker(Unifier):
                 # subsumption check and produce casts
                 # reordred type args by eta expansion, TyLam & TyApp
                 return self.subs_check_rho(ty, ty2)
-            case _: raise Exception("impossible")
 
     def quantify(self, tvs: list[MetaTv], tys: list[Ty]) -> tuple[list[TyVar], list[Ty]]:
         """
@@ -443,7 +430,6 @@ class TypeChecker(Unifier):
                 self.fill_infer(exp, ty)
             case Check(ty2):
                 self.unify(ty, ty2)
-            case _: raise Exception("unreachable")
 
     def run_infer(self, run: Callable[[Infer], R]) -> tuple[Ty, R]:
         infer = self.make_infer()

@@ -32,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from dataclasses import dataclass
 
-from .ty import BoundTv, Lit, Name, Ty
+from .ty import BoundTv, Lit, Name, Ty, TyVar
 
 
 # =============================================================================
@@ -177,7 +177,7 @@ class RnDataConDecl:
 class RnDataDecl:
     """Parsed data type declaration (str names)."""
     name: Name
-    tyvars: list[BoundTv]
+    tyvars: list[TyVar]
     constructors: list[RnDataConDecl]
 
 

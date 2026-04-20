@@ -4,13 +4,13 @@ REPL and REPLSession - orchestration and state management.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import override
+from typing import Callable, override
 
+from systemf.elab3.rename_expr import RenameExpr
 from systemf.elab3.types import REPLContext
 
 from .builtins import BUILTIN_ENDS
 from .types import Module, TyThing
-from .name_cache import NameCache
 from .reader_env import ReaderEnv
 from systemf.utils.uniq import Uniq
 
@@ -44,7 +44,6 @@ class REPLSession:
         pass
 
 
-@dataclass
 class REPL(REPLContext):
     """Owns shared state, creates sessions, orchestrates module loading.
 
@@ -56,7 +55,7 @@ class REPL(REPLContext):
     modules: dict[str, Module]
     search_paths: list[str]
     # Cycle detection
-    _loading: set[str]
+    _loading: dict[str, str | None]
     _replmod_counter: int
 
     def __init__(self, search_paths: list[str] | None = None):
@@ -64,7 +63,7 @@ class REPL(REPLContext):
         self.name_cache = NameCache(self.uniq)
         self.modules = {}
         self.search_paths = search_paths or ["."]
-        self._loading = set()
+        self._loading = {}
         self._replmod_counter = 0
 
     @override
@@ -76,20 +75,19 @@ class REPL(REPLContext):
 
     @override
     def load(self, name: str) -> Module:
+        return self._load(name, None)
+
+    def _load(self, name: str, from_mod: str | None = None) -> Module:
         """
         Load a module and its dependencies into HPT.
         """
         if (m := self.modules.get(name)) is not None:
             return m
         if name in self._loading:
-            raise Exception("Cyclic imports detected")
-        self._loading.add(name)
-        def _get_module(mod_name: str) -> Module:
-            if (m := self.modules.get(mod_name)) is not None:
-                return m
-            return self.load(mod_name)
+            raise Exception(f"Cyclic imports detected: {_build_import_chain(self._loading, name)}")
+        self._loading[name] = from_mod
 
-        m = load_module(name, self._mod_file(name), _get_module)
+        m = self._load_module(name, self._mod_file(name))
         self.modules[name] = m
         self._loading.remove(name)
         return m
@@ -102,6 +100,10 @@ class REPL(REPLContext):
                 return p
         raise Exception(f"module not found: {module_name}")
 
+    def _load_module(self, name: str, file: Path) -> Module:
+        text = file.read_text(encoding="utf-8")
+        pass
+
     def new_session(self) -> REPLSession:
         """Create a new REPL session with given state."""
         return REPLSession(
@@ -109,3 +111,11 @@ class REPL(REPLContext):
             reader_env=ReaderEnv.empty(),
             tythings=[],
         )
+
+
+def _build_import_chain(loads: dict[str, str | None], start: str) -> str:
+    chain = [start]
+    s = start
+    while (s := loads.get(start)) is not None:
+        chain.append(s)
+    return "->".join(list(reversed(chain)))

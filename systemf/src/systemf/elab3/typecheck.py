@@ -2,10 +2,13 @@
 typecheck module
 """
 
-from systemf.elab3.types import NameGenerator, REPLContext, Name
-from systemf.elab3.types.ast import ModuleDecls, RnDataDecl
-from systemf.elab3.types.core import CoreTm
-from systemf.elab3.types.tything import TypeEnv, ATyCon, ACon
+from .typecheck_expr import TypeChecker
+
+from .types import NameGenerator, REPLContext, Name
+from .types.ast import Binding, ModuleDecls, RnDataConDecl, RnDataDecl, RnTermDecl
+from .types.core import CoreTm
+from .types.ty import Id
+from .types.tything import AnId, TypeEnv, ATyCon, ACon
 
 
 class Typecheck:
@@ -23,34 +26,36 @@ class Typecheck:
     
     @property
     def typecheck_expr(self):
-        return TypecheckExpr(self.ctx, self.name_gen, self.type_env)
+        return TypeChecker(
+            self.ctx,
+            self.mod_name,
+            self.name_gen,
+            self.type_env
+        )
 
     def typecheck(self, mod: ModuleDecls) -> tuple[TypeEnv, dict[Name, CoreTm]]:
-        self.tc_datas(mod.data_decls)
-        self.tc_funs
-        pass
+        ty_env = self.tc_datas(mod.data_decls)
+        self.type_env.update(ty_env)
+        vals = self.tc_valbinds(mod.term_decls)
+        ty_env.update((id.name, AnId.from_id(id)) for id, _ in vals.items())
+        return ty_env, {id.name: tm for id, tm in vals.items()}
 
-    def tc_datas(self, data_decls: list[RnDataDecl]):
+    def tc_datas(self, data_decls: list[RnDataDecl]) -> TypeEnv:
         """
         Simply populate type env with data types.
         """
-        for data_decl in data_decls:
-            self.type_env[data_decl.name] = ATyCon(data_decl.name, data_decl.params, data_decl.constructors)
-            for tag, con in enumerate(data_decl.constructors):
-                self.type_env[con.name] = ACon(con.name, tag, len(con.args), con.args, data_decl.name)
 
-    def resolve_type(self, name: Name):
-        """
-        Resolve and cache a tything lookup, local first, then global modules
-        """
-        # first try local type_env
-        if name in self.type_env:
-            return self.type_env[name]
-        else:
-            # fallback to locate module and then fetch from there
-            m = self.ctx.load(name.mod)
-            if m is not None:
-                return m.type_env.get(name)
-            else:
-                raise Exception(f"Cannot resolve type {name}, module {name.mod} not found")
-    
+        env: TypeEnv = {}
+
+        def _acon(tag: int, con: RnDataConDecl) -> ACon:
+            return ACon(con.name, tag, len(con.fields), con.fields, con.tycon.name)
+        for data_decl in data_decls:
+            cons = [_acon(i, con) for i, con in enumerate(data_decl.constructors)]
+            env[data_decl.name] = ATyCon(data_decl.name, data_decl.tyvars, cons)
+            for con in cons:
+                env[con.name] = con
+        return env
+
+    def tc_valbinds(self, valbinds: list[RnTermDecl]) -> dict[Id, CoreTm]:
+        items = self.typecheck_expr.bindings([Binding(b.name, b.expr) for b in valbinds], lambda xs: xs)
+        return {b: tm() for b, tm in items}

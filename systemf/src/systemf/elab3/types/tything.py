@@ -3,7 +3,7 @@ TyThing (type environment entries)
 """
 from dataclasses import dataclass
 
-from .ty import (Id, Name, Ty, BoundTv)
+from .ty import Id, Name, Ty, TyVar
 
 
 @dataclass
@@ -26,7 +26,7 @@ class AnId(TyThing):
 class ATyCon(TyThing):
     """Type constructor (data type or type synonym)."""
     name: Name
-    tyvars: list[BoundTv]
+    tyvars: list[TyVar]
     constructors: list[ACon]
 
 

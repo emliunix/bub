@@ -6,7 +6,7 @@ threading the continuation (cb) through, and collecting results in order.
 
 import pytest
 
-from systemf.elab3.typecheck_expr2 import multiple
+from systemf.elab3.typecheck_expr import multiple
 
 
 # =============================================================================
