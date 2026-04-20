@@ -17,9 +17,9 @@ from typing import Callable, cast
 
 from .types import Name
 from .types.core import CoreTm
-from .types.tything import ACon, ATyCon, TyThing, TypeEnv
+from .types.tything import ACon, APrimTy, ATyCon, TyThing, TypeEnv
 from .types.wrapper import WP_HOLE, WpCast, WpTyApp, WpTyLam, Wrapper, wp_compose, wp_fun
-from .types.ty import BoundTv, MetaTv, Ref, SkolemTv, Ty, TyConApp, TyForall, TyFun, TyVar, get_meta_vars, subst_ty, varnames
+from .types.ty import BoundTv, MetaTv, Ref, SkolemTv, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, get_meta_vars, subst_ty, varnames
 
 from systemf.utils.uniq import Uniq
 
@@ -87,12 +87,16 @@ class TcCtx(ABC):
     def lookup(self, name: Name) -> TyThing:
         if (th := self.lookup_local(name)) is not None:
             return th
+        if name.mod == self.mod_name:
+            raise Exception(f"local name not found: {name}")
         return self.lookup_gbl(name)
 
     def lookup_tycon(self, name: Name) -> ATyCon:
         match self.lookup(name):
             case ATyCon() as a:
                 return a
+            case APrimTy() as a:
+                raise Exception(f"Expected tycon, but got a prim type: {a}")
             case a:
                 raise Exception(f"Expected tycon, but got: {a}")
             
@@ -253,21 +257,26 @@ class Unifier(TcCtx, ABC):
                 return mty
             case Check(ty):
                 return ty
-            case _:
-                raise Exception("impossible")
 
     def unify(self, ty1: Ty, ty2: Ty):
         match ty1, ty2:
+            case (TyInt(), TyInt()):
+                pass
+            case (TyString(), TyString()):
+                pass
             case (BoundTv(), _) | (_, BoundTv()):
                 raise Exception(f"Unexpected bound type variables to unify, got {ty1} and {ty2}")
             case (SkolemTv() as sk1, SkolemTv() as sk2) if sk1 == sk2:
                 pass
             case (MetaTv() as m1, MetaTv() as m2) if m1 == m2:
                 pass
-            case (TyConApp(n1, args1), TyConApp(n2, args2)) if n1 == n2 and len(args1) == len(args2):
-                # get arity from the real tycon to check args length with
-                for a1, a2 in zip(args1, args2):
-                    self.unify(a1, a2)
+            case (TyConApp(n1, args1), TyConApp(n2, args2)):
+                if n1 == n2 and len(args1) == len(args2):
+                    # get arity from the real tycon to check args length with
+                    for a1, a2 in zip(args1, args2):
+                        self.unify(a1, a2)
+                else:
+                    raise Exception(f"Cannot unify type constructors, got {ty1} and {ty2}")
             case (MetaTv() as m, ty):
                 self.unify_var(m, ty)
             case (ty, MetaTv() as m):

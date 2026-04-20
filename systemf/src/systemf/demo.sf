@@ -1,0 +1,27 @@
+-- | Demo module: sample programs using builtins.
+
+import builtins
+
+-- | Identity function
+id :: forall a. a -> a = \x -> x
+
+-- | Constant function
+const :: forall a b. a -> b -> a = \x y -> x
+
+-- | Boolean negation
+not :: Bool -> Bool = \b ->
+  case b of
+    True -> False
+    False -> True
+
+-- | Factorial
+-- factorial :: Int -> Int = \n ->
+--   case n of
+--     0 -> 1
+--     m -> m * factorial (m - 1)
+
+-- | Greeting function with literal pattern
+greet :: String -> String = \name ->
+  case name of
+    "world" -> "hello world"
+    other -> "hello " ++ other

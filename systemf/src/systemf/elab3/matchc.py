@@ -73,7 +73,7 @@ class PGCo:
     ty: Ty
 
 
-type PG = PGAny | PGCon | PGLit | PGCo 
+type PG = PGAny | PGCon | PGLit | PGCo
 
 
 def pat_group(pat: XPat) -> PG:
@@ -109,7 +109,7 @@ class MatchC:
                     raise Exception(f"invariant breaks, the equation doesn't match vars: {eqn}")
                 return rhs
             return mr_chain([_check_eqn(eqn) for eqn in eqns])
-        
+
         # column case
         [v, *vs] = vars  # split vars
         (col_, eqns_) = shift_eqn(eqns)
@@ -135,7 +135,7 @@ class MatchC:
             case XPatWild():
                 return (dw_id, pat)
             case XPatVar(v2):
-                return (mk_bndr(v, C.var(v2)), XPatWild())
+                return (mk_bndr(v2, C.var(v)), XPatWild())
             case _:
                 return (dw_id, pat)
 
@@ -156,14 +156,14 @@ class MatchC:
                 return self.mc_con(v, vs, ty, pats, eqns)
             case PGLit():
                 return self.mc_lit(v, vs, ty, pats, eqns)
-    
+
     def mc_lit(self, v: Id, vs: list[Id], ty: Ty, col: list[XPat], eqns: list[Equation]) -> MatchResult:
         def _by_lit(t: tuple[XPat, Equation]) -> Lit:
             match t:
                 case (XPatLit(lit), _):
                     return lit
                 case _: raise Exception("unreachable")
-        
+
         groups = defaultdict(list)
         lit_order = []
         for t in zip(col, eqns):
@@ -171,7 +171,7 @@ class MatchC:
             if lit not in groups:
                 lit_order.append(lit)
             groups[lit].append(t)
-        
+
         def _go_grp(pat_eqns: list[tuple[XPat, Equation]]):
             _, eqns = unzip(pat_eqns)
             return self.matchc(vs, ty, eqns)
@@ -217,13 +217,13 @@ class MatchC:
 
     def mk_con_alts(self, v: Id, ty: Ty, xs: list[tuple[Name, list[Id], MatchResult]]) -> MatchResult:
         def _mk_alt1(con: Name, ids: list[Id], mr: MatchResult) -> MatchResult1[tuple[Name, list[Id], CoreTm]]:
-            match mr: 
+            match mr:
                 case MRInfallible(core):
                     return MRInfallible((con, ids, core))
                 case MRFallible(wh):
                     return MRFallible(lambda eh: (con, ids, wh(eh)))
         mr_alts = mr_bundle([_mk_alt1(con, ids, mr) for con, ids, mr in xs])
-        
+
         tycon = cast(TyConApp, v.ty).name
         all_cons = [c.name for c in self.tycon_datacons(tycon)]
         # just to decide if we need default alt
@@ -248,7 +248,7 @@ class MatchC:
                 alts_
             )
         return mr_map(mr_bundle2(mr_alts, mr_default), _map_res)
-    
+
     def with_shared_error_handler(self, ty: Ty, mr: MatchResult) -> MatchResult:
         match mr:
             case MRInfallible():
@@ -323,7 +323,7 @@ def mr_bundle(mrs: list[MatchResult1[T]]) -> MatchResult1[list[T]]:
         return MRInfallible([cast(MRInfallible[T], x).core for x in mrs])
     else:
         return MRFallible(lambda eh: [mr_run(x, eh) for x in mrs])
-    
+
 
 def mr_bundle2(left: MatchResult1[T], right: MatchResult1[R]) -> MatchResult1[tuple[T, R]]:
     match (left, right):
@@ -350,3 +350,5 @@ def wrap_rhs(eqn: Equation, dw: DsWrapper) -> Equation:
 
 def mk_bndr(bndr: Id, rhs: CoreTm) -> Callable[[CoreTm], CoreTm]:
     return lambda c: C.let(bndr, rhs, c)
+
+

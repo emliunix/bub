@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import cast
 
-from systemf.elab3.name_gen import NAME_CACHE, NameGeneratorImpl, check_dups
+from systemf.elab3.name_gen import NameGeneratorImpl, check_dups
 
 from .rename_expr import RenameExpr
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
@@ -17,18 +17,17 @@ from .types import NameGenerator, REPLContext, Module
 from .types.ty import Name, BoundTv
 from .types.ast import (
     Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl,
-    Lam, Let, LitExpr, LitPat, ModuleDecls, Pat, RnDataConDecl, RnDataDecl, RnTermDecl, Var, VarPat
+    Lam, Let, LitExpr, LitPat, ModuleDecls, Pat, RnDataConDecl, RnDataDecl, RnPrimOpDecl, RnPrimTyDecl, RnTermDecl, Var, VarPat
 )
 
 from systemf.surface.types import (
     SurfaceConstructorInfo,
     SurfaceDataDeclaration,
     SurfaceDeclaration,
-    SurfaceDeclarationRepr,
     SurfaceImportDeclaration,
+    SurfacePrimOpDecl,
+    SurfacePrimTypeDecl,
     SurfaceTermDeclaration,
-    SurfaceTypeForall,
-    SurfaceTypeVar
 )
 
 from systemf.utils.location import Location
@@ -60,9 +59,9 @@ class Rename:
         return RenameExpr(self.reader_env, self.mod_name, self.name_gen)
 
     def rename(self, imports: list[SurfaceImportDeclaration], ast: list[SurfaceDeclaration]) -> RenameResult:
-        ast_datas, ast_terms = split_ast(ast)
+        ast_datas, ast_terms, ast_prim_tys, ast_prim_ops = split_ast(ast)
         # imports
-        self.do_imports(get_imports(imports))
+        self.do_imports(get_imports(self.mod_name, imports))
 
         # lhs
         lhs_datas = self.rename_lhs_datas(ast_datas)
@@ -77,7 +76,11 @@ class Rename:
         rn_datas = [self.rename_rhs_data(ld) for ld in lhs_datas]
         rn_terms = [self.rename_rhs_term(lt) for lt in lhs_terms]
 
-        return RenameResult(ModuleDecls(rn_datas, rn_terms))
+        # prims
+        rn_prim_tys = [self.rename_prim_ty(p) for p in ast_prim_tys]
+        rn_prim_ops = [self.rename_prim_op(p) for p in ast_prim_ops]
+
+        return RenameResult(ModuleDecls(rn_datas, rn_terms, rn_prim_tys, rn_prim_ops))
 
     def do_imports(self, imports: list[ImportDecl]):
         # TODO: implement import handling
@@ -135,15 +138,26 @@ class Rename:
         when name is builtin, we return from the cache
         otherwise we generate a new name and put it in the cache so later occ_name lookup finds it.
         """
-        if (n := NAME_CACHE.get(self.mod_name, name)) is not None:
+        if (n := self.ctx.name_cache.get(self.mod_name, name)) is not None:
             return n
         n = self.name_gen.new_name(name, loc)
-        NAME_CACHE.put(n)
+        self.ctx.name_cache.put(n)
         return n
 
     def new_lhs_names(self, names: list[str], loc: Location | None) -> list[Name]:
         check_dups(names, loc)
         return [self.new_lhs_name(name, loc) for name in names]
+
+    def rename_prim_ty(self, pt: SurfacePrimTypeDecl) -> RnPrimTyDecl:
+        # FIX: enhance surface to support prim ty args
+        return RnPrimTyDecl(self.new_lhs_name(pt.name, pt.location), [])
+
+    def rename_prim_op(self, op: SurfacePrimOpDecl) -> RnPrimOpDecl:
+        ty = op.type_annotation
+        # FIX: at parser level, make types requried
+        if ty is None:
+            raise Exception(f"primitive operator {op.name} must have a type annotation at {op.location}")
+        return RnPrimOpDecl(AnnotName(self.new_lhs_name(op.name, op.location), self.rename_expr.rename_type(ty)))
 
 
 @dataclass
@@ -163,28 +177,52 @@ def split_ast(
     ast: list[SurfaceDeclaration]
 ) -> tuple[
     list[SurfaceDataDeclaration],
-    list[SurfaceTermDeclaration]
+    list[SurfaceTermDeclaration],
+    list[SurfacePrimTypeDecl],
+    list[SurfacePrimOpDecl],
 ]:
     datas: list[SurfaceDataDeclaration] = []
     terms: list[SurfaceTermDeclaration] = []
+    prim_tys: list[SurfacePrimTypeDecl] = []
+    prim_ops: list[SurfacePrimOpDecl] = []
     for decl in ast:
         match decl:
             case SurfaceDataDeclaration():
                 datas.append(decl)
             case SurfaceTermDeclaration():
                 terms.append(decl)
+            case SurfacePrimTypeDecl():
+                prim_tys.append(decl)
+            case SurfacePrimOpDecl():
+                prim_ops.append(decl)
             case _:
                 raise Exception(f"unexpected declaration: {decl}")
-    return datas, terms
+    return datas, terms, prim_tys, prim_ops
 
-def get_imports(imports: list[SurfaceImportDeclaration]) -> list[ImportDecl]:
-    return [ImportDecl(
-        module=decl.module,
-        qualified=decl.qualified,
-        alias=decl.alias,
-        import_items=decl.items,
-        hiding_items=[],  # TODO: fix surface to support hiding items
-    ) for decl in imports]
+DEFAULT_IMPORTS = [
+    ("builtins", ImportDecl(
+        module="builtins",
+        qualified=False,
+        alias=None,
+        import_items=None,
+        hiding_items=None,
+    ))
+]
+
+
+def get_imports(mod: str, imports: list[SurfaceImportDeclaration]) -> list[ImportDecl]:
+    return list(itertools.chain(
+        [m for n, m in DEFAULT_IMPORTS if n != mod],
+        (
+            ImportDecl(
+                module=decl.module,
+                qualified=decl.qualified,
+                alias=decl.alias,
+                import_items=decl.items,
+                hiding_items=[],  # TODO: fix surface to support hiding items
+            ) for decl in imports
+        )
+    ))
 
 
 def env_from_import_decl(mod: Module, decl: ImportDecl) -> ReaderEnv:

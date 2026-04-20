@@ -9,7 +9,7 @@ from systemf.utils import run_capture_return
 from .types import Name, NameGenerator, REPLContext
 from .types.ast import Ann, AnnotName, App, Binding, Case, CaseBranch, Expr, Lam, Let, LitExpr, Pat, ConPat, Var, VarPat, LitPat, WildcardPat
 from .types.core import C, CoreTm
-from .types.tything import AnId, TyThing, TypeEnv
+from .types.tything import ACon, AnId, TyThing, TypeEnv
 from .types.wrapper import WP_HOLE, Wrapper, WrapperRunner, mk_wp_ty_lams, wp_compose, zonk_wrapper
 from .types.ty import Id, Lit, LitInt, MetaTv, Ty, TyConApp, TyForall, TyFun, TyVar, get_meta_vars, subst_ty, zonk_type
 from .types.xpat import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
@@ -93,6 +93,8 @@ class TypeChecker(Unifier):
                 rho, w = self.instantiate(ty)
                 self.exp_set_ty(rho, exp)
                 return self.with_wrapper(w, lambda: C.var(id))
+            case ACon(name=con):
+                return self.match_datacon_fun(con, exp)
             case thing: raise Exception(f"expected AnId for {name}, got: {thing}")
 
     def lit(self, lit: Lit, exp: Expect) -> TyCkRes:
@@ -235,7 +237,7 @@ class TypeChecker(Unifier):
 
     def match_tyconapp(self, tycon_name: Name, ty: Ty) -> tuple[list[TyVar], list[Ty]]:
         tycon = self.lookup_tycon(tycon_name)
-        tyvars = cast(list[TyVar], tycon.tyvars)
+        tyvars = tycon.tyvars
         ty = zonk_type(ty)
         match ty:
             case TyConApp(name2, args) if name2 == tycon_name:
@@ -251,6 +253,19 @@ class TypeChecker(Unifier):
         rho, w_inst = self.instantiate(ty)
         tyvars, tyargs = self.match_tyconapp(con.parent, rho)
         return w_inst, rho, [subst_ty(tyvars, tyargs, arg_ty) for arg_ty in con.field_types]
+
+    def match_datacon_fun(self, con_name: Name, exp: Expect) -> TyCkRes:
+        con = self.lookup_datacon(con_name)
+        tycon = self.lookup_tycon(con.parent)
+
+        fun_ty = functools.reduce(
+            lambda acc, c: TyFun(c, acc),
+            reversed(con.field_types),
+            TyConApp(tycon.name, cast(list[Ty], tycon.tyvars)))
+        ty = TyForall(tycon.tyvars, fun_ty)
+
+        w = self.inst(ty, exp)
+        return self.with_wrapper(w, lambda: C.var(Id(con_name, ty)))
 
     def subs_check_pat(self, res: Expect, ty: Ty) -> Wrapper:
         match res:
@@ -442,7 +457,8 @@ class TypeChecker(Unifier):
         def _run():
             tm = run()
             zw = zonk_wrapper(w)
-            return self.wrapper_runner.run_wrapper(zw, tm)
+            result = self.wrapper_runner.run_wrapper(zw, tm)
+            return result
         return _run
 
 

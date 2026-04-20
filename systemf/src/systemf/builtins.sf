@@ -1,0 +1,33 @@
+-- | Builtins module: defines primitive types, data types, and primitive operations.
+-- This file must stay in sync with systemf/elab3/builtins.py.
+
+-- Unit type
+data Unit = MkUnit
+
+-- Bool type
+data Bool = True | False
+
+-- List type
+data List a = Nil | Cons a (List a)
+
+-- Pair type
+data Pair a b = MkPair a b
+
+-- Integer primitives
+prim_op int_plus     :: Int -> Int -> Int
+prim_op int_minus    :: Int -> Int -> Int
+prim_op int_multiply :: Int -> Int -> Int
+prim_op int_divide   :: Int -> Int -> Int
+prim_op int_eq       :: Int -> Int -> Bool
+prim_op int_neq      :: Int -> Int -> Bool
+prim_op int_lt       :: Int -> Int -> Bool
+prim_op int_gt       :: Int -> Int -> Bool
+prim_op int_le       :: Int -> Int -> Bool
+prim_op int_ge       :: Int -> Int -> Bool
+
+-- Bool primitives
+prim_op bool_and :: Bool -> Bool -> Bool
+prim_op bool_or  :: Bool -> Bool -> Bool
+
+-- String primitives
+prim_op string_concat :: String -> String -> String

@@ -16,6 +16,7 @@ class AnId(TyThing):
     """Term-level binding: variable or function."""
     name: Name
     id: Id
+    is_prim: bool = False
 
     @staticmethod
     def from_id(id: Id) -> AnId:
@@ -38,6 +39,13 @@ class ACon(TyThing):
     arity: int
     field_types: list[Ty]
     parent: Name
+
+
+@dataclass
+class APrimTy(TyThing):
+    """Primitives"""
+    name: Name
+    tyvars: list[TyVar]
 
 
 type TypeEnv = dict[Name, TyThing]

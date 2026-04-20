@@ -4,14 +4,16 @@ REPL and REPLSession - orchestration and state management.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, override
+from typing import override
 
-from systemf.elab3.rename_expr import RenameExpr
-from systemf.elab3.types import REPLContext
+from systemf.elab3.name_gen import NameCacheImpl
 
-from .builtins import BUILTIN_ENDS
-from .types import Module, TyThing
 from .reader_env import ReaderEnv
+from .pipeline import execute
+from .builtins import BUILTIN_ENDS
+
+from .types import Module, TyThing, REPLContext, NameCache
+
 from systemf.utils.uniq import Uniq
 
 
@@ -60,7 +62,7 @@ class REPL(REPLContext):
 
     def __init__(self, search_paths: list[str] | None = None):
         self.uniq = Uniq(BUILTIN_ENDS)
-        self.name_cache = NameCache(self.uniq)
+        self.name_cache = NameCacheImpl()
         self.modules = {}
         self.search_paths = search_paths or ["."]
         self._loading = {}
@@ -85,12 +87,14 @@ class REPL(REPLContext):
             return m
         if name in self._loading:
             raise Exception(f"Cyclic imports detected: {_build_import_chain(self._loading, name)}")
-        self._loading[name] = from_mod
 
-        m = self._load_module(name, self._mod_file(name))
-        self.modules[name] = m
-        self._loading.remove(name)
-        return m
+        self._loading[name] = from_mod
+        try: 
+            m = self._load_module(name, self._mod_file(name))
+            self.modules[name] = m
+            return m
+        finally:
+            del self._loading[name]
 
     def _mod_file(self, module_name: str) -> Path:
         parts = module_name.split(".")
@@ -102,7 +106,7 @@ class REPL(REPLContext):
 
     def _load_module(self, name: str, file: Path) -> Module:
         text = file.read_text(encoding="utf-8")
-        pass
+        return execute(self, name, str(file), text)
 
     def new_session(self) -> REPLSession:
         """Create a new REPL session with given state."""

@@ -4,11 +4,11 @@ typecheck module
 
 from .typecheck_expr import TypeChecker
 
-from .types import NameGenerator, REPLContext, Name
-from .types.ast import Binding, ModuleDecls, RnDataConDecl, RnDataDecl, RnTermDecl
+from .types import NameGenerator, REPLContext, Name, Ty
+from .types.ast import Binding, ModuleDecls, RnDataConDecl, RnDataDecl, RnPrimOpDecl, RnPrimTyDecl, RnTermDecl
 from .types.core import CoreTm
 from .types.ty import Id
-from .types.tything import AnId, TypeEnv, ATyCon, ACon
+from .types.tything import APrimTy, AnId, TypeEnv, ATyCon, ACon
 
 
 class Typecheck:
@@ -35,10 +35,14 @@ class Typecheck:
 
     def typecheck(self, mod: ModuleDecls) -> tuple[TypeEnv, dict[Name, CoreTm]]:
         ty_env = self.tc_datas(mod.data_decls)
+        ty_env.update(self.tc_prims(mod.prim_ty_decls, mod.prim_op_decls))
+
+        # update for tc_valbinds
         self.type_env.update(ty_env)
         vals = self.tc_valbinds(mod.term_decls)
-        ty_env.update((id.name, AnId.from_id(id)) for id, _ in vals.items())
-        return ty_env, {id.name: tm for id, tm in vals.items()}
+
+        ty_env.update((n, AnId.from_id(Id(n, ty))) for n, (ty, _) in vals.items())
+        return ty_env, {n: tm for n, (_, tm) in vals.items()}
 
     def tc_datas(self, data_decls: list[RnDataDecl]) -> TypeEnv:
         """
@@ -56,6 +60,15 @@ class Typecheck:
                 env[con.name] = con
         return env
 
-    def tc_valbinds(self, valbinds: list[RnTermDecl]) -> dict[Id, CoreTm]:
+    def tc_prims(self, ptys: list[RnPrimTyDecl], pops: list[RnPrimOpDecl]) -> TypeEnv:
+        env: TypeEnv = {}
+        for pty in ptys:
+            env[pty.name] = APrimTy(pty.name, pty.tyvars)
+        for pop in pops:
+            name, ty = pop.name.name, pop.name.type_ann
+            env[name] = AnId(name, Id(name, ty), is_prim=True)
+        return env
+
+    def tc_valbinds(self, valbinds: list[RnTermDecl]) -> dict[Name, tuple[Ty, CoreTm]]:
         items = self.typecheck_expr.bindings([Binding(b.name, b.expr) for b in valbinds], lambda xs: xs)
-        return {b: tm() for b, tm in items}
+        return {b.name: (b.ty, tm()) for b, tm in items}

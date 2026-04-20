@@ -19,22 +19,25 @@ from .ty import Id, Lit, Name, Ty, TyVar, zonk_type
 
 class CoreTm(ABC):
     """Base class for core language terms."""
-    pass
+    
+    def __repr__(self) -> str:
+        from .core_pp import pp_core
+        return pp_core(self)
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreLit(CoreTm):
     """Literal value."""
     value: Lit
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreVar(CoreTm):
     """Local variable reference (lambda param, let-bound)."""
     id: Id
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreGlobalVar(CoreTm):
     """Top-level / module-level variable reference.
 
@@ -45,28 +48,28 @@ class CoreGlobalVar(CoreTm):
     id: Id
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreLam(CoreTm):
     """Lambda abstraction."""
     param: Id
     body: CoreTm
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreApp(CoreTm):
     """Function application."""
     fun: CoreTm
     arg: CoreTm
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreTyLam(CoreTm):
     """Type abstraction (polymorphic lambda)."""
     var: TyVar
     body: CoreTm
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreTyApp(CoreTm):
     """Type application (explicit instantiation)."""
     fun: CoreTm
@@ -78,20 +81,20 @@ class CoreTyApp(CoreTm):
 # =============================================================================
 
 
-@dataclass
+@dataclass(repr=False)
 class Binding:
     """Base class for bindings."""
     pass
 
 
-@dataclass
+@dataclass(repr=False)
 class NonRec(Binding):
     """Non-recursive binding: let x = expr in body"""
     binder: Id
     expr: CoreTm
 
 
-@dataclass
+@dataclass(repr=False)
 class Rec(Binding):
     """Recursive bindings: letrec { x = e1; y = e2 } in body
 
@@ -100,7 +103,7 @@ class Rec(Binding):
     bindings: list[tuple[Id, CoreTm]]
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreLet(CoreTm):
     """Let binding with NonRec or Rec."""
     binding: Binding
@@ -112,7 +115,7 @@ class CoreLet(CoreTm):
 # =============================================================================
 
 
-@dataclass
+@dataclass(repr=False)
 class CoreCase(CoreTm):
     scrut: CoreTm
     var: Id
@@ -120,18 +123,18 @@ class CoreCase(CoreTm):
     alts: list[tuple[Alt, CoreTm]]
 
 
-@dataclass
+@dataclass(repr=False)
 class DataAlt:
     con: Name
     vars: list[Id]
 
 
-@dataclass
+@dataclass(repr=False)
 class LitAlt:
     lit: Lit
 
 
-@dataclass
+@dataclass(repr=False)
 class DefaultAlt:
     pass
 
@@ -244,3 +247,31 @@ def shift_substs(substs: dict[Id, CoreTm], ids: list[Id]) -> dict[Id, CoreTm]:
 
 
 C = CoreBuilder()
+
+
+def pp_core(core: CoreTm, indent:int=0):
+    match core:
+        case CoreLit(value):
+            return f"Lit({value})"
+        case CoreVar(id):
+            return f"Var({id.name}:{id.ty})"
+        case CoreGlobalVar(id):
+            return f"GlobalVar({id.name}:{id.ty})"
+        case CoreLam(param, body):
+            return f"(\\{param.name}:{param.ty} -> {pp_core(body)})"
+        case CoreApp(fun, arg):
+            return f"({pp_core(fun)} {pp_core(arg)})"
+        case CoreTyLam(var, body):
+            return f"(\\@{var} -> {pp_core(body)})"
+        case CoreTyApp(fun, tyarg):
+            return f"({pp_core(fun)} @{tyarg})"
+        case CoreLet(binding, body):
+            match binding:
+                case NonRec(binder, expr):
+                    return f"(let {binder.name} = {pp_core(expr)} in {pp_core(body)})"
+                case Rec(bindings):
+                    binds_str = "; ".join(f"{b.name} = {pp_core(e)}" for b, e in bindings)
+                    return f"(letrec {{ {binds_str} }} in {pp_core(body)})"
+        case CoreCase(scrut, var, res_ty, alts):
+            alts_str = " | ".join(f"{pp_alt(alt)} -> {pp_core(tm)}" for alt, tm in alts)
+            return f"(case {pp_core(scrut)} of {var.name}:{res_ty} {{ {alts_str} }})"

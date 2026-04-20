@@ -9,7 +9,7 @@ from systemf.utils.location import Location
 from systemf.utils.uniq import Uniq
 
 
-class NameCache:
+class NameCacheImpl:
     """
     NameCache is only for toplevel names of a module.
     """
@@ -34,9 +34,6 @@ class NameCache:
     def put_all(self, names: Iterable[Name]):
         for name in names:
             self.put(name)
-
-
-NAME_CACHE = NameCache()
 
 
 class NameGeneratorImpl(NameGenerator):

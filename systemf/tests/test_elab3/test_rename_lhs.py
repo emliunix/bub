@@ -2,14 +2,14 @@
 and allocates fresh unique IDs for user-defined names.
 """
 
-from dataclasses import dataclass, field
 from systemf.elab3.rename import Rename
 from systemf.elab3.reader_env import ReaderEnv
-from systemf.elab3.name_gen import NameGeneratorImpl
+from systemf.elab3.name_gen import NameGeneratorImpl, NameCacheImpl
 from systemf.elab3.builtins import (
     BUILTIN_BOOL, BUILTIN_TRUE, BUILTIN_FALSE,
     BUILTIN_LIST, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL,
     BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR,
+    BUILTIN_UNIT, BUILTIN_MK_UNIT,
     BUILTIN_ENDS,
 )
 from systemf.elab3.types.ty import Name
@@ -17,19 +17,33 @@ from systemf.utils.ast_utils import structural_equals
 from systemf.utils.uniq import Uniq
 
 
-@dataclass
-class FakeCtx:
-    uniq: Uniq = field(default_factory=lambda: Uniq(BUILTIN_ENDS))
+def _make_fake_ctx():
+    _uniq = Uniq(BUILTIN_ENDS)
+    _cache = NameCacheImpl()
+    builtins = [
+        BUILTIN_BOOL, BUILTIN_TRUE, BUILTIN_FALSE,
+        BUILTIN_LIST, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL,
+        BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR,
+        BUILTIN_UNIT, BUILTIN_MK_UNIT,
+    ]
+    _cache.put_all(builtins)
 
-    def load(self, name: str):
-        raise NotImplementedError
+    class FakeCtx:
+        def __init__(self):
+            self.uniq = _uniq
+            self.name_cache = _cache
 
-    def next_replmod_id(self) -> int:
-        return 0
+        def load(self, name: str):
+            raise NotImplementedError
+
+        def next_replmod_id(self) -> int:
+            return 0
+
+    return FakeCtx()
 
 
 def mk_rename(mod_name: str = "builtins") -> Rename:
-    ctx = FakeCtx()
+    ctx = _make_fake_ctx()
     return Rename(ctx, ReaderEnv.empty(), mod_name, NameGeneratorImpl(mod_name, ctx.uniq))
 
 

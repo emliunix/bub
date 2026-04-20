@@ -188,6 +188,17 @@ class RnTermDecl:
     expr: Expr
 
 
+@dataclass
+class RnPrimTyDecl:
+    name: Name
+    tyvars: list[TyVar]
+
+
+@dataclass
+class RnPrimOpDecl:
+    name: AnnotName
+
+
 # =============================================================================
 # Import Declarations (always str - module names, not term/type names)
 # =============================================================================
@@ -213,6 +224,8 @@ class ModuleDecls:
     """All declarations in a module (pre-renaming)."""
     data_decls: list[RnDataDecl]
     term_decls: list[RnTermDecl]
+    prim_ty_decls: list[RnPrimTyDecl]
+    prim_op_decls: list[RnPrimOpDecl]
 
 
 def expr_names(expr: Expr) -> Generator[Name, None, None]:
