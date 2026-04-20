@@ -5,6 +5,7 @@ and allocates fresh unique IDs for user-defined names.
 from dataclasses import dataclass, field
 from systemf.elab3.rename import Rename
 from systemf.elab3.reader_env import ReaderEnv
+from systemf.elab3.name_gen import NameGeneratorImpl
 from systemf.elab3.builtins import (
     BUILTIN_BOOL, BUILTIN_TRUE, BUILTIN_FALSE,
     BUILTIN_LIST, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL,
@@ -28,7 +29,8 @@ class FakeCtx:
 
 
 def mk_rename(mod_name: str = "builtins") -> Rename:
-    return Rename(FakeCtx(), ReaderEnv.empty(), mod_name)
+    ctx = FakeCtx()
+    return Rename(ctx, ReaderEnv.empty(), mod_name, NameGeneratorImpl(mod_name, ctx.uniq))
 
 
 def test_new_lhs_name_builtin_bool():
