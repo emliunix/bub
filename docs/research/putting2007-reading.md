@@ -51,7 +51,19 @@ The system uses **two modes**:
 
 ## Files Reference
 
-### Main Paper Documentation
+### File Naming Conventions
+
+For each paper in this collection:
+
+| File | Purpose |
+|------|---------|
+| `*-[year].txt` | Plain text extraction of PDF for searching |
+| `*-[year]-index.md` | Line number index for navigating the paper |
+| `*.tex` | LaTeX source (if paper has formalization) |
+| `*.hs` | Reference implementation in Haskell |
+| `*.md` | Reading notes, manifest, or validation docs |
+
+### Main Paper Documentation (Putting 2007)
 
 **File**: [`docs/research/practical-type-inference-2007.tex`](practical-type-inference-2007.tex)
 
@@ -112,6 +124,23 @@ Plain text extraction of the PDF for searching.
 **Index**: [`docs/research/putting2007-index.md`](putting2007-index.md)
 
 Quick reference for navigating the paper by line numbers.
+
+### Dunfield & Krishnaswami 2022 - Bidirectional Typing
+
+**File**: [`Dunfield and Krishnaswami - 2022 - Bidirectional Typing.pdf`](Dunfield%20and%20Krishnaswami%20-%202022%20-%20Bidirectional%20Typing.pdf)
+
+Comprehensive survey of bidirectional typing systems.
+
+**Extracted files**:
+- [`dunfield-2022.txt`](dunfield-2022.txt) - Plain text extraction (2282 lines)
+- [`dunfield-2022-index.md`](dunfield-2022-index.md) - Line number index
+
+**Key sections**:
+- Sections 1-4: Core bidirectional typing theory and the Pfenning recipe
+- Section 5: Polymorphism (higher-rank types, HM bidirectionalization)
+- Section 6: Variations (mixed-direction, backwards, CBPV)
+- Sections 7-8: Proof theory connections, pattern matching
+- Pattern matching: Lines 498, 1406, 1834-1891
 
 ---
 
@@ -361,6 +390,66 @@ Checking if one type is "at least as polymorphic" as another:
 
 **Key insight for pattern elaboration**: World-indexed types (Section 3) provide the mechanism to handle pattern variables as fresh existentials. The bidirectional generator (Section 4.7) shows how checking mode can handle pattern scrutinees.
 
+### 4. Vytiniotis et al. 2011 - OutsideIn(X)
+
+**Paper**: "OutsideIn(X): Modular Type Inference with Local Assumptions"  
+**Authors**: Vytiniotis, Peyton Jones, Schrijvers, Sulzmann  
+**Location**: [`docs/research/`](./)
+
+| File | Description |
+|------|-------------|
+| [`vytiniotis-2011-outsidein.txt`](vytiniotis-2011-outsidein.txt) | Plain text extraction |
+| [`vytiniotis-2011-index.md`](vytiniotis-2011-index.md) | Line number index |
+
+**Key contribution**: Constraint-based inference for GADTs and type families. Introduces "touchable" vs "untouchable" variables for handling local constraints from pattern matching. Key innovation: restricting let-generalization with GADTs to maintain soundness.
+
+**Relationship to Putting 2007**: OutsideIn builds on Putting's bidirectional framework and extends it to handle GADT equality constraints brought in by pattern matching.
+
+### 5. Weirich et al. 2013 - System FC
+
+**Paper**: "System FC: Explicitly Typed Normalized Core"  
+**Authors**: Weirich, Vytiniotis, Peyton Jones, Zardenata  
+**Location**: [`docs/research/`](./)
+
+| File | Description |
+|------|-------------|
+| [`weirich-2013-system-fc.txt`](weirich-2013-system-fc.txt) | Plain text extraction |
+| [`weirich-2013-index.md`](weirich-2013-index.md) | Line number index |
+
+**Key contribution**: Formalizes GHC's Core language (System FC) with explicitly typed syntax. Shows how to add type equalities, type families, and coercions to a System F-style core.
+
+**Relationship to Putting 2007**: System FC is the target language for elaboration. Putting 2007 shows how to elaborate to System F; Weirich 2013 extends this with a more explicit coercion system.
+
+### 6. Lower Your Guards 2020
+
+**Paper**: "Lower Your Guards: A Simple Clause-Based Approach"  
+**Authors**: Abel, Pientka  
+**Location**: [`docs/research/`](./)
+
+| File | Description |
+|------|-------------|
+| [`lower-your-guards-2020.txt`](lower-your-guards-2020.txt) | Plain text extraction |
+| [`lower-your-guards-2020-index.md`](lower-your-guards-2020-index.md) | Line number index |
+
+**Key contribution**: Pattern-match coverage checking via a guard-based system. Used in GHC for exhaustiveness checking, separate from the Core code generation system.
+
+**Relationship to Putting 2007**: Putting 2007 handles pattern matching in the type inference context; Lower Your Guards handles the downstream coverage checking. GHC uses two parallel systems.
+
+### 7. Fan, Xu, Xie 2025 - Practical Type Inference with Levels
+
+**Paper**: "Practical Type Inference for Rank-N Types with Type Levels"  
+**Authors**: Fan, Xu, Xie  
+**Location**: [`docs/research/`](./)
+
+| File | Description |
+|------|-------------|
+| [`fan-xu-xie-2025-practical-type-inference-with-levels.txt`](fan-xu-xie-2025-practical-type-inference-with-levels.txt) | Plain text extraction |
+| [`fan-xu-xie-2025-index.md`](fan-xu-xie-2025-index.md) | Line number index |
+
+**Key contribution**: Extends Putting 2007-style inference with a level system to track type variable usage and enable better let-generalization.
+
+**Relationship to Putting 2007**: Builds directly on Putting 2007's bidirectional framework, adding level tracking for more precise generalization.
+
 ---
 
 ## Paper Relationships
@@ -373,6 +462,8 @@ Jones & Shields 2002 (Scoped Type Variables)
 Putting 2007 (Higher-Rank Type Inference)  ←  You are here
         ↓
 Eisenberg 2016 (Visible Type Application)
+        ↓
+Fan-Xu-Xie 2025 (Type Levels)
 ```
 
 ### Verification & Elaboration
@@ -383,16 +474,30 @@ Putting 2007 (Higher-rank, hand proofs)
 Carnier 2024 (Verified, constraint-based, elaboration)
 ```
 
+### GHC Core & Implementation
+
+```
+Weirich 2013 (System FC) ← Elaboration target
+        ↑
+Putting 2007 elaborates to System F
+        ↓
+Vytiniotis 2011 (OutsideIn) ← GHC's inference
+        ↓
+Lower Your Guards 2020 ← Coverage checking
+```
+
 **Reading order for implementation:**
 1. **Jones & Shields** - Understand scoped type variables (HMV_Annot, SB_Annot rules)
 2. **Putting 2007** - Understand bidirectional checking and higher-rank inference
 3. **Eisenberg 2016** - Add visible type application on top of the above
-4. **Carnier 2024** - For verified, modular type inference with elaboration
+4. **Fan-Xu-Xie 2025** - Add level tracking for better generalization
+5. **Carnier 2024** - For verified, modular type inference with elaboration
 
 **Reading order for pattern matching:**
-1. **Putting 2007** - Bidirectional checking fundamentals
-2. **Carnier 2024** - Constraint-based elaboration framework
-3. **GADT papers** (next) - Pattern matching with unknown scrutinee types
+1. **Putting 2007** - Bidirectional checking fundamentals + pattern matching (Section 7)
+2. **Vytiniotis 2011** - GADT constraints from pattern matching
+3. **Lower Your Guards 2020** - Coverage checking separate from Core generation
+4. **Carnier 2024** - Constraint-based elaboration framework
 
 ---
 

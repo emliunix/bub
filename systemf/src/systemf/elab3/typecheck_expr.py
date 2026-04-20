@@ -76,9 +76,6 @@ class TypeChecker(Unifier):
         raise Exception(f"global item not found {name}")
 
     # ---
-    # bindings
-
-    # ---
     # expression
 
     def expr(self, expr: Expr, exp: Expect) -> TyCkRes:
