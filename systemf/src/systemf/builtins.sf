@@ -31,3 +31,6 @@ prim_op bool_or  :: Bool -> Bool -> Bool
 
 -- String primitives
 prim_op string_concat :: String -> String -> String
+
+-- error
+prim_op error :: forall a. String -> a

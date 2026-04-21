@@ -33,6 +33,8 @@ BUILTIN_BOOL_OR = Name("builtins", "bool_or", 22)
 
 BUILTIN_STRING_CONCAT = Name("builtins", "string_concat", 23)
 
+BUILTIN_ERROR = Name("builtins", "error", 24)
+
 BUILTIN_ENDS = 1000
 
 
