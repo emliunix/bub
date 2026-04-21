@@ -7,7 +7,7 @@ Core terms use Id (Name + Type) for all variable references.
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 from .ty import Id, Lit, Name, Ty, TyVar, zonk_type
 
@@ -16,12 +16,17 @@ from .ty import Id, Lit, Name, Ty, TyVar, zonk_type
 # Core Terms
 # =============================================================================
 
+pp_core: Any = None
+
 
 class CoreTm(ABC):
     """Base class for core language terms."""
     
     def __repr__(self) -> str:
-        from .core_pp import pp_core
+        global pp_core
+        if pp_core is None:
+            from .core_pp import pp_core as pp
+            pp_core = pp
         return pp_core(self)
 
 
@@ -247,31 +252,3 @@ def shift_substs(substs: dict[Id, CoreTm], ids: list[Id]) -> dict[Id, CoreTm]:
 
 
 C = CoreBuilder()
-
-
-def pp_core(core: CoreTm, indent:int=0):
-    match core:
-        case CoreLit(value):
-            return f"Lit({value})"
-        case CoreVar(id):
-            return f"Var({id.name}:{id.ty})"
-        case CoreGlobalVar(id):
-            return f"GlobalVar({id.name}:{id.ty})"
-        case CoreLam(param, body):
-            return f"(\\{param.name}:{param.ty} -> {pp_core(body)})"
-        case CoreApp(fun, arg):
-            return f"({pp_core(fun)} {pp_core(arg)})"
-        case CoreTyLam(var, body):
-            return f"(\\@{var} -> {pp_core(body)})"
-        case CoreTyApp(fun, tyarg):
-            return f"({pp_core(fun)} @{tyarg})"
-        case CoreLet(binding, body):
-            match binding:
-                case NonRec(binder, expr):
-                    return f"(let {binder.name} = {pp_core(expr)} in {pp_core(body)})"
-                case Rec(bindings):
-                    binds_str = "; ".join(f"{b.name} = {pp_core(e)}" for b, e in bindings)
-                    return f"(letrec {{ {binds_str} }} in {pp_core(body)})"
-        case CoreCase(scrut, var, res_ty, alts):
-            alts_str = " | ".join(f"{pp_alt(alt)} -> {pp_core(tm)}" for alt, tm in alts)
-            return f"(case {pp_core(scrut)} of {var.name}:{res_ty} {{ {alts_str} }})"

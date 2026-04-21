@@ -14,7 +14,7 @@ from __future__ import annotations
 from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar, override
+from typing import Any, Generic, TypeVar, override
 
 from systemf.utils.location import Location
 
@@ -195,6 +195,9 @@ class Lit(ABC):
     @property
     def ty(self) -> Ty: ...
 
+    @property
+    def v(self) -> Any: ...
+
 
 @dataclass(frozen=True)
 class LitInt(Lit):
@@ -205,6 +208,11 @@ class LitInt(Lit):
     @override
     def ty(self) -> Ty:
         return TyInt()
+    
+    @property
+    @override
+    def v(self) -> Any:
+        return self.value
 
 
 @dataclass(frozen=True)
@@ -216,6 +224,11 @@ class LitString(Lit):
     @override
     def ty(self) -> Ty:
         return TyString()
+    
+    @property
+    @override
+    def v(self) -> Any:
+        return self.value
 
 
 # =============================================================================

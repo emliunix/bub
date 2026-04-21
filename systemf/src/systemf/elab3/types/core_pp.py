@@ -3,7 +3,6 @@ Pretty printer for core language terms.
 
 Indent-aware, uses core-specific syntax (not surface syntax).
 """
-
 from .core import (
     CoreApp,
     CoreCase,
@@ -41,7 +40,7 @@ def _pp(tm: CoreTm, depth: int, width: int) -> list[str]:
 
     match tm:
         case CoreLit(value):
-            return [f"{ind}{value.value!r}"]
+            return [f"{ind}{value.v!r}"]
 
         case CoreVar(id) | CoreGlobalVar(id):
             return [f"{ind}{id.name.surface}"]
@@ -140,7 +139,7 @@ def _pp_alt(alt) -> str:
                 return f"{con.surface} {' '.join(v.name.surface for v in vars)}"
             return con.surface
         case LitAlt(lit):
-            return repr(lit.value)
+            return repr(lit.v)
         case DefaultAlt():
             return "_"
         case _:

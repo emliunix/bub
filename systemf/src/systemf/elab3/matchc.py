@@ -199,8 +199,8 @@ class MatchC:
                 case _: raise Exception("unreachable")
 
         # FIX: we must not use groupby (local grouping) here
-        groups = defaultdict(list)
-        con_order = []
+        groups: dict[Name, list[tuple[XPat, Equation]]] = defaultdict(list)
+        con_order: list[Name] = []
         for t in zip(col, eqns):
             con = _by_con(t)
             if con not in groups:
@@ -209,9 +209,11 @@ class MatchC:
 
         def _go_grp(con: Name, pat_eqns: list[tuple[XPat, Equation]]) -> tuple[Name, list[Id], MatchResult]:
             _, eqns = unzip(pat_eqns)
-            pat_con = cast(XPatCon, pat_eqns[0][0])
-            ids = [self.name_gen.new_id(lambda i: f"_mc_con_{i}", ty) for ty in pat_con.arg_tys]
-            return (pat_con.con, ids, self.matchc(ids + vs, ty, unshift_eqn([cast(XPatCon, p).args for p, _ in pat_eqns], eqns)))
+            # the column must be of the same type
+            # so just take the first one's arg_tys
+            arg_tys = cast(XPatCon, pat_eqns[0][0]).arg_tys
+            ids = [self.name_gen.new_id(lambda i: f"_mc_con_{i}", ty) for ty in arg_tys]
+            return (con, ids, self.matchc(ids + vs, ty, unshift_eqn([cast(XPatCon, p).args for p, _ in pat_eqns], eqns)))
 
         return self.mk_con_alts(v, ty, [_go_grp(con, list(groups[con])) for con in con_order])
 
@@ -288,7 +290,7 @@ def mr_chain(resx: list[MatchResult]) -> MatchResult:
     return functools.reduce(lambda r, l: _merge2(l, r), reversed(resx))
 
 
-def _chain_mr_fi(left: MRFallible[CoreTm], right: MRInfallible[CoreTm]) -> MRInfallibleF[CoreTm]:
+def _chain_mr_fi(left: MRFallible[CoreTm], right: MRInfallible[CoreTm]) -> MRInfallible[CoreTm]:
     return MRInfallible(left.with_errorh(right.core))
 
 
