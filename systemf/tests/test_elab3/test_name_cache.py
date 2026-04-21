@@ -1,29 +1,29 @@
 from systemf.elab3.types.ty import Name
-from systemf.elab3.name_gen import NameCache
+from systemf.elab3.name_gen import NameCacheImpl
 from systemf.elab3.builtins import BUILTIN_BOOL, BUILTIN_LIST, BUILTIN_LIST_CONS
 
 
 def test_builtin_lookup():
-    cache = NameCache()
+    cache = NameCacheImpl()
     n = cache.get("builtins", "Bool")
     assert n == BUILTIN_BOOL
 
 
 def test_unknown_returns_none():
-    cache = NameCache()
+    cache = NameCacheImpl()
     n = cache.get("M", "foo")
     assert n is None
 
 
 def test_put_and_get():
-    cache = NameCache()
+    cache = NameCacheImpl()
     name = Name(mod="M", surface="foo", unique=9999)
     cache.put(name)
     assert cache.get("M", "foo") == name
 
 
 def test_put_all():
-    cache = NameCache()
+    cache = NameCacheImpl()
     names = [
         Name(mod="M", surface="a", unique=9001),
         Name(mod="M", surface="b", unique=9002),
@@ -34,7 +34,7 @@ def test_put_all():
 
 
 def test_builtins_prepopulated():
-    cache = NameCache()
+    cache = NameCacheImpl()
     assert cache.get("builtins", "Bool") == BUILTIN_BOOL
     assert cache.get("builtins", "List") == BUILTIN_LIST
     assert cache.get("builtins", "Cons") == BUILTIN_LIST_CONS

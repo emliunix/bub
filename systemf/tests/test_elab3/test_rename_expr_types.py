@@ -15,7 +15,7 @@ from systemf.elab3.builtins import (
 )
 from systemf.elab3.reader_env import ReaderEnv, ImportRdrElt, ImportSpec
 from systemf.elab3.types.ty import Name, BoundTv, TyFun, TyForall, TyInt, TyString, TyConApp
-from systemf.elab3.types.ast import VarPat, ConPat, LitPat, DefaultPat
+from systemf.elab3.types.ast import VarPat, ConPat, LitPat
 from systemf.utils.uniq import Uniq
 from systemf.utils.location import Location
 from systemf.utils.ast_utils import structural_equals
