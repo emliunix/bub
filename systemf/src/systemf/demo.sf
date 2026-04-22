@@ -130,3 +130,8 @@ data Tree a = Leaf a | Node (Tree a) a (Tree a)
 --   case t of
 --     Leaf x -> Cons x Nil
 --     Node l x r -> append (treeToList l) (Cons x (treeToList r))
+
+-- | Test explicit type annotation narrowing polymorphism
+-- const has type forall a b. a -> b -> a
+-- Here we annotate it as forall a. a -> a -> a (forcing b = a)
+testConstMono :: Int = (const :: forall a. a -> a -> a) 1 2

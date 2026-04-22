@@ -95,13 +95,12 @@ class TypeChecker(Unifier):
     def var(self, name: Name, exp: Expect) -> TyCkRes:
         match self.lookup(name):
             case AnId(id=Id(ty=ty) as id):
-                rho, w = self.instantiate(ty)
-                self.exp_set_ty(rho, exp)
-                # the lookup name maybe different from Id's name, so make sure use id
-                return self.with_wrapper(w, lambda: C.var(id))
+                sigma = ty
             case ACon(name=con):
-                return self.match_datacon_fun(con, exp)
+                sigma = self.datacon_fun(con)
             case thing: raise Exception(f"expected AnId for {name}, got: {thing}")
+        w = self.inst(sigma, exp)
+        return self.with_wrapper(w, lambda: C.var(Id(name, sigma)))
 
     def lit(self, lit: Lit, exp: Expect) -> TyCkRes:
         self.exp_set_ty(lit.ty, exp)
@@ -180,12 +179,13 @@ class TypeChecker(Unifier):
             return self.pat(pat, Check(scr_ty), lambda: _rhs(rhs))
         
         brs = [_branch(br) for br in branches]
+        res_ty = self.exp_to_ty(exp)
         scr_id = self.name_gen.new_id(lambda i: f"_scrut_{i}", scr_ty)
         
         def _core() -> CoreTm:
             eqns = [([p], cast(MatchResult, MRInfallible(rhs()))) for p, rhs in brs]
             mr = self.matchc.matchc([scr_id], scr_ty, eqns)
-            return C.let(scr_id, scr_c(), mr_run(mr, self.error_expr(scr_ty, "Unexhaustive patterns")))
+            return C.let(scr_id, scr_c(), mr_run(mr, self.error_expr(res_ty, "Unexhaustive patterns")))
 
         return _core
 
@@ -253,8 +253,8 @@ class TypeChecker(Unifier):
         rho, w_inst = self.instantiate(ty)
         tyvars, tyargs = self.match_tyconapp(con.parent, rho)
         return w_inst, rho, [subst_ty(tyvars, tyargs, arg_ty) for arg_ty in con.field_types]
-
-    def match_datacon_fun(self, con_name: Name, exp: Expect) -> TyCkRes:
+    
+    def datacon_fun(self, con_name: Name) -> Ty:
         con = self.lookup_datacon(con_name)
         tycon = self.lookup_tycon(con.parent)
 
@@ -262,10 +262,7 @@ class TypeChecker(Unifier):
             lambda acc, c: TyFun(c, acc),
             reversed(con.field_types),
             TyConApp(tycon.name, cast(list[Ty], tycon.tyvars)))
-        ty = TyForall(tycon.tyvars, fun_ty)
-
-        w = self.inst(ty, exp)
-        return self.with_wrapper(w, lambda: C.var(Id(con_name, ty)))
+        return TyForall(tycon.tyvars, fun_ty)
 
     def subs_check_pat(self, res: Expect, ty: Ty) -> Wrapper:
         match res:
