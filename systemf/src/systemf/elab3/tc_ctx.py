@@ -14,12 +14,14 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Callable, cast
 
+from systemf.elab3.builtins import BUILTIN_ERROR
+
 
 from .types import Name
-from .types.core import CoreTm
-from .types.tything import ACon, APrimTy, ATyCon, TyThing, TypeEnv
+from .types.core import C, CoreTm
+from .types.tything import ACon, APrimTy, ATyCon, AnId, TyThing, TypeEnv
 from .types.wrapper import WP_HOLE, WpCast, WpTyApp, WpTyLam, Wrapper, wp_compose, wp_fun
-from .types.ty import BoundTv, MetaTv, Ref, SkolemTv, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, get_meta_vars, subst_ty, varnames, zonk_type
+from .types.ty import BoundTv, LitString, MetaTv, Ref, SkolemTv, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, get_meta_vars, subst_ty, varnames, zonk_type
 from .types.tc import *
 
 from systemf.utils.uniq import Uniq
@@ -31,10 +33,10 @@ class TcCtx(ABC):
     type_env: TypeEnv
     tc_level: int
 
-    def __init__(self, mod_name: str, uniq: Uniq):
+    def __init__(self, mod_name: str, uniq: Uniq, init_type_env: TypeEnv | None = None):
         self.mod_name = mod_name
         self.uniq = uniq
-        self.type_env = {}
+        self.type_env = init_type_env if init_type_env is not None else {}
         self.tc_level = 0
 
     @contextmanager
@@ -63,12 +65,21 @@ class TcCtx(ABC):
     def lookup_gbl(self, name: Name) -> TyThing: ...
 
     def lookup_local(self, name: Name) -> TyThing | None:
-        return self.type_env.get(name)
+        th = self.type_env.get(name)
+        if th is None and name.surface in ['Nothing', 'Just', 'Left', 'Right', 'Leaf', 'Node']:
+            # trace name identity for datacon debugging
+            matching = [k for k in self.type_env.keys() if k.surface == name.surface]
+            print(f"[TRACE lookup_local] name={name} (id={id(name)}) not found in type_env")
+            for m in matching:
+                print(f"[TRACE lookup_local]   same-surface key: {m} (id={id(m)}, same_id={id(m) == id(name)})")
+        return th
 
     def lookup(self, name: Name) -> TyThing:
         if (th := self.lookup_local(name)) is not None:
             return th
         if name.mod == self.mod_name:
+            # Check if it's in gbl_type_env (for debugging)
+            print(f"[TRACE lookup] local miss for {name.surface} (id={id(name)}), mod={name.mod} == self.mod_name={self.mod_name}")
             raise Exception(f"local name not found: {name}")
         return self.lookup_gbl(name)
 
@@ -112,8 +123,8 @@ class TcCtx(ABC):
 
 class Unifier(TcCtx, ABC):
 
-    def __init__(self, mod_name: str, uniq: Uniq):
-        super().__init__(mod_name, uniq)
+    def __init__(self, mod_name: str, uniq: Uniq, init_type_env: TypeEnv | None = None):
+        super().__init__(mod_name, uniq, init_type_env)
 
     # ---
     # subsumption check
@@ -307,6 +318,15 @@ class Unifier(TcCtx, ABC):
                 self.unify(ty2, ty)
             case Infer(ref=ref):
                 ref.set(ty)
+
+    # ---
+    # core terms helper
+
+    def error_expr(self, ty: Ty, msg: str) -> CoreTm:
+        match self.lookup(BUILTIN_ERROR):
+            case AnId(id=id):
+                return C.app(C.tyapp(C.var(id), ty), C.lit(LitString(msg)))
+            case err: raise Exception(f"Builtin error has wrong type: {err}")
 
 def binders_of_ty(ty: Ty) -> list[TyVar]:
     """

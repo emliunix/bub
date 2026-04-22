@@ -332,16 +332,16 @@ def _ty_repr(ty: Ty, prec: int) -> str:
             case TyPrim(name=name):
                 return 3, name
             case BoundTv(name=name):
-                return 1, name.surface
+                return 3, name.surface
             case SkolemTv(name=name):
-                return 1, f"${name.unique}_{name.surface}"
+                return 3, f"${name.unique}_{name.surface}"
+            case TyConApp(name=name, args=[] | None):
+                    return 3, name.surface
             case TyConApp(name=name, args=args):
-                if not args:
-                    return 1, name.surface
                 args_str = " ".join(_ty_repr(a, 2) for a in args)
                 return 2, f"{name.surface} {args_str}"
             case TyFun(arg=arg, result=res):
-                return 1, f"{_ty_repr(arg, 1)} -> {_ty_repr(res, 0)}"
+                return 1, f"{_ty_repr(arg, 2)} -> {_ty_repr(res, 1)}"
             case TyForall(vars=vars, body=body):
                 var_strs = " ".join(
                     v.name.surface for v in vars if isinstance(v, (BoundTv, SkolemTv))

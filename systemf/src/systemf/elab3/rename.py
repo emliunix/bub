@@ -139,9 +139,11 @@ class Rename:
         otherwise we generate a new name and put it in the cache so later occ_name lookup finds it.
         """
         if (n := self.ctx.name_cache.get(self.mod_name, name)) is not None:
+            print(f"[TRACE new_lhs_name] CACHE HIT: {self.mod_name}.{name} -> {n}")
             return n
         n = self.name_gen.new_name(name, loc)
         self.ctx.name_cache.put(n)
+        print(f"[TRACE new_lhs_name] NEW: {self.mod_name}.{name} -> {n}")
         return n
 
     def new_lhs_names(self, names: list[str], loc: Location | None) -> list[Name]:

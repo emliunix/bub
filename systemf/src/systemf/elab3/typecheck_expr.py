@@ -51,25 +51,22 @@ class TypeChecker(Unifier):
     name_gen: NameGenerator
     wrapper_runner: WrapperRunner
     matchc: MatchC
-    gbl_type_env: TypeEnv
 
     def __init__(self,
                  ctx: REPLContext, 
                  mod_name: str,
                  name_gen: NameGenerator,
-                 gbl_type_env: TypeEnv,
+                 init_type_env: TypeEnv | None = None,
                  ):
-        super().__init__(mod_name, ctx.uniq)
+        super().__init__(mod_name, ctx.uniq, init_type_env)
         self.ctx = ctx
         self.name_gen = name_gen
         self.wrapper_runner = WrapperRunner(name_gen)
         self.matchc = MatchC(self, name_gen)
-        self.gbl_type_env = gbl_type_env
+        print(f"[TRACE TypeChecker.__init__] local type_env has {len(self.type_env)} entries (should be 0)")
 
     @override
     def lookup_gbl(self, name: Name) -> TyThing:
-        if (r := self.gbl_type_env.get(name)) is not None:
-            return r
         if (r := self.ctx.load(name.mod).items.get(name)) is not None:
             return r
         raise Exception(f"global item not found {name}")
@@ -165,8 +162,8 @@ class TypeChecker(Unifier):
         
         def _core() -> CoreTm:
             mr = self.matchc.matchc(arg_ids, res_ty, [(arg_pats, MRInfallible(body_c()))])
-            body = mr_run(mr, C.lit(LitInt(0)))  # FIX: dummy error handler
-            return functools.reduce(lambda body, id: C.lam(id, body), arg_ids, body)
+            body = mr_run(mr, self.error_expr(res_ty, "Unexhaustive patterns"))
+            return functools.reduce(lambda body, id: C.lam(id, body), reversed(arg_ids), body)
 
         return self.with_wrapper(w, _core)
 
@@ -188,7 +185,7 @@ class TypeChecker(Unifier):
         def _core() -> CoreTm:
             eqns = [([p], cast(MatchResult, MRInfallible(rhs()))) for p, rhs in brs]
             mr = self.matchc.matchc([scr_id], scr_ty, eqns)
-            return C.let(scr_id, scr_c(), mr_run(mr, C.lit(LitInt(0))))  # FIX: dummy error handler
+            return C.let(scr_id, scr_c(), mr_run(mr, self.error_expr(scr_ty, "Unexhaustive patterns")))
 
         return _core
 
@@ -296,7 +293,8 @@ class TypeChecker(Unifier):
             for bind in bindings    
         ]
         groups = run_scc(scc_input)
-        return multiple(groups, self._binding_group, cb)
+        with self.extend_env([(b.name.name, AnId.from_id(Id(b.name.name, b.name.type_ann))) for b in bindings if isinstance(b.name, AnnotName)]):
+            return multiple(groups, self._binding_group, cb)
     
     def _binding_group(self, group: SccGroup[Binding], cb: CB[R]) -> tuple[BindingGroup, R]:
         if group.is_recursive:
