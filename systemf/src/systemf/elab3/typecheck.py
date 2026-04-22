@@ -2,13 +2,15 @@
 typecheck module
 """
 
-from .typecheck_expr import TypeChecker
+from systemf.elab3.types.tc import NonRecGroup, RecGroup
+from .typecheck_expr import TypeChecker, ds_binding
 
 from .types import NameGenerator, REPLContext, Name, Ty
 from .types.ast import Binding, ModuleDecls, RnDataConDecl, RnDataDecl, RnPrimOpDecl, RnPrimTyDecl, RnTermDecl
-from .types.core import CoreTm
+from .types.core import CoreTm, CoreLet, Rec, C
 from .types.ty import Id
 from .types.tything import APrimTy, AnId, TypeEnv, ATyCon, ACon
+from systemf.elab3.types import core
 
 
 class Typecheck:
@@ -33,16 +35,16 @@ class Typecheck:
             self.type_env
         )
 
-    def typecheck(self, mod: ModuleDecls) -> tuple[TypeEnv, dict[Name, CoreTm]]:
+    def typecheck(self, mod: ModuleDecls) -> tuple[TypeEnv, dict[Name, core.Binding]]:
         ty_env = self.tc_datas(mod.data_decls)
         ty_env.update(self.tc_prims(mod.prim_ty_decls, mod.prim_op_decls))
 
         # update for tc_valbinds
         self.type_env.update(ty_env)
-        vals = self.tc_valbinds(mod.term_decls)
+        bindings = self.tc_valbinds(mod.term_decls)
 
-        ty_env.update((n, AnId.from_id(Id(n, ty))) for n, (ty, _) in vals.items())
-        return ty_env, {n: tm for n, (_, tm) in vals.items()}
+        ty_env.update((id.name, AnId.from_id(id)) for id, _ in bindings)
+        return ty_env, {n.name: tm for n, tm in bindings}
 
     def tc_datas(self, data_decls: list[RnDataDecl]) -> TypeEnv:
         """
@@ -69,6 +71,26 @@ class Typecheck:
             env[name] = AnId(name, Id(name, ty), is_prim=True)
         return env
 
-    def tc_valbinds(self, valbinds: list[RnTermDecl]) -> dict[Name, tuple[Ty, CoreTm]]:
-        items = self.typecheck_expr.bindings([Binding(b.name, b.expr) for b in valbinds], lambda xs: xs)
-        return {b.name: (b.ty, tm()) for b, tm in items}
+    def tc_valbinds(self, valbinds: list[RnTermDecl]) -> list[tuple[Id, core.Binding]]:
+        groups, _ = self.typecheck_expr.bindings([Binding(b.name, b.expr) for b in valbinds], lambda: None)
+        result = {}
+        bs = [
+            ds_binding(group)
+            for group in groups
+        ]
+
+        def _ids(b: core.Binding) -> list[Id]:
+            match b:
+                case core.NonRec(id, _):
+                    return [id]
+                case core.Rec(bindings):
+                    return [id for id, _ in bindings]
+                case _: raise Exception("unreachable")
+        res = []
+        for b in bs:
+            for n in _ids(b):
+                if n in res:
+                    raise Exception(f"duplicate binding for {n}")
+                # FIX: the sharing of RecGroup
+                res.append((n, b))
+        return res

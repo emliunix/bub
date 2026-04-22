@@ -4,18 +4,26 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Callable, TypeVar, cast, override
 
+from systemf.elab3 import builtins
 from systemf.utils import run_capture_return
 
 from .types import Name, NameGenerator, REPLContext
-from .types.ast import Ann, AnnotName, App, Binding, Case, CaseBranch, Expr, Lam, Let, LitExpr, Pat, ConPat, Var, VarPat, LitPat, WildcardPat
-from .types.core import C, CoreTm
+from .types.ast import (
+    Ann, AnnotName, App, Binding, Case, CaseBranch,
+    Expr, Lam, Let, LitExpr, Pat, ConPat, Var, VarPat,
+    LitPat, WildcardPat, expr_names, name_of
+)
+from .types.core import C, CoreTm, CoreLet, NonRec, Rec
 from .types.tything import ACon, AnId, TyThing, TypeEnv
-from .types.wrapper import WP_HOLE, Wrapper, WrapperRunner, mk_wp_ty_lams, wp_compose, zonk_wrapper
+from .types.wrapper import WP_HOLE, WpTyApp, Wrapper, WrapperRunner, mk_wp_ty_lams, wp_compose, zonk_wrapper
 from .types.ty import Id, Lit, LitInt, MetaTv, Ty, TyConApp, TyForall, TyFun, TyVar, get_meta_vars, subst_ty, zonk_type
 from .types.xpat import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
+from .types.tc import *
 
 from .matchc import MRInfallible, MatchC, MatchResult, mr_run
 from .tc_ctx import Expect, Infer, Check, TyCkRes, Unifier
+from .scc import run_scc, SccGroup
+from systemf.elab3.types import core
 
 
 T = TypeVar("T")
@@ -92,6 +100,7 @@ class TypeChecker(Unifier):
             case AnId(id=Id(ty=ty) as id):
                 rho, w = self.instantiate(ty)
                 self.exp_set_ty(rho, exp)
+                # the lookup name maybe different from Id's name, so make sure use id
                 return self.with_wrapper(w, lambda: C.var(id))
             case ACon(name=con):
                 return self.match_datacon_fun(con, exp)
@@ -131,16 +140,10 @@ class TypeChecker(Unifier):
         return self.with_wrapper(res_w, res)
 
     def let(self, bindings: list[Binding], body: Expr, exp: Expect) -> TyCkRes:
-        def _body(bindings_tc: list[tuple[Id, TyCkRes]]) -> TyCkRes:
-            # the ids already in scope
-            body_c = self.expr(body, exp)
-            def _core():
-                def _go(body: CoreTm, bind: tuple[Id, TyCkRes]) -> CoreTm:
-                    id, bind_c = bind
-                    return C.let(id, bind_c(), body)
-                return functools.reduce(_go, reversed(bindings_tc), body_c())
-            return _core
-        return self.bindings(bindings, _body)
+        bgs, body_c = self.bindings(bindings, lambda: self.expr(body, exp))
+        def _core() -> CoreTm:
+            return functools.reduce(lambda acc, bg: core.CoreLet(ds_binding(bg), acc), reversed(bgs), body_c())
+        return _core
 
     def lam(self, args: list[Name | AnnotName], body: Expr, exp: Expect) -> TyCkRes:
         def _go(arg_exps: list[Expect], res_exp: Expect) -> tuple[list[XPat], TyCkRes]:
@@ -285,20 +288,72 @@ class TypeChecker(Unifier):
     # ---
     # bindings
 
-    def bindings(self, bindings: list[Binding], cb: Callable[[list[tuple[Id, TyCkRes]]], R]) -> R:
-        def _bind1(bind: Binding) -> tuple[Id, TyCkRes]:
+    def bindings(self, bindings: list[Binding], cb: CB[R]) -> tuple[list[BindingGroup], R]:
+        """Process bindings via SCC analysis, returning ordered BindingGroups."""
+        annot_names = set(name_of(b.name) for b in bindings)
+        scc_input = [
+            (bind, name_of(bind.name), [n for n in expr_names(bind.expr) if n not in annot_names])
+            for bind in bindings    
+        ]
+        groups = run_scc(scc_input)
+        return multiple(groups, self._binding_group, cb)
+    
+    def _binding_group(self, group: SccGroup[Binding], cb: CB[R]) -> tuple[BindingGroup, R]:
+        if group.is_recursive:
+            if any(isinstance(b.name, AnnotName) for b in group.bindings):
+                # this should be guaranteed by the run_scc edges construction in bindings()
+                raise Exception("recursive bindings cannot have type annotations")
+            binding_grp: BindingGroup = self._rec_group(group.bindings)
+        else:
+            binding_grp: BindingGroup = self._nonrec_group(group.bindings)
+
+        def _mk_env(group: BindingGroup) -> list[tuple[Name, TyThing]]:
+            match group:
+                case NonRecGroup(bndr, _):
+                    return [(bndr.name, AnId.from_id(bndr))]
+                case RecGroup(abs_binds):
+                    return [(exp.poly_id.name, AnId.from_id(exp.poly_id)) for exp in abs_binds.exports]
+
+        with self.extend_env(_mk_env(binding_grp)):
+            return binding_grp, cb()
+        
+    def _nonrec_group(self, bindings: list[Binding]) -> NonRecGroup:
+        if len(bindings) != 1:
+            raise Exception("non-recursive group should have exactly one binding")
+        binding = bindings[0]
+        match binding:
+            case Binding(AnnotName(name, ty), expr):
+                bndr, res = Id(name, ty), self.poly_check_expr(expr, ty)
+            case Binding(Name() as name, expr):
+                ty, res = self.run_infer(lambda inf: self.poly_infer_expr(expr, inf))
+                bndr, res = Id(name, ty), res
+            case _: raise Exception("unreachable")
+        return NonRecGroup(bndr, res)
+    
+    def _rec_group(self, bindings: list[Binding]) -> RecGroup:
+        names = [name_of(b.name) for b in bindings]
+        mono_ids = [self.name_gen.new_id(f"_{name.surface}_mono", self.make_meta()) for name in names]
+
+        def _tc_rhs(bind: Binding, mono_id: Id) -> TyCkRes:
             match bind:
-                case Binding(AnnotName(name, ty), expr):
-                    return Id(name, ty), self.poly_check_expr(expr, ty)
-                case Binding(Name() as name, expr):
-                    # TODO: check the invariant Expect can hold poly type or not.
-                    ty, res = self.run_infer(lambda inf: self.poly_infer_expr(expr, inf))
-                    return Id(name, ty), res
+                case Binding(Name(), rhs):
+                    return self.expr(rhs, Check(mono_id.ty))
                 case _: raise Exception("unreachable")
-        bind_res = [_bind1(bind) for bind in bindings]
-        # TODO: scc into groups and properly handle recursive bindings.
-        with self.extend_env([(id.name, AnId(id.name, id)) for id, _ in bind_res]):
-            return cb(bind_res)
+        with self.extend_env([(name, AnId.from_id(id)) for name, id in zip(names, mono_ids)]):
+            with self.push_level():
+                rhss = [
+                    _tc_rhs(bind, mono_id)
+                    for bind, mono_id in zip(bindings, mono_ids)
+                ]
+        mono_tys = [id.ty for id in mono_ids]
+        tvs = [m for m in get_meta_vars(mono_tys) if m.level == self.tc_level + 1]
+        binders, sigma_tys = self.quantify(tvs, mono_tys)
+        exports = [
+            ABExport(Id(name, sigma_ty), mono_id, WP_HOLE)
+            for name, mono_id, sigma_ty in zip(names, mono_ids, sigma_tys)
+        ]
+        abs_binds = AbsBinds(binders, exports, list(zip(mono_ids, rhss)))
+        return RecGroup(abs_binds)
 
     # ---
     # helpers
@@ -324,6 +379,13 @@ class TypeChecker(Unifier):
                     return wp_compose(w, w2), ty_arg, ty_res
                 case TyFun(ty_arg, ty_res):
                     return WP_HOLE, ty_arg, ty_res
+                case MetaTv(ref=ref) if (ty_ := ref.get()) is not None:
+                    return _check1(ty_)
+                case MetaTv() as mt:
+                    arg_ty = self.make_meta(mt.level)
+                    res_ty = self.make_meta(mt.level)
+                    self.unify(mt, TyFun(arg_ty, res_ty))
+                    return WP_HOLE, arg_ty, res_ty
                 case _:
                     raise Exception(f"Expected a function type, got {ty}")
                 
@@ -339,7 +401,11 @@ class TypeChecker(Unifier):
             case Infer():
                 mv_args = [cast(Expect, self.make_infer()) for _ in range(arity)]
                 mv_res = self.make_infer()
-                return WP_HOLE, list(map(_exp_ty, mv_args)), _exp_ty(mv_res), cb(mv_args, mv_res)
+                # the order is important, cb() called before _exp_ty()
+                res = cb(mv_args, mv_res)
+                arg_tys = list(map(_exp_ty, mv_args))
+                res_ty = _exp_ty(mv_res)
+                return WP_HOLE, arg_tys, res_ty, res
             case Check(ty):
                 ws: list[Wrapper] = []
                 arg_tys: list[Ty] = []
@@ -358,7 +424,7 @@ class TypeChecker(Unifier):
                         functools.reduce(lambda acc, c: wp_compose(c, acc), reversed(ws), WP_HOLE),
                         arg_tys,
                         res_ty,
-                        cb(list(map(Check, arg_tys)), Check(res_ty))
+                        cb([Check(ty) for ty in arg_tys], Check(res_ty))
                     )
 
     def inst_fun(self, ty: Ty, arity: int) -> tuple[list[InstFun], Ty]:
@@ -374,6 +440,19 @@ class TypeChecker(Unifier):
                     return res_ty
                 case TyFun(ty_arg, res_ty):
                     yield InstFunArg(ty_arg)
+                    res_ty2 = yield from _inst(res_ty, arity - 1)
+                    return res_ty2
+                # to check with meta type, it feels like infer
+                case MetaTv(ref=ref) if (ty_ := ref.get()) is not None:
+                    res = yield from _inst(ty_, arity)
+                    return res
+                case MetaTv() as mt:
+                    if arity == 0:
+                        return ty
+                    arg_ty = self.make_meta(mt.level)
+                    res_ty = self.make_meta(mt.level)
+                    self.unify(mt, TyFun(arg_ty, res_ty))
+                    yield InstFunArg(arg_ty)
                     res_ty2 = yield from _inst(res_ty, arity - 1)
                     return res_ty2
                 case _:
@@ -476,3 +555,34 @@ def multiple(xs: list[T], fun: Callable[[T, CB[R]], tuple[A,R]], cb: CB[R]) -> t
         return _go
     res = functools.reduce(lambda f, x: _mk_go(x, f), reversed(xs), cb)()
     return list(reversed(ts)), res
+
+
+def ds_binding(binding: BindingGroup) -> core.Binding:
+    match binding:
+        case NonRecGroup(bndr, rhs):
+            return core.NonRec(bndr, rhs())
+        case RecGroup(AbsBinds([], _, binds)):
+            return core.Rec([(mono_id, rhs_c()) for mono_id, rhs_c in binds])
+        case RecGroup(AbsBinds(tvs, [ABExport(poly_id, mono_id, _)], [(_, rhs_c)])):
+            return core.NonRec(poly_id,
+                         _tylams(tvs,
+                                 C.letrec([(mono_id, rhs_c())], C.var(mono_id))))
+        case _:
+            raise Exception("unimplemented: poly mutual recursive bindings")
+
+
+def _tylams(tyvars: list[TyVar], tm: CoreTm) -> CoreTm:
+    return functools.reduce(lambda acc, tv: C.tylam(tv, acc), reversed(tyvars), tm)
+
+
+# def mk_tuple(args: list[CoreTm], tys: list[Ty]) -> tuple[CoreTm, Ty]:
+#     match (args, tys):
+#         case [], []:
+#             raise Exception("cannot create tuple of arity 0")
+#         case [arg], [ty]:
+#             return arg, ty
+#         case [a,*ax], [ty, *tyx]:
+#             rest, rest_ty = mk_tuple(ax, tyx)
+#             ty = TyConApp(builtins.BUILTIN_PAIR, [ty, rest_ty])
+#             mk_pair = C.var(Id(builtins.BUILTIN_PAIR_MKPAIR, TyConApp(builtins.BUILTIN_PAIR, [ty, rest_ty])))
+#             return C.app(C.app(C.var(Id(builtins.BUILTIN_PAIR_MKPAIR, TyConApp(builtins.BUILTIN_PAIR, [])), a), rest), ty), ty

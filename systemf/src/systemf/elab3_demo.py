@@ -33,7 +33,7 @@ def main() -> None:
     print(f"  Exports: {[n.surface for n in demo_mod.exports]}")
     print(f"  Items: {list(demo_mod.items.keys())}")
     print(f"\n  Core terms (vals):")
-    for name, term in demo_mod.vals.items():
+    for name, term in demo_mod.bindings.items():
         print(f"\n    {name.surface}:")
         for line in pp_core(term).split("\n"):
             print(f"      {line}")

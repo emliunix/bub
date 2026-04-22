@@ -25,12 +25,12 @@ def execute(ctx: REPLContext, mod_name: str, file_path: str, code: str,
 
     # 3. Typecheck
     typecheck = Typecheck(mod_name, ctx, name_gen)
-    type_env, terms = typecheck.typecheck(res.rn_mod)
+    type_env, bindings = typecheck.typecheck(res.rn_mod)
 
     return Module(
         name=mod_name,
         items=type_env,
-        vals=terms,
+        bindings=bindings,
         exports=list(type_env.keys()),
         source_path=file_path
     )

@@ -32,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from dataclasses import dataclass
 
-from .ty import BoundTv, Lit, Name, Ty, TyVar
+from .ty import Lit, Name, Ty, TyVar
 
 
 # =============================================================================
@@ -44,6 +44,14 @@ from .ty import BoundTv, Lit, Name, Ty, TyVar
 class AnnotName:
     name: Name
     type_ann: Ty
+
+
+def name_of(n: Name | AnnotName) -> Name:
+    match n:
+        case Name():
+            return n
+        case AnnotName(name=name):
+            return name
 
 
 class Expr:

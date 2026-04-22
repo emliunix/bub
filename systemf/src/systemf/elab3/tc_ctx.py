@@ -19,29 +19,10 @@ from .types import Name
 from .types.core import CoreTm
 from .types.tything import ACon, APrimTy, ATyCon, TyThing, TypeEnv
 from .types.wrapper import WP_HOLE, WpCast, WpTyApp, WpTyLam, Wrapper, wp_compose, wp_fun
-from .types.ty import BoundTv, MetaTv, Ref, SkolemTv, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, get_meta_vars, subst_ty, varnames
+from .types.ty import BoundTv, MetaTv, Ref, SkolemTv, Ty, TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, get_meta_vars, subst_ty, varnames, zonk_type
+from .types.tc import *
 
 from systemf.utils.uniq import Uniq
-
-
-@dataclass
-class Infer:
-    lvl: int
-    ref: Ref[Ty]
-
-    def set(self, ty: Ty):
-        self.ref.set(ty)
-
-
-@dataclass
-class Check:
-    ty: Ty
-
-
-type Expect = Infer | Check
-
-type TyCk[T] = Callable[[], T]
-type TyCkRes = TyCk[CoreTm]
 
 
 class TcCtx(ABC):
@@ -151,6 +132,8 @@ class Unifier(TcCtx, ABC):
         return wp_compose(sks_wrap, subs_wrap)
 
     def subs_check_rho(self, sigma: Ty, rho: Ty) -> Wrapper:
+        sigma = zonk_type(sigma)
+        rho = zonk_type(rho)
         match (sigma, rho):
             case (TyForall(), _):          # DSK/SPEC
                 in_rho, in_wrap = self.instantiate(sigma)
