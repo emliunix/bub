@@ -28,6 +28,7 @@ from systemf.surface.parser.helpers import (
     column,
     match_token,
     must_continue,
+    peek_column,
 )
 from systemf.surface.parser.type_parser import type_app_parser, type_atom_parser, type_parser
 
@@ -425,19 +426,6 @@ def app_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     return parser
 
 
-def peek_column() -> P[int]:
-    """Peek at the column of the next token without consuming it.
-
-    Returns 0 if at end of input.
-    """
-
-    @P
-    def parser(tokens: list, index: int) -> Result:
-        if index >= len(tokens):
-            return Result.success(index, 0)
-        return Result.success(index, tokens[index].location.column)
-
-    return parser
 
 
 # =============================================================================

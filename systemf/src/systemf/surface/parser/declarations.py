@@ -44,7 +44,7 @@ from systemf.surface.parser.type_parser import (
 
 # Import expression parser for term declaration bodies
 from systemf.surface.parser.expressions import expr_parser as _expr_parser_factory
-from systemf.surface.parser.helpers import AnyIndent, AtPos, AfterPos, ValidIndent, column
+from systemf.surface.parser.helpers import AnyIndent, AtPos, AfterPos, ValidIndent
 
 
 def skip_inline_docstrings() -> P[None]:
@@ -341,19 +341,20 @@ def term_parser() -> P[SurfaceTermDeclaration]:
         # Match "::" for type annotation
         yield match_symbol("::")
 
-        # Parse type
-        ty = yield type_parser()
+        # Parse type — constrained so that the next top-level declaration
+        # (which starts at the same column as name_token) is never consumed
+        # as a type application argument.
+        decl_col = name_token.location.column
+        ty = yield type_parser(AfterPos(col=decl_col + 1))
 
         # Match "=" for definition
         yield match_symbol("=")
 
-        # Capture column of first body token for layout constraint
-        # Multi-line bodies should stop when we see a token at/before this column
-        body_col = yield column()
-        body_constraint = AfterPos(col=body_col - 1)
-
-        # Parse expression body with layout constraint
-        body = yield _expr_parser_factory(body_constraint)
+        # The declaration name's column is the block column for the entire
+        # declaration — both the type (above) and the body use the same
+        # AfterPos(decl_col + 1) constraint.  Any token at column <= decl_col
+        # belongs to the next declaration, not to this body.
+        body = yield _expr_parser_factory(AfterPos(col=decl_col + 1))
 
         return SurfaceTermDeclaration(
             name=name,
@@ -409,8 +410,12 @@ def prim_op_parser() -> P[SurfacePrimOpDecl]:
         # Match "::" for type annotation
         yield match_symbol("::")
 
-        # Parse type
-        ty = yield type_parser()
+        # Parse type — constrained so that the next top-level declaration
+        # (at the same column as prim_token) is never consumed as a type
+        # application argument.  AfterPos(decl_col + 1) accepts only tokens
+        # strictly indented past the declaration keyword.
+        decl_col = prim_token.location.column
+        ty = yield type_parser(AfterPos(col=decl_col + 1))
 
         return SurfacePrimOpDecl(
             name=name,

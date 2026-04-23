@@ -9,6 +9,26 @@ Parsers implemented:
 - Function types (arrows)
 - Universal quantification (forall)
 - Tuple types
+
+Layout-sensitive parsing
+------------------------
+All parsers accept an optional ``constraint: ValidIndent`` argument that is
+threaded through every sub-parser.  The semantics follow Idris2's approach:
+
+- ``AnyIndent()``  — no column restriction (default, used inside parens/tuples)
+- ``AfterPos(c)``  — token must be at column >= c (used for declaration bodies)
+
+The constraint is checked at two places:
+
+1. Before each additional argument in ``type_app_parser`` (mirrors Idris2's
+   ``many (argExpr fname indents)`` where ``argExpr`` starts with
+   ``continue indents``).
+2. Before the optional ``->`` arrow in ``type_arrow_parser`` (mirrors Idris2's
+   ``continue indents`` guard in ``typeExpr``).
+
+``peek_column()`` returns 0 at EOF; ``check_valid`` returns False for column 0
+against any real constraint, so both EOF and layout boundaries terminate loops
+non-consumingly.
 """
 
 from __future__ import annotations
@@ -18,21 +38,24 @@ from typing import List, TypeVar
 import parsy
 from parsy import Parser, Result, alt, fail, generate
 
-from systemf.surface.parser.helpers import match_token
+from systemf.surface.parser.helpers import (
+    check_valid,
+    match_token,
+    peek_column,
+)
 from systemf.surface.parser.types import (
+    AnyIndent,
     ArrowToken,
     CommaToken,
-    DelimiterToken,
     DocstringToken,
     DocstringType,
     DotToken,
     ForallToken,
     IdentifierToken,
-    KeywordToken,
     LeftParenToken,
-    OperatorToken,
     RightParenToken,
     TokenBase,
+    ValidIndent,
 )
 from systemf.surface.types import (
     SurfaceType,
@@ -40,9 +63,9 @@ from systemf.surface.types import (
     SurfaceTypeVar,
 )
 
-# Type variable for generic parsers
 T = TypeVar("T")
 type P[T] = Parser[List[TokenBase], T]
+
 
 # =============================================================================
 # Token Matching Helpers
@@ -50,11 +73,7 @@ type P[T] = Parser[List[TokenBase], T]
 
 
 def match_forall() -> P[ForallToken]:
-    """Match a forall token (forall keyword or ∀).
-
-    Returns:
-        Parser that returns the matched forall token
-    """
+    """Match a forall token (``forall`` keyword or ``∀``)."""
 
     @Parser
     def parser(tokens: list, index: int) -> Result:
@@ -69,10 +88,10 @@ def match_forall() -> P[ForallToken]:
 
 
 def match_inline_docstring() -> P[str | None]:
-    """Match an inline docstring token (-- ^ doc).
+    """Match an inline docstring token (``-- ^``).
 
-    Returns:
-        Parser that returns the docstring content or None
+    Always succeeds: returns the docstring content if present, ``None``
+    otherwise (non-consuming on no-match).
     """
 
     @Parser
@@ -91,7 +110,10 @@ def match_inline_docstring() -> P[str | None]:
 # Forward Declaration for Recursive Type Parser
 # =============================================================================
 
-
+# Used by type_atom_parser (parenthesised types) and type_tuple_parser.
+# Both of these appear inside explicit delimiters, so they always use
+# AnyIndent — the forward-declaration is initialised at the bottom of
+# this module with type_parser(AnyIndent()).
 _type_parser: P[SurfaceType] = parsy.forward_declaration()
 
 
@@ -102,29 +124,24 @@ _type_parser: P[SurfaceType] = parsy.forward_declaration()
 
 @generate
 def type_tuple_parser() -> P[SurfaceType]:
-    """Parse a tuple type: (t1, t2, ..., tn).
+    """Parse a tuple type: ``(t1, t2, ..., tn)``.
 
-    Sugar for nested Pair types: Pair t1 (Pair t2 (... tn))
-
-    Returns:
-        SurfaceTypeTuple containing the elements
+    Sugar for nested ``Pair`` types.  Always uses ``AnyIndent`` because the
+    content is enclosed in parentheses.
     """
     from systemf.surface.types import SurfaceTypeTuple
 
     open_paren = yield match_token(LeftParenToken)
     loc = open_paren.location
 
-    # Parse first element
     first = yield _type_parser
     elements = [first]
 
-    # Parse comma-separated elements
     while True:
         yield match_token(CommaToken)
         elem = yield _type_parser
         elements.append(elem)
 
-        # Check if we're at the closing paren
         close_paren = yield match_token(RightParenToken).optional()
         if close_paren is not None:
             break
@@ -133,202 +150,239 @@ def type_tuple_parser() -> P[SurfaceType]:
 
 
 def type_atom_parser() -> P[SurfaceType]:
-    """Parse a type atom (base type without arrows).
+    """Parse a type atom — the smallest syntactic unit of a type.
 
     Tries in order:
-    1. Type variable (identifier)
-    2. Type constructor
-    3. Parenthesized type
 
-    Returns:
-        SurfaceType - the parsed atomic type
+    1. Parenthesised type — resets layout to ``AnyIndent`` (Idris2 semantics).
+    2. Type constructor (uppercase identifier).
+    3. Type variable (lowercase identifier).
+
+    Returns ``None`` (non-consuming) if none of the above match so that callers
+    can use ``.optional()`` cleanly.
     """
 
     @generate
     def parser():
-        # Try parenthesized type first
+        # Parenthesised type — layout constraint is reset inside parens.
         open_paren = yield match_token(LeftParenToken).optional()
         if open_paren is not None:
             inner = yield _type_parser
             yield match_token(RightParenToken)
             return inner
 
-        # Try identifier (type constructor or type variable based on naming convention)
         ident_token = yield match_token(IdentifierToken).optional()
         if ident_token is not None:
-            from systemf.surface.types import SurfaceTypeConstructor, SurfaceTypeVar
-
             name = ident_token.value
             loc = ident_token.location
-            # Uppercase names are type constructors, lowercase are type variables
             if name[0].isupper():
                 return SurfaceTypeConstructor(name=name, args=[], location=loc)
             else:
                 return SurfaceTypeVar(name=name, location=loc)
 
-        # No match - return None (will be handled by optional)
         return None
 
     return parser
 
 
-@generate
-def type_app_parser() -> P[SurfaceType]:
-    """Parse a type application (constructor applied to arguments).
+def type_app_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
+    """Parse a type application: ``F a b …``
 
-    Example: List Int, Maybe a
+    Parses one mandatory head atom followed by zero or more argument atoms.
+    Before each additional argument the layout constraint is checked via
+    ``peek_column()`` — this is the direct equivalent of Idris2's
+    ``many (argExpr fname indents)`` where ``argExpr`` starts with
+    ``continue indents``.
 
-    Returns:
-        SurfaceType - the parsed type application or atomic type
-    """
-    from systemf.surface.types import SurfaceTypeConstructor
-
-    # Try tuple first (it starts with '('), then regular atom
-    tuple_result = yield type_tuple_parser.optional()
-    if tuple_result is not None:
-        return tuple_result
-
-    # Parse first type atom (constructor or variable)
-    first = yield type_atom_parser()
-    if first is None:
-        yield fail("expected type")
-        return None  # Unreachable, but satisfies type checker
-
-    loc = first.location
-
-    # Parse additional type atoms for application
-    # Stop if we reach EOF or a token that can't start a type atom
-    args: list[SurfaceType] = []
-    while True:
-        # Check if we're at EOF - if so, stop gracefully
-        at_eof = yield parsy.peek(parsy.eof).optional()
-        if at_eof is not None:
-            break
-
-        # Try to parse a type atom
-        arg = yield type_atom_parser().optional()
-        if arg is None:
-            break
-        args.append(arg)
-
-    # Build type constructor with arguments
-    if not args:
-        return first
-
-    # The first element must be a type constructor name
-    # We use SurfaceTypeConstructor to represent applied types like "List Int"
-    match first:
-        case SurfaceTypeConstructor(name=name, args=[], location=_):
-            return SurfaceTypeConstructor(name=name, args=args, location=loc)
-        case SurfaceTypeVar(name=name, location=_):
-            # For type variables (like in higher-kinded contexts),
-            # we still use constructor representation
-            return SurfaceTypeConstructor(name=name, args=args, location=loc)
-        case _:
-            # Fallback: if first is already a constructor with args, append to it
-            match first:
-                case SurfaceTypeConstructor(name=name, args=existing_args, location=_):
-                    return SurfaceTypeConstructor(
-                        name=name, args=existing_args + args, location=loc
-                    )
-                case _:
-                    # For other cases, try to extract name
-                    return SurfaceTypeConstructor(name=str(first), args=args, location=loc)
-
-
-@generate
-def type_arrow_parser() -> P[SurfaceType]:
-    """Parse a function type (with arrows).
-
-    Grammar: type_app ("-- ^ doc" "->" type_arrow)?
-    Right-associative: A -> B -> C = A -> (B -> C)
-
-    Supports inline docstrings: String -- ^ Input text -> String
+    Args:
+        constraint: Layout constraint.  ``AnyIndent`` disables column checks.
 
     Returns:
-        SurfaceType - the parsed function type
+        ``SurfaceType`` — either a single atom or an applied constructor.
     """
-    from systemf.surface.types import SurfaceTypeArrow
+    if constraint is None:
+        constraint = AnyIndent()
 
-    # Parse left side
-    left = yield type_app_parser
-    loc = left.location
+    @generate
+    def parser():
+        # Try tuple first — it starts with '(' but is a distinct syntactic form.
+        tuple_result = yield type_tuple_parser.optional()
+        if tuple_result is not None:
+            return tuple_result
 
-    # Check for inline docstring before arrow
-    param_doc = yield match_inline_docstring().optional()
+        # Mandatory head.
+        first = yield type_atom_parser().optional()
+        if first is None:
+            yield fail("expected type")
+            return None  # unreachable; satisfies type checker
 
-    # Check for arrow (accepts both ASCII -> and Unicode →)
-    arrow = yield match_token(ArrowToken).optional()
-    if arrow is None:
-        return left
+        loc = first.location
+        args: list[SurfaceType] = []
 
-    # Parse right side (recursively for right-associativity)
-    right = yield type_arrow_parser
-    return SurfaceTypeArrow(arg=left, ret=right, param_doc=param_doc, location=loc)
+        while True:
+            # Layout check: peek_column() returns 0 at EOF; any real constraint
+            # rejects 0, so this terminates naturally at EOF as well.
+            if not isinstance(constraint, AnyIndent):
+                next_col = yield peek_column()
+                if next_col == 0 or not check_valid(constraint, next_col):
+                    break
+
+            arg = yield type_atom_parser().optional()
+            if arg is None:
+                break
+            args.append(arg)
+
+        if not args:
+            return first
+
+        # Build SurfaceTypeConstructor with collected args.
+        match first:
+            case SurfaceTypeConstructor(name=name, args=[], location=_):
+                return SurfaceTypeConstructor(name=name, args=args, location=loc)
+            case SurfaceTypeVar(name=name, location=_):
+                # Type variable in applied position (higher-kinded context).
+                return SurfaceTypeConstructor(name=name, args=args, location=loc)
+            case SurfaceTypeConstructor(name=name, args=existing_args, location=_):
+                return SurfaceTypeConstructor(
+                    name=name, args=existing_args + args, location=loc
+                )
+            case _:
+                return SurfaceTypeConstructor(name=str(first), args=args, location=loc)
+
+    return parser
 
 
-@generate
-def type_forall_parser() -> P[SurfaceType]:
+def type_arrow_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
+    """Parse a function type.  Right-associative.
+
+    Grammar::
+
+        type_arrow ::= type_app ("--^ doc"? "->" type_arrow)?
+
+    The optional ``->`` is guarded by a layout check (mirrors Idris2's
+    ``continue indents`` placed before the optional arrow in ``typeExpr``).
+
+    Args:
+        constraint: Layout constraint.  The ``->`` arrow is only consumed when
+                    the token's column satisfies the constraint.
+
+    Returns:
+        ``SurfaceType`` — function type or a single application/atom.
+    """
+    if constraint is None:
+        constraint = AnyIndent()
+
+    @generate
+    def parser():
+        from systemf.surface.types import SurfaceTypeArrow
+
+        left = yield type_app_parser(constraint)
+        loc = left.location
+
+        # Inline docstring may appear between the parameter type and the arrow.
+        param_doc = yield match_inline_docstring()
+
+        # Guard the arrow with a column check before consuming it.
+        # Non-consuming failure here causes the optional(..) below to yield None
+        # cleanly, matching Idris2's `continue indents` semantics.
+        if not isinstance(constraint, AnyIndent):
+            next_col = yield peek_column()
+            if next_col == 0 or not check_valid(constraint, next_col):
+                return left
+
+        arrow = yield match_token(ArrowToken).optional()
+        if arrow is None:
+            return left
+
+        right = yield type_arrow_parser(constraint)
+        return SurfaceTypeArrow(arg=left, ret=right, param_doc=param_doc, location=loc)
+
+    return parser
+
+
+def type_forall_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
     """Parse a universally quantified type.
 
-    Grammar: forall ident+. type
-    Example: forall a. a -> a
+    Grammar::
+
+        type_forall ::= ("forall" | "∀") ident+ "." type
+
+    The outer ``constraint`` is propagated into the body so that layout
+    boundaries are respected even inside a ``forall``.
+
+    Args:
+        constraint: Layout constraint propagated to the forall body.
 
     Returns:
-        SurfaceType - the parsed forall type
+        ``SurfaceType`` — one or more nested ``SurfaceTypeForall`` nodes.
     """
-    from systemf.surface.types import SurfaceTypeForall
+    if constraint is None:
+        constraint = AnyIndent()
 
-    # Match forall keyword (forall or ∀)
-    forall_token = yield match_forall()
-    loc = forall_token.location
+    @generate
+    def parser():
+        from systemf.surface.types import SurfaceTypeForall
 
-    # Parse one or more type variable names
-    var_tokens = yield match_token(IdentifierToken).at_least(1)
+        forall_token = yield match_forall()
+        loc = forall_token.location
 
-    # Match dot
-    yield match_token(DotToken)
+        var_tokens = yield match_token(IdentifierToken).at_least(1)
+        yield match_token(DotToken)
 
-    # Parse body type (use _type_parser to allow nested foralls)
-    body = yield _type_parser
+        # Propagate constraint so that the forall body respects layout.
+        body = yield type_parser(constraint)
 
-    # Build nested foralls from right to left
-    result = body
-    for var_token in reversed(var_tokens):
-        result = SurfaceTypeForall(var=var_token.value, body=result, location=loc)
+        # Build nested foralls right-to-left.
+        result = body
+        for var_token in reversed(var_tokens):
+            result = SurfaceTypeForall(var=var_token.value, body=result, location=loc)
 
-    return result
+        return result
+
+    return parser
 
 
-def type_parser() -> P[SurfaceType]:
-    """Type parser - parses forall types and arrow types.
+def type_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
+    """Top-level type parser.
 
-    This parser does NOT ensure all tokens are consumed - it's designed
-    for use within other parsers. Entry points should use `<< eof` to
-    ensure complete consumption.
+    Tries ``forall`` first (with constraint propagated), then ``->`` form.
+
+    This parser does **not** consume EOF — wrap with ``<< eof`` at entry
+    points that require complete consumption.
+
+    Args:
+        constraint: Layout constraint.  Defaults to ``AnyIndent()`` (no
+                    restriction).  Pass ``AfterPos(decl_col + 1)`` from
+                    declaration parsers to respect top-level layout.
 
     Returns:
-        SurfaceType - the parsed type
+        ``SurfaceType`` — the parsed type.
     """
+    if constraint is None:
+        constraint = AnyIndent()
     return alt(
-        type_forall_parser,
-        type_arrow_parser,
+        type_forall_parser(constraint),
+        type_arrow_parser(constraint),
     )
 
 
-# Initialize the forward declaration with the actual parser
-_type_parser.become(type_parser())
+# Initialise the forward declaration used by type_atom_parser and
+# type_tuple_parser.  Both contexts appear inside explicit delimiters
+# (parentheses / tuple syntax) so AnyIndent is always correct here.
+_type_parser.become(type_parser(AnyIndent()))
 
 
 __all__ = [
     # Token matching helpers
     "match_token",
-    # Type parsers
+    "match_forall",
+    "match_inline_docstring",
+    # Type parsers (factories — call to get a Parser)
+    "type_tuple_parser",   # @generate Parser object (zero-arg, used inside parens)
     "type_atom_parser",
     "type_app_parser",
     "type_arrow_parser",
     "type_forall_parser",
-    "type_tuple_parser",
-    # Main parser (internal use, no EOF handling)
+    # Main entry point
     "type_parser",
 ]

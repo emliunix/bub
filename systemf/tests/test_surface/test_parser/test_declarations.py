@@ -282,9 +282,8 @@ class TestTermDeclaration:
         assert result.name == "id"
 
     def test_let_with_type_annotation_in_declaration(self):
-        """Parse with let containing type annotation."""
-        source = """foo :: Int → Int
-foo x = let y :: Int = x + 1 in y"""
+        """Parse a declaration whose body contains a let with a type annotation."""
+        source = "foo :: Int → Int = λx → let y :: Int = x + 1 in y"
         tokens = lex(source)
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)
@@ -307,11 +306,8 @@ foo x = let y :: Int = x + 1 in y"""
         assert result.name == "applyPoly"
 
     def test_nested_let_with_annotations(self):
-        """Parse nested let expressions with type annotations."""
-        source = """compute :: Int
-compute = let x :: Int = 1 in
-          let y :: Int = 2 in
-          x + y"""
+        """Parse a declaration with nested let expressions with type annotations."""
+        source = "compute :: Int = let x :: Int = 1 in let y :: Int = 2 in x + y"
         tokens = lex(source)
         result = term_parser().parse(tokens)
         assert isinstance(result, SurfaceTermDeclaration)

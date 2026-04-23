@@ -87,6 +87,25 @@ def column() -> P[int]:
     return parser
 
 
+def peek_column() -> P[int]:
+    """Peek at the column of the next token without consuming it.
+
+    Returns 0 if at end of input (EOF). This is the safe version of
+    column() that never fails — it returns 0 at EOF. Used by
+    layout-sensitive parsers to check the next token's column before
+    deciding whether to continue parsing.
+    """
+
+    @Parser
+    def parser(tokens: List[TokenBase], index: int) -> Result[int]:
+        if index >= len(tokens):
+            return Result.success(index, 0)
+        token = tokens[index]
+        return Result.success(index, token.location.column)
+
+    return parser
+
+
 def check_valid(constraint: ValidIndent, col: int) -> bool:
     """Check if a column satisfies a constraint.
 
@@ -488,6 +507,7 @@ __all__ = [
     "match_token",
     # Core infrastructure
     "column",
+    "peek_column",
     "check_valid",
     "is_at_constraint",
     "get_indent_info",
