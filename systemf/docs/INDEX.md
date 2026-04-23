@@ -101,6 +101,12 @@ docs/
   - All-or-nothing implementation
   - Scoped AST design
 
+- **[Parser Indentation Infrastructure](./implementation/parser-indentation.md)** - Layout-sensitive constraint propagation
+  - `ValidIndent` constraint system and `AfterPos` boundary checking
+  - Type parser factory function pattern and constraint flow
+  - Idris2 theoretical grounding (`continue indents`, `blockEntry`)
+  - Implementation record: what changed and why
+
 ---
 
 ## Reference (Look It Up)
@@ -195,6 +201,7 @@ For those who want to **hack** on the compiler:
 
 | Date | Document | Change |
 |------|----------|--------|
+| 2026-03-09 | implementation/parser-indentation.md | New: layout-sensitive type parser constraint infrastructure |
 | 2026-03-09 | architecture/elaborator-design.md | Updated for 15-pass multi-pass architecture implementation |
 | 2026-03-03 | docs/INDEX.md | Complete reorganization of documentation |
 | 2026-03-03 | concepts/*.md | New concept documents explaining theory |
@@ -212,6 +219,7 @@ For those who want to **hack** on the compiler:
 - ✅ [concepts/implicit-instantiation.md](./concepts/implicit-instantiation.md)
 - ✅ [pipeline/overview.md](./pipeline/overview.md)
 - ✅ [implementation/elaborator.md](./implementation/elaborator.md)
+- ✅ [implementation/parser-indentation.md](./implementation/parser-indentation.md)
 
 ### Archive (Deprecated)
 - 🗄️ `architecture/` - Moved to concepts/ and pipeline/
