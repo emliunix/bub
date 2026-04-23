@@ -26,8 +26,17 @@ prim_op int_le       :: Int -> Int -> Bool
 prim_op int_ge       :: Int -> Int -> Bool
 
 -- Bool primitives
-prim_op bool_and :: Bool -> Bool -> Bool
-prim_op bool_or  :: Bool -> Bool -> Bool
+bool_and :: Bool -> Bool -> Bool = \b -> case b of 
+    True -> \b2 -> b2
+    False -> \_ -> False
+
+bool_or  :: Bool -> Bool -> Bool = \b -> case b of 
+    True -> \_ -> True
+    False -> \b2 -> b2
+
+bool_not :: Bool -> Bool = \b -> case b of
+    True -> False
+    False -> True
 
 -- String primitives
 prim_op string_concat :: String -> String -> String

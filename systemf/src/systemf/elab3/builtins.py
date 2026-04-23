@@ -30,10 +30,11 @@ BUILTIN_INT_GE = Name("builtins", "int_ge", 20)
 
 BUILTIN_BOOL_AND = Name("builtins", "bool_and", 21)
 BUILTIN_BOOL_OR = Name("builtins", "bool_or", 22)
+BUILTIN_BOOL_NOT = Name("builtins", "bool_not", 23)
 
-BUILTIN_STRING_CONCAT = Name("builtins", "string_concat", 23)
+BUILTIN_STRING_CONCAT = Name("builtins", "string_concat", 24)
 
-BUILTIN_ERROR = Name("builtins", "error", 24)
+BUILTIN_ERROR = Name("builtins", "error", 25)
 
 BUILTIN_ENDS = 1000
 
@@ -60,6 +61,7 @@ BUILTIN_NAMES: dict[str, list[Name]] = {
         BUILTIN_INT_GE,
         BUILTIN_BOOL_AND,
         BUILTIN_BOOL_OR,
+        BUILTIN_BOOL_NOT,
         BUILTIN_STRING_CONCAT,
         BUILTIN_ERROR,
     ]
