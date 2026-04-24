@@ -1,12 +1,14 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from pyrsistent import PMap, pmap
+
 from .ty import Lit, Id
 from .core import CoreTm
 
 
 # Environment: Name.unique -> Val
-type Env = dict[int, Val]
+type Env = PMap[int, Val]
 
 
 class Val:

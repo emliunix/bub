@@ -8,6 +8,7 @@ dependencies = [
     "parsy>=2.1",
     "openai>=1.0.0",
     "anthropic>=0.21.0",
+    "pyrsistent>=0.20.0",
 ]
 
 [project.scripts]

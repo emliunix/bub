@@ -12,6 +12,8 @@ Architecture:
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from pyrsistent import pmap
+
 from systemf.elab3.types.core import (
     CoreTm, CoreLit, CoreVar, CoreGlobalVar, CoreLam, CoreApp,
     CoreTyLam, CoreTyApp, CoreLet, CoreCase,
@@ -122,20 +124,20 @@ class Evaluator:
         ``step(CoreVar)`` checks it before falling through to
         ``ctx.lookup_gbl``.
         """
-        init_env = {bndr.unique: v for bndr, v in mod_inst.items()}
+        init_env = pmap({bndr.unique: v for bndr, v in mod_inst.items()})
         for binding in mod.bindings:
             match binding:
                 case NonRec(binder, expr):
                     val = self._eval_expr(expr, init_env)
                     mod_inst[binder.name] = val
-                    init_env[binder.name.unique] = val
+                    init_env = init_env.set(binder.name.unique, val)
                 case Rec(rec_bindings):
                     # FIX: we should construct a tuple, then extracts each field
                     # current approach causes re-evaluation for each binder
                     for bndr, _ in rec_bindings:
                         val = self._eval_expr(CoreLet(binding, CoreVar(bndr)), init_env)
                         mod_inst[bndr.name] = val
-                        init_env[bndr.name.unique] = val
+                        init_env = init_env.set(bndr.name.unique, val)
                 case _:
                     raise Exception(f"unexpected binding type: {binding!r}")
         return mod_inst
@@ -196,9 +198,9 @@ class Evaluator:
                 trap_pairs: list[tuple[Trap, CoreTm]] = [
                     (Trap(), expr) for _, expr in bindings
                 ]
-                new_env: Env = dict(env)
+                new_env: Env = env
                 for (trap, _), (binder, _) in zip(trap_pairs, bindings):
-                    new_env[binder.name.unique] = trap
+                    new_env = new_env.set(binder.name.unique, trap)
 
                 first_trap, first_expr = trap_pairs[0]
                 rest = trap_pairs[1:]
@@ -227,7 +229,7 @@ class Evaluator:
             case Ap(closure=f, k=k2):
                 match f:
                     case VClosure(env=cenv, param=param, body=body):
-                        return (body, cenv | {param.name.unique: v}, k2)
+                        return (body, cenv.set(param.name.unique, v), k2)
                     case VPartial(name=name, arity=arity, done=done, finish=finish):
                         new_done = done + [v]
                         if arity == len(new_done):
@@ -237,7 +239,7 @@ class Evaluator:
                                 VPartial(name, arity, new_done, finish), k2
                             )
             case LetBind(binder=binder, body=body, env=env, k=k2):
-                return (body, env | {binder.name.unique: v}, k2)
+                return (body, env.set(binder.name.unique, v), k2)
             case BackpatchNext(trap=trap, rest=rest, new_env=new_env, body=body, k=k2):
                 trap.set(v)
                 if rest:
@@ -254,14 +256,14 @@ class Evaluator:
                 for alt, body in alts:
                     match alt, v:
                         case LitAlt(lit=lit), Lit() if lit == v:
-                            return (body, env | {scrut_key: v}, k2)
+                            return (body, env.set(scrut_key, v), k2)
                         case DataAlt(tag=tag, vars=vars), VData(tag=tag_, vals=vals) if tag == tag_:
-                            new_env = env.copy()
+                            new_env = env
                             for var, val in zip(vars, vals):
-                                new_env[var.name.unique] = val
+                                new_env = new_env.set(var.name.unique, val)
                             return (body, new_env, k2)
                         case DefaultAlt(), _:
-                            return (body, env | {scrut_key: v}, k2)
+                            return (body, env.set(scrut_key, v), k2)
                 raise Exception(f"no matching case for value: {v!r}")
             case Halt():
                 return v

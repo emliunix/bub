@@ -1290,6 +1290,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyrsistent"
+version = "0.20.0"
+source = { registry = "https://mirror.sjtu.edu.cn/pypi/web/simple/" }
+sdist = { url = "https://mirror.sjtu.edu.cn/pypi-packages/ce/3a/5031723c09068e9c8c2f0bc25c3a9245f2b1d1aea8396c787a408f2b95ca/pyrsistent-0.20.0.tar.gz", hash = "sha256:4c48f78f62ab596c679086084d0dd13254ae4f3d6c72a83ffdf5ebdef8f265a4" }
+wheels = [
+    { url = "https://mirror.sjtu.edu.cn/pypi-packages/23/88/0acd180010aaed4987c85700b7cc17f9505f3edb4e5873e4dc67f613e338/pyrsistent-0.20.0-py3-none-any.whl", hash = "sha256:c55acc4733aad6560a7f5f818466631f07efc001fd023f34a6c203f8b6df0f0b" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.0.2"
 source = { registry = "https://mirror.sjtu.edu.cn/pypi/web/simple/" }
@@ -1605,6 +1614,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "openai" },
     { name = "parsy" },
+    { name = "pyrsistent" },
 ]
 
 [package.dev-dependencies]
@@ -1620,6 +1630,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.21.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "parsy", specifier = ">=2.1" },
+    { name = "pyrsistent", specifier = ">=0.20.0" },
 ]
 
 [package.metadata.requires-dev]
