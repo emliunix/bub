@@ -31,12 +31,22 @@ def main() -> None:
     demo_mod = ctx.load("demo")
     print(f"\nLoaded demo module: {demo_mod.name}")
     print(f"  Exports: {[n.surface for n in demo_mod.exports]}")
-    print(f"  Items: {list(demo_mod.items.keys())}")
+    print(f"  TyThings: {[n.surface for n, _ in demo_mod.tythings]}")
     print(f"\n  Core terms (vals):")
-    for name, binding in demo_mod.bindings.items():
-        print(f"\n    {name.surface}:")
+    for binding in demo_mod.bindings:
+        print(f"\n    {pp_binding_name(binding)}:")
         for line in pp_binding(binding).split("\n"):
             print(f"      {line}")
+
+
+def pp_binding_name(b: core.Binding) -> str:
+    match b:
+        case core.NonRec(name, _):
+            return name.name.surface
+        case core.Rec(bindings):
+            return ", ".join(name.name.surface for name, _ in bindings)
+        case _:
+            return "?"
 
 
 def pp_binding(b: core.Binding) -> str:

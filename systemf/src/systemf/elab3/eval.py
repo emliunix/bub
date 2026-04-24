@@ -10,19 +10,17 @@ Architecture:
 """
 
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 from systemf.elab3.types.core import (
     CoreTm, CoreLit, CoreVar, CoreGlobalVar, CoreLam, CoreApp,
     CoreTyLam, CoreTyApp, CoreLet, CoreCase,
     NonRec, Rec,
     DataAlt, LitAlt, DefaultAlt, Alt,
-    Binding,
 )
-from systemf.elab3.types.val import Val
 from .types.ty import Id, Lit, LitInt, Name
 from .types.mod import Module
-from .types.val import Val, VLit, VClosure, VPartial, VPrimOp, VData, Trap, Env
+from .types.val import Val, VLit, VClosure, VPartial, VData, Trap, Env
 
 
 
@@ -51,7 +49,7 @@ class Ar(Cont):
 @dataclass
 class Ap(Cont):
     """Apply a closure/partial/primop to the incoming value."""
-    closure: VClosure | VPartial | VPrimOp
+    closure: VClosure | VPartial
     k: Cont
 
 
@@ -250,7 +248,7 @@ class Evaluator:
         match k:
             case Ar(arg=arg, env=env, k=k2):
                 match v:
-                    case VClosure() | VPartial() | VPrimOp():
+                    case VClosure() | VPartial():
                         return (arg, env, Ap(v, k2))
                     case _:
                         raise Exception(
@@ -262,23 +260,13 @@ class Evaluator:
                     case VClosure(env=cenv, param=param, body=body):
                         return (body, cenv | {param.name.unique: v}, k2)
                     case VPartial(name=name, arity=arity, done=done, finish=finish):
-                        # the old VParitial is guaranteed to be discarded, so mutate done inplace
-                        done.append(v)
-                        if arity == len(done):
-                            return self.call_continue(finish(done), k2)
-                        else:
-                            return self.call_continue(
-                                VPartial(name, arity, done, finish), k2
-                            )
-                    case VPrimOp(name=name, arity=arity, func=func):
-                        new_done = [v]
+                        new_done = done + [v]
                         if arity == len(new_done):
-                            return self.call_continue(func(new_done), k2)
+                            return self.call_continue(finish(new_done), k2)
                         else:
                             return self.call_continue(
-                                VPartial(name.surface, arity, new_done, func), k2
+                                VPartial(name, arity, new_done, finish), k2
                             )
-
             case LetBind(binder=binder, body=body, env=env, k=k2):
                 return (body, env | {binder.name.unique: v}, k2)
 

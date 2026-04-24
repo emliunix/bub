@@ -50,8 +50,8 @@ class TestRecursiveBindings:
     def test_self_recursive_binding(self):
         """Self-recursive binding (factorial-like)."""
         tc = mk_tc()
-        fact = mk_name("fact")
-        n = mk_name("n")
+        fact = mk_name("fact", unique=1)
+        n = mk_name("n", unique=2)
         
         # let fact n = if n == 0 then 1 else n * fact (n - 1)
         # For simplicity, just test that it typechecks
@@ -73,9 +73,9 @@ class TestRecursiveBindings:
     def test_mutual_recursion(self):
         """Mutually recursive bindings (even/odd)."""
         tc = mk_tc()
-        even = mk_name("even")
-        odd = mk_name("odd")
-        n = mk_name("n")
+        even = mk_name("even", unique=1)
+        odd = mk_name("odd", unique=2)
+        n = mk_name("n", unique=3)
         
         # let even n = odd (n - 1)
         #     odd n = even (n - 1)
@@ -97,9 +97,9 @@ class TestRecursiveBindings:
     def test_mixed_recursive_non_recursive(self):
         """Mix of recursive and non-recursive bindings."""
         tc = mk_tc()
-        x = mk_name("x")
-        y = mk_name("y")
-        z = mk_name("z")
+        x = mk_name("x", unique=1)
+        y = mk_name("y", unique=2)
+        z = mk_name("z", unique=3)
         
         # let x = 1
         #     y = x + 1
@@ -121,9 +121,9 @@ class TestRecursiveBindings:
     def test_topological_ordering(self):
         """Bindings should be processed in topological order."""
         tc = mk_tc()
-        a = mk_name("a")
-        b = mk_name("b")
-        c = mk_name("c")
+        a = mk_name("a", unique=1)
+        b = mk_name("b", unique=2)
+        c = mk_name("c", unique=3)
         
         # let c = b
         #     b = a
@@ -149,8 +149,8 @@ class TestBindingErrors:
     def test_unbound_variable(self):
         """Using an unbound variable should fail."""
         tc = mk_tc()
-        x = mk_name("x")
-        y = mk_name("y")
+        x = mk_name("x", unique=1)
+        y = mk_name("y", unique=2)
         
         # let x = y in x  (y is unbound)
         bindings = [Binding(x, Var(y))]

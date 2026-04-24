@@ -55,6 +55,14 @@ class Name:
     unique: int
     loc: Location | None = None
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Name):
+            return NotImplemented
+        return self.unique == other.unique
+
+    def __hash__(self) -> int:
+        return hash(self.unique)
+
 
 # =============================================================================
 # Id (Name + Type)

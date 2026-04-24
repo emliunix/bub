@@ -16,13 +16,15 @@ from systemf.surface.parser import parse_expression, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
 from systemf.utils.uniq import Uniq
 
+from . import pipeline
+from . import builtins as bi
+from . import builtins_rts as rts
 from .name_gen import NameCacheImpl
 from .reader_env import ImportSpec, ReaderEnv, RdrElt, ImportRdrElt
 from .pipeline import Code, execute
-from .builtins import BUILTIN_ENDS
-from .eval import Evaluator, EvalCtx, VData, Val
+from .eval import Evaluator, EvalCtx
+from .types.val import VData, VPartial, Val
 from .types import Module, TyThing, REPLContext, Name, NameCache
-from . import pipeline
 
 
 class REPLSession(EvalCtx):
@@ -40,7 +42,7 @@ class REPLSession(EvalCtx):
         self.ctx = ctx
         self.reader_env = reader_env
         self.tythings = tythings
-        self.mod_insts = mod_insts # Cache for evaluated module instances
+        self.mod_insts: dict[str, dict[Name, Val]] = mod_insts
         self._evaluator = Evaluator(self)
         self._evaling = []
 
@@ -71,9 +73,9 @@ class REPLSession(EvalCtx):
         # and for an expression, we need to make up a "it = <expr>" declaration
         file_path = f"<repl {repl_id}>"
         is_expr, ast = normalize_input(file_path, input)
-        mod = pipeline.execute(self.ctx, mod_name, file_path, ast)
-        self.update_repl_with_mod(mod)
-        mod_inst = self.eval_mod(mod)
+        repl_mod = pipeline.execute(self.ctx, mod_name, file_path, ast)
+        self.update_repl_with_mod(repl_mod)
+        mod_inst = self.eval_mod(repl_mod)
 
         if is_expr:
             # Convention: REPL expressions bind to `it`
@@ -81,28 +83,29 @@ class REPLSession(EvalCtx):
             if it:
                 return it[0]
             raise Exception("REPL expression did not produce a value")
+        return None
 
     # --- EvalCtx implementation ---------------------------------------------
 
     def lookup_gbl(self, name: Name) -> Val:
         """Resolve a global name, loading and evaluating modules on demand."""
-        mod = name.mod
+        mod_name = name.mod
 
         # 1. Check runtime value cache
-        cached = self.mod_insts.get(mod, {}).get(name)
+        cached = self.mod_insts.get(mod_name, {}).get(name)
         if cached is not None:
             return cached
 
         # 2. Cycle detection for evaluation
-        if mod in self._evaling:
+        if mod_name in self._evaling:
             raise Exception(
-                f"Cyclic evaluation detected: {'->'.join(self._evaling + [mod])}"
+                f"Cyclic evaluation detected: {'->'.join(self._evaling + [mod_name])}"
             )
 
-        self._evaling.append(mod)
+        self._evaling.append(mod_name)
         try:
             # 3. Load the typechecked module
-            mod = self.ctx.load(mod)
+            mod = self.ctx.load(mod_name)
             
             # 4. Eager whole module processing & return
             mod_inst = self.eval_mod(mod)
@@ -130,24 +133,17 @@ class REPLSession(EvalCtx):
         self.tythings.extend(thing for _, thing in mod.tythings)
     
     def mk_mod_inst(self, mod: Module) -> dict[Name, Val]:
-        """
-        Populate mod_inst with primitive values first
-        """
-        mod_inst = {}
+        mod_inst: dict[Name, Val] = {}
         for name, thing in mod.tythings:
             match thing:
-                case ACon(con=con, arity=arity):
-                    mod_inst[name] = self.mk_con_func(name, con, arity)
+                case ACon(name=con_name, tag=tag, arity=arity):
+                    mod_inst[name] = VPartial.create(
+                        con_name.surface, arity,
+                        lambda args: VData(tag, args),  # type: ignore[misc]
+                    )
                 case AnId(name=name, is_prim=True):
                     mod_inst[name] = self.mk_primop(name)
         return mod_inst
-    
-    def mk_con_func(self, name: Name, tag: int, arity: int) -> Val:
-        def con_func(args: list[Val]) -> Val:
-            if len(args) != arity:
-                raise Exception(f"Constructor {name} expects {arity} arguments, got {len(args)}")
-            return VData(tag, args)
-        return VPartial(name.surface, arity, [], con_func)
 
     def mk_primop(self, name: Name) -> Val:
         if (p := self.ctx.get_primop(name)) is not None:
@@ -160,27 +156,23 @@ class REPL(REPLContext):
 
     Contains NameCache which wraps the Uniq counter for generating unique IDs.
     Also owns the session counter for unique module names.
-
-    Implements EvalCtx.lookup_gbl to resolve names at runtime.  The REPL
-    manages ``mod_insts`` — the runtime value cache — and uses a separate
-    ``_evaling`` set for cycle detection during evaluation (distinct from
-    ``_loading`` which guards typecheck-time import cycles).
     """
     uniq: Uniq
     name_cache: NameCache
     modules: dict[str, Module]
+    _prim_ops: dict[str, dict[str, Val]]
     search_paths: list[str]
     _loading: dict[str, str | None]
     _replmod_counter: int
 
     def __init__(self, search_paths: list[str] | None = None):
-        self.uniq = Uniq(BUILTIN_ENDS)
+        self.uniq = Uniq(bi.BUILTIN_ENDS)
         self.name_cache = NameCacheImpl()
         self.modules = {}
-        self.mod_insts = {}
-        self.search_paths = search_paths or ["."]
+        self.search_paths = search_paths or [".", str(Path(__file__).parent.parent)]
         self._loading = {}
         self._replmod_counter = 0
+        self._prim_ops = _populate_primops()
 
     # --- REPLContext implementation -----------------------------------------
 
@@ -194,6 +186,10 @@ class REPL(REPLContext):
     @override
     def load(self, name: str) -> Module:
         return self._load(name, None)
+
+    @override
+    def get_primop(self, name: Name) -> Val | None:
+        return self._prim_ops.get(name.mod, {}).get(name.surface)
 
     def _load(self, name: str, from_mod: str | None = None) -> Module:
         """
@@ -232,6 +228,35 @@ class REPL(REPLContext):
             tythings=[],
             mod_insts={},
         )
+
+
+def _populate_primops() -> dict[str, dict[str, Val]]:
+    """Build the primop cache. Called once at REPL init."""
+
+    # FIX: this is hacky, but we need rename phase of bulitins to get the tags assigned
+    # so we just hardcode what will be assigned
+    true_val = VData(0, [])
+    false_val = VData(1, [])
+
+    builtins: dict[str, Val] = {}
+
+    def _reg(surface: str, arity: int, func):
+        builtins[surface] = VPartial.create(surface, arity, func)
+
+    _reg(bi.BUILTIN_INT_PLUS.surface, 2, rts.int_plus)
+    _reg(bi.BUILTIN_INT_MINUS.surface, 2, rts.int_minus)
+    _reg(bi.BUILTIN_INT_MULTIPLY.surface, 2, rts.int_multiply)
+    _reg(bi.BUILTIN_INT_DIVIDE.surface, 2, rts.int_divide)
+    _reg(bi.BUILTIN_INT_EQ.surface, 2, rts.mk_int_eq(true_val, false_val))
+    _reg(bi.BUILTIN_INT_NEQ.surface, 2, rts.mk_int_neq(true_val, false_val))
+    _reg(bi.BUILTIN_INT_LT.surface, 2, rts.mk_int_lt(true_val, false_val))
+    _reg(bi.BUILTIN_INT_GT.surface, 2, rts.mk_int_gt(true_val, false_val))
+    _reg(bi.BUILTIN_INT_LE.surface, 2, rts.mk_int_le(true_val, false_val))
+    _reg(bi.BUILTIN_INT_GE.surface, 2, rts.mk_int_ge(true_val, false_val))
+    _reg(bi.BUILTIN_STRING_CONCAT.surface, 2, rts.string_concat)
+    _reg(bi.BUILTIN_ERROR.surface, 1, rts.error)
+
+    return {"builtins": builtins}
 
 
 def _build_import_chain(loads: dict[str, str | None], start: str) -> str:

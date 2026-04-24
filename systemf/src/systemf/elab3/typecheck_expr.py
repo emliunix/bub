@@ -284,7 +284,7 @@ class TypeChecker(Unifier):
 
     def bindings(self, bindings: list[Binding], cb: CB[R]) -> tuple[list[BindingGroup], R]:
         """Process bindings via SCC analysis, returning ordered BindingGroups."""
-        annot_names = set(name_of(b.name) for b in bindings)
+        annot_names = set(name_of(b.name) for b in bindings if isinstance(b.name, AnnotName))
         scc_input = [
             (bind, name_of(bind.name), [n for n in expr_names(bind.expr) if n not in annot_names])
             for bind in bindings    

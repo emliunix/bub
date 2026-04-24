@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .ty import Lit, LitInt, LitString, Name, Id
+from .ty import Lit, Id
 from .core import CoreTm
 
 
@@ -18,20 +18,19 @@ class VLit(Val):
 
 
 @dataclass
-class VPrimOp(Val):
-    """Primitive operation (e.g. int_plus, bool_and)."""
-    name: Name
-    arity: int
-    func: Callable[[list[Val]], Val]
-
-
-@dataclass
 class VPartial(Val):
     """Partially-applied constructor or primop."""
     name: str
     arity: int
     done: list[Val]
     finish: Callable[[list[Val]], Val]
+
+    @staticmethod
+    def create(name: str, arity: int, finish: Callable[[list[Val]], Val]) -> Val:
+        if arity == 0:
+            return finish([])
+        else:
+            return VPartial(name, arity, [], finish)
 
 
 @dataclass

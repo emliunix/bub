@@ -1,0 +1,614 @@
+"""Tests for elab3 CEK evaluator."""
+
+import pytest
+
+from systemf.elab3.builtins import (
+    BUILTIN_TRUE,
+    BUILTIN_FALSE,
+    BUILTIN_BOOL,
+    BUILTIN_UNIT,
+    BUILTIN_MK_UNIT,
+    BUILTIN_LIST,
+    BUILTIN_LIST_CONS,
+    BUILTIN_LIST_NIL,
+    BUILTIN_PAIR,
+    BUILTIN_PAIR_MKPAIR,
+    BUILTIN_INT_PLUS,
+    BUILTIN_INT_MINUS,
+    BUILTIN_INT_EQ,
+    BUILTIN_STRING_CONCAT,
+    BUILTIN_INT_MULTIPLY,
+    BUILTIN_INT_DIVIDE,
+    BUILTIN_INT_NEQ,
+    BUILTIN_INT_LT,
+    BUILTIN_INT_GT,
+    BUILTIN_INT_LE,
+    BUILTIN_INT_GE,
+    BUILTIN_ERROR,
+)
+from systemf.elab3.eval import (
+    Evaluator,
+    EvalCtx,
+)
+from systemf.elab3.types.val import (
+    Val,
+    VLit,
+    VClosure,
+    VData,
+    VPartial,
+)
+from systemf.elab3.types.core import (
+    CoreLit,
+    CoreVar,
+    CoreLam,
+    CoreApp,
+    CoreLet,
+    CoreTyLam,
+    CoreTyApp,
+    CoreCase,
+    NonRec,
+    Rec,
+    DataAlt,
+    DefaultAlt,
+    Binding,
+)
+from systemf.elab3.types.ty import (
+    Id,
+    LitInt,
+    LitString,
+    Name,
+    TyInt,
+    TyFun,
+    TyString,
+    BoundTv,
+)
+from systemf.elab3.types.mod import Module
+
+
+# =============================================================================
+# Builtin tags (Name.unique — globally unique across all types)
+# =============================================================================
+
+TRUE_TAG = BUILTIN_TRUE.unique
+FALSE_TAG = BUILTIN_FALSE.unique
+NIL_TAG = BUILTIN_LIST_NIL.unique
+CONS_TAG = BUILTIN_LIST_CONS.unique
+MKUNIT_TAG = BUILTIN_MK_UNIT.unique
+MKPAIR_TAG = BUILTIN_PAIR_MKPAIR.unique
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+def _name(mod: str, surface: str, unique: int) -> Name:
+    return Name(mod, surface, unique)
+
+
+def _id(mod: str, surface: str, unique: int, ty) -> Id:
+    return Id(_name(mod, surface, unique), ty)
+
+
+def _build_chain(loads: dict[str, str | None], start: str) -> str:
+    chain = [start]
+    parent = loads.get(start)
+    while parent is not None:
+        chain.append(parent)
+        parent = loads.get(parent)
+    return "->".join(list(reversed(chain)))
+
+
+# =============================================================================
+# FakeCtx
+# =============================================================================
+
+class FakeCtx:
+    """EvalCtx for tests.  Provides builtins; lazily evaluates user modules."""
+
+    def __init__(self, modules: dict[str, list[Binding]] | None = None):
+        self.mod_insts: dict[str, dict[Name, Val]] = {}
+        self._modules_bindings = modules or {}
+        self._evaling: dict[str, str | None] = {}
+        self._populate_builtins()
+
+    def _populate_builtins(self) -> None:
+        from systemf.elab3 import builtins_rts as rts
+
+        insts: dict[Name, Val] = {}
+
+        # Data constructors — arity 0 → VData, arity > 0 → VPartial
+        insts[BUILTIN_TRUE] = VData(TRUE_TAG, [])
+        insts[BUILTIN_FALSE] = VData(FALSE_TAG, [])
+        insts[BUILTIN_MK_UNIT] = VData(MKUNIT_TAG, [])
+        insts[BUILTIN_LIST_NIL] = VData(NIL_TAG, [])
+        insts[BUILTIN_LIST_CONS] = VPartial(
+            BUILTIN_LIST_CONS.surface, 2, [],
+            lambda args: VData(CONS_TAG, args),
+        )
+        insts[BUILTIN_PAIR_MKPAIR] = VPartial(
+            BUILTIN_PAIR_MKPAIR.surface, 2, [],
+            lambda args: VData(MKPAIR_TAG, args),
+        )
+
+        # Primitive operations
+        true_val = insts[BUILTIN_TRUE]
+        false_val = insts[BUILTIN_FALSE]
+
+        def _reg(n: Name, arity: int, func):
+            insts[n] = VPartial(n.surface, arity, [], func)
+
+        _reg(BUILTIN_INT_PLUS, 2, rts.int_plus)
+        _reg(BUILTIN_INT_MINUS, 2, rts.int_minus)
+        _reg(BUILTIN_INT_MULTIPLY, 2, rts.int_multiply)
+        _reg(BUILTIN_INT_DIVIDE, 2, rts.int_divide)
+        _reg(BUILTIN_INT_EQ, 2, rts.mk_int_eq(true_val, false_val))
+        _reg(BUILTIN_INT_NEQ, 2, rts.mk_int_neq(true_val, false_val))
+        _reg(BUILTIN_INT_LT, 2, rts.mk_int_lt(true_val, false_val))
+        _reg(BUILTIN_INT_GT, 2, rts.mk_int_gt(true_val, false_val))
+        _reg(BUILTIN_INT_LE, 2, rts.mk_int_le(true_val, false_val))
+        _reg(BUILTIN_INT_GE, 2, rts.mk_int_ge(true_val, false_val))
+        _reg(BUILTIN_STRING_CONCAT, 2, rts.string_concat)
+        _reg(BUILTIN_ERROR, 1, rts.error)
+
+        self.mod_insts["builtins"] = insts
+
+    def _ensure_evaluated(self, mod_name: str) -> None:
+        if mod_name in self.mod_insts:
+            return
+        if mod_name in self._evaling:
+            raise Exception(
+                f"Cyclic evaluation detected: {_build_chain(self._evaling, mod_name)}"
+            )
+
+        bindings_list = self._modules_bindings.get(mod_name)
+        if bindings_list is None:
+            raise Exception(f"module not found: {mod_name}")
+
+        self._evaling[mod_name] = None
+        try:
+            ev = Evaluator(self)
+            mod = Module(
+                name=mod_name,
+                tythings=[],
+                bindings=bindings_list,
+                exports=[],
+            )
+            mod_inst: dict[Name, Val] = {}
+            mod_inst = ev.eval_mod(mod, mod_inst)
+            self.mod_insts[mod_name] = mod_inst
+        finally:
+            del self._evaling[mod_name]
+
+    def lookup_gbl(self, name: Name) -> Val:
+        cached = self.mod_insts.get(name.mod, {}).get(name)
+        if cached is not None:
+            return cached
+        self._ensure_evaluated(name.mod)
+        return self.mod_insts[name.mod][name]
+
+
+# =============================================================================
+# Core expression evaluation (via _eval_expr)
+# =============================================================================
+
+def test_eval_lit():
+    ev = Evaluator(FakeCtx())
+    result = ev._eval_expr(CoreLit(LitInt(42)))
+    assert isinstance(result, VLit)
+    assert result.lit.value == 42
+
+
+def test_eval_lambda():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 1, TyInt())
+    lam = CoreLam(x, CoreVar(x))
+    result = ev._eval_expr(lam)
+    assert isinstance(result, VClosure)
+    assert result.param.name.unique == x.name.unique
+
+
+def test_eval_app():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 1, TyInt())
+    lam = CoreLam(x, CoreVar(x))
+    app = CoreApp(lam, CoreLit(LitInt(99)))
+    result = ev._eval_expr(app)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 99
+
+
+def test_eval_let_nonrec():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 1, TyInt())
+    let_expr = CoreLet(NonRec(x, CoreLit(LitInt(7))), CoreVar(x))
+    result = ev._eval_expr(let_expr)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 7
+
+
+def test_eval_let_rec_guarded():
+    r"""Recursive binding guarded by lambda: let rec f = \x -> f x in f."""
+    ev = Evaluator(FakeCtx())
+    f = _id("Test", "f", 1, TyFun(TyInt(), TyInt()))
+    x = _id("Test", "x", 2, TyInt())
+    body = CoreLam(x, CoreApp(CoreVar(f), CoreVar(x)))
+    expr = CoreLet(Rec([(f, body)]), CoreVar(f))
+    result = ev._eval_expr(expr)
+    assert isinstance(result, VClosure)
+
+
+def test_eval_ty_lam_ty_app_erasure():
+    """Type abstractions and applications are erased at runtime."""
+    ev = Evaluator(FakeCtx())
+    a = BoundTv(_name("Test", "a", 3))
+    x = _id("Test", "x", 4, TyInt())
+    tlam = CoreTyLam(a, CoreLam(x, CoreVar(x)))
+    tapp = CoreTyApp(tlam, TyInt())
+    app = CoreApp(tapp, CoreLit(LitInt(5)))
+    result = ev._eval_expr(app)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 5
+
+
+# =============================================================================
+# Case expressions
+# =============================================================================
+
+def test_eval_case_data_alt():
+    ev = Evaluator(FakeCtx())
+    s = _id("Test", "s", 50, TyInt())
+    case_expr = CoreCase(
+        scrut=CoreVar(Id(BUILTIN_TRUE, TyInt())),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), CoreLit(LitInt(1))),
+            (DataAlt(con=BUILTIN_FALSE, tag=FALSE_TAG, vars=[]), CoreLit(LitInt(0))),
+            (DefaultAlt(), CoreLit(LitInt(-1))),
+        ],
+    )
+    result = ev._eval_expr(case_expr)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 1
+
+
+def test_eval_case_default_alt():
+    ev = Evaluator(FakeCtx())
+    s = _id("Test", "s", 51, TyInt())
+    case_expr = CoreCase(
+        scrut=CoreVar(Id(BUILTIN_LIST_NIL, TyInt())),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), CoreLit(LitInt(1))),
+            (DefaultAlt(), CoreLit(LitInt(42))),
+        ],
+    )
+    result = ev._eval_expr(case_expr)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 42
+
+
+def test_eval_case_cons_pattern():
+    """Pattern match on Cons with bound variables."""
+    ev = Evaluator(FakeCtx())
+    cons_id = Id(BUILTIN_LIST_CONS, TyInt())
+    nil_id = Id(BUILTIN_LIST_NIL, TyInt())
+    # scrut = Cons 1 Nil
+    scrut = CoreApp(
+        CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))),
+        CoreVar(nil_id),
+    )
+    s = _id("Test", "s", 52, TyInt())
+    x = _id("Test", "x", 53, TyInt())
+    xs = _id("Test", "xs", 54, TyInt())
+    case_expr = CoreCase(
+        scrut=scrut,
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_LIST_CONS, tag=CONS_TAG, vars=[x, xs]), CoreVar(x)),
+            (DataAlt(con=BUILTIN_LIST_NIL, tag=NIL_TAG, vars=[]), CoreLit(LitInt(0))),
+        ],
+    )
+    result = ev._eval_expr(case_expr)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 1
+
+
+# =============================================================================
+# Builtin resolution via CoreVar fallback
+# =============================================================================
+
+def test_builtin_int_plus():
+    ev = Evaluator(FakeCtx())
+    plus_id = Id(BUILTIN_INT_PLUS, TyInt())
+    expr = CoreApp(
+        CoreApp(CoreVar(plus_id), CoreLit(LitInt(1))),
+        CoreLit(LitInt(2)),
+    )
+    result = ev._eval_expr(expr)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 3
+
+
+def test_builtin_int_minus():
+    ev = Evaluator(FakeCtx())
+    minus_id = Id(BUILTIN_INT_MINUS, TyInt())
+    expr = CoreApp(
+        CoreApp(CoreVar(minus_id), CoreLit(LitInt(10))),
+        CoreLit(LitInt(3)),
+    )
+    result = ev._eval_expr(expr)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 7
+
+
+def test_builtin_int_eq():
+    ev = Evaluator(FakeCtx())
+    eq_id = Id(BUILTIN_INT_EQ, TyInt())
+    true_expr = CoreApp(
+        CoreApp(CoreVar(eq_id), CoreLit(LitInt(5))),
+        CoreLit(LitInt(5)),
+    )
+    false_expr = CoreApp(
+        CoreApp(CoreVar(eq_id), CoreLit(LitInt(5))),
+        CoreLit(LitInt(6)),
+    )
+    assert isinstance(ev._eval_expr(true_expr), VData)
+    assert ev._eval_expr(true_expr).tag == TRUE_TAG
+    assert isinstance(ev._eval_expr(false_expr), VData)
+    assert ev._eval_expr(false_expr).tag == FALSE_TAG
+
+
+def test_builtin_string_concat():
+    ev = Evaluator(FakeCtx())
+    concat_id = Id(BUILTIN_STRING_CONCAT, TyInt())
+    expr = CoreApp(
+        CoreApp(CoreVar(concat_id), CoreLit(LitString("hello"))),
+        CoreLit(LitString(" world")),
+    )
+    result = ev._eval_expr(expr)
+    assert isinstance(result, VLit)
+    assert result.lit.value == "hello world"
+
+
+def test_builtin_bool_constructors():
+    ev = Evaluator(FakeCtx())
+    true_id = Id(BUILTIN_TRUE, TyInt())
+    false_id = Id(BUILTIN_FALSE, TyInt())
+    assert isinstance(ev._eval_expr(CoreVar(true_id)), VData)
+    assert isinstance(ev._eval_expr(CoreVar(false_id)), VData)
+
+
+def test_builtin_list_nil():
+    ev = Evaluator(FakeCtx())
+    nil_id = Id(BUILTIN_LIST_NIL, TyInt())
+    result = ev._eval_expr(CoreVar(nil_id))
+    assert isinstance(result, VData)
+    assert result.tag == NIL_TAG
+
+
+def test_builtin_partial_saturation():
+    """Cons partially applied, then fully applied."""
+    ev = Evaluator(FakeCtx())
+    cons_id = Id(BUILTIN_LIST_CONS, TyInt())
+    nil_id = Id(BUILTIN_LIST_NIL, TyInt())
+    # Cons 1 -> VPartial
+    p1 = ev._eval_expr(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))))
+    assert isinstance(p1, VPartial)
+    assert p1.done == [VLit(LitInt(1))]
+    # (Cons 1) Nil -> VData
+    full = ev._eval_expr(
+        CoreApp(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))), CoreVar(nil_id))
+    )
+    assert isinstance(full, VData)
+    assert full.tag == CONS_TAG
+
+
+# =============================================================================
+# Module loading via lookup_gbl / eval_mod
+# =============================================================================
+
+def test_eval_mod_nonrec():
+    a = _name("M", "a", 10)
+    b = _name("M", "b", 11)
+    bindings: list[Binding] = [
+        NonRec(Id(a, TyInt()), CoreLit(LitInt(1))),
+        NonRec(Id(b, TyInt()), CoreLit(LitInt(2))),
+    ]
+    ctx = FakeCtx({"M": bindings})
+    assert ctx.lookup_gbl(a) == VLit(LitInt(1))
+    assert ctx.lookup_gbl(b) == VLit(LitInt(2))
+
+
+def test_eval_mod_rec_single_guarded():
+    f = _id("M", "f", 20, TyFun(TyInt(), TyInt()))
+    x = _id("M", "x", 21, TyInt())
+    lam = CoreLam(x, CoreApp(CoreVar(f), CoreVar(x)))
+    bindings: list[Binding] = [Rec([(f, lam)])]
+    ctx = FakeCtx({"M": bindings})
+    result = ctx.lookup_gbl(f.name)
+    assert isinstance(result, VClosure)
+
+
+def test_eval_mod_rec_multi_mutual():
+    """Mutual recursion with two functions."""
+    f = _id("M", "f", 30, TyFun(TyInt(), TyInt()))
+    g = _id("M", "g", 31, TyFun(TyInt(), TyInt()))
+    x = _id("M", "x", 32, TyInt())
+    f_lam = CoreLam(x, CoreApp(CoreVar(g), CoreVar(x)))
+    g_lam = CoreLam(x, CoreApp(CoreVar(f), CoreVar(x)))
+    bindings: list[Binding] = [Rec([(f, f_lam), (g, g_lam)])]
+    ctx = FakeCtx({"M": bindings})
+    assert isinstance(ctx.lookup_gbl(f.name), VClosure)
+    assert isinstance(ctx.lookup_gbl(g.name), VClosure)
+
+
+def test_eval_mod_raises_on_missing_module():
+    """Lookup on an unknown module raises."""
+    ctx = FakeCtx()
+    with pytest.raises(Exception, match="module not found"):
+        ctx.lookup_gbl(_name("M", "foo", 99))
+
+
+def test_eval_mod_cyclic_raises():
+    """Cross-module cycles are caught by the context."""
+    a_name = _name("A", "x", 50)
+    b_name = _name("B", "y", 51)
+
+    bindings_a: list[Binding] = [NonRec(Id(a_name, TyInt()), CoreVar(Id(b_name, TyInt())))]
+    bindings_b: list[Binding] = [NonRec(Id(b_name, TyInt()), CoreVar(Id(a_name, TyInt())))]
+
+    ctx = FakeCtx({
+        "A": bindings_a,
+        "B": bindings_b,
+    })
+    with pytest.raises(Exception, match="Cyclic evaluation detected"):
+        ctx.lookup_gbl(a_name)
+
+
+# =============================================================================
+# Non-polymorphic mutual recursive functions (applied)
+# =============================================================================
+
+def test_mutual_rec_functions_applied():
+    """
+    f = \n -> if n == 0 then 1 else g (n - 1)
+    g = \n -> if n == 0 then 2 else f (n - 1)
+    f 0 -> 1
+    f 1 -> g 0 -> 2
+    """
+    f = _id("M", "f", 60, TyFun(TyInt(), TyInt()))
+    g = _id("M", "g", 61, TyFun(TyInt(), TyInt()))
+    n = _id("M", "n", 62, TyInt())
+    eq_id = Id(BUILTIN_INT_EQ, TyInt())
+    minus_id = Id(BUILTIN_INT_MINUS, TyInt())
+
+    zero = CoreLit(LitInt(0))
+    one = CoreLit(LitInt(1))
+    two = CoreLit(LitInt(2))
+
+    # n == 0
+    n_eq_0 = CoreApp(CoreApp(CoreVar(eq_id), CoreVar(n)), zero)
+    # n - 1
+    n_minus_1 = CoreApp(CoreApp(CoreVar(minus_id), CoreVar(n)), one)
+
+    s = _id("M", "s", 63, TyInt())
+    # f body: case (n == 0) of True -> 1; _ -> g (n - 1)
+    f_body = CoreCase(
+        scrut=n_eq_0,
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), one),
+            (DefaultAlt(), CoreApp(CoreVar(g), n_minus_1)),
+        ],
+    )
+    # g body: case (n == 0) of True -> 2; _ -> f (n - 1)
+    g_body = CoreCase(
+        scrut=n_eq_0,
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), two),
+            (DefaultAlt(), CoreApp(CoreVar(f), n_minus_1)),
+        ],
+    )
+
+    f_lam = CoreLam(n, f_body)
+    g_lam = CoreLam(n, g_body)
+
+    bindings: list[Binding] = [Rec([(f, f_lam), (g, g_lam)])]
+
+    ctx = FakeCtx({"M": bindings})
+    ev = Evaluator(ctx)
+
+    # f 0 -> 1
+    result_f0 = ev._eval_expr(CoreApp(CoreVar(f), zero), {})
+    assert isinstance(result_f0, VLit)
+    assert result_f0.lit.value == 1
+
+    # f 1 -> g 0 -> 2
+    result_f1 = ev._eval_expr(CoreApp(CoreVar(f), one), {})
+    assert isinstance(result_f1, VLit)
+    assert result_f1.lit.value == 2
+
+
+# =============================================================================
+# Primary API: eval_mod / lookup_gbl
+# =============================================================================
+
+def test_eval_mod_primary_api():
+    n = _name("M", "answer", 70)
+    bindings: list[Binding] = [NonRec(Id(n, TyInt()), CoreLit(LitInt(42)))]
+    ctx = FakeCtx({"M": bindings})
+    result = ctx.lookup_gbl(n)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 42
+
+
+# =============================================================================
+# Cross-module references
+# =============================================================================
+
+def test_cross_module_reference():
+    """Module B references a name from module A; auto-loading kicks in."""
+    a_name = _name("A", "foo", 100)
+    b_name = _name("B", "bar", 101)
+
+    bindings_a: list[Binding] = [NonRec(Id(a_name, TyInt()), CoreLit(LitInt(100)))]
+    bindings_b: list[Binding] = [NonRec(Id(b_name, TyInt()), CoreVar(Id(a_name, TyInt())))]
+
+    ctx = FakeCtx({
+        "A": bindings_a,
+        "B": bindings_b,
+    })
+    result = ctx.lookup_gbl(b_name)
+    assert isinstance(result, VLit)
+    assert result.lit.value == 100
+
+
+# =============================================================================
+# Trap / self-reference edge cases
+# =============================================================================
+
+def test_single_rec_unguarded_self_reference_raises():
+    """
+    A monomorphic single-binding Rec with an unguarded self-reference
+    (e.g. f = f) is non-productive and must raise.
+    """
+    f = _id("M", "f", 110, TyInt())
+    bindings: list[Binding] = [Rec([(f, CoreVar(f))])]
+    ctx = FakeCtx({"M": bindings})
+    with pytest.raises(Exception, match="uninitialized letrec trap"):
+        ctx.lookup_gbl(f.name)
+
+
+def test_multi_rec_unguarded_mutual_reference_raises():
+    """
+    Mutual Rec where the first RHS immediately forces the second binder
+    is non-productive and must raise.
+    """
+    f = _id("M", "f", 111, TyInt())
+    g = _id("M", "g", 112, TyInt())
+    bindings: list[Binding] = [
+        Rec([(f, CoreVar(g)), (g, CoreLit(LitInt(1)))])
+    ]
+    ctx = FakeCtx({"M": bindings})
+    with pytest.raises(Exception, match="uninitialized letrec trap"):
+        ctx.lookup_gbl(f.name)
+
+
+# =============================================================================
+# VPartial (primops are VPartial)
+# =============================================================================
+
+def test_primops_are_vpartial():
+    """Primitive operations should resolve to VPartial."""
+    ctx = FakeCtx()
+    result = ctx.lookup_gbl(BUILTIN_INT_PLUS)
+    assert isinstance(result, VPartial)
+    assert result.name == "int_plus"
+    assert result.arity == 2
+    assert result.done == []
