@@ -69,12 +69,12 @@ from systemf.elab3.types.mod import Module
 # Builtin tags (Name.unique — globally unique across all types)
 # =============================================================================
 
-TRUE_TAG = BUILTIN_TRUE.unique
-FALSE_TAG = BUILTIN_FALSE.unique
-NIL_TAG = BUILTIN_LIST_NIL.unique
-CONS_TAG = BUILTIN_LIST_CONS.unique
-MKUNIT_TAG = BUILTIN_MK_UNIT.unique
-MKPAIR_TAG = BUILTIN_PAIR_MKPAIR.unique
+TRUE_TAG = 0
+FALSE_TAG = 1
+NIL_TAG = 0
+CONS_TAG = 1
+MKUNIT_TAG = 0
+MKPAIR_TAG = 0
 
 
 # =============================================================================
@@ -193,16 +193,16 @@ class FakeCtx:
 
 def test_eval_lit():
     ev = Evaluator(FakeCtx())
-    result = ev._eval_expr(CoreLit(LitInt(42)))
+    result = ev._eval_expr(CoreLit(LitInt(42)), {})
     assert isinstance(result, VLit)
-    assert result.lit.value == 42
+    assert result.lit == LitInt(42)
 
 
 def test_eval_lambda():
     ev = Evaluator(FakeCtx())
     x = _id("Test", "x", 1, TyInt())
     lam = CoreLam(x, CoreVar(x))
-    result = ev._eval_expr(lam)
+    result = ev._eval_expr(lam, {})
     assert isinstance(result, VClosure)
     assert result.param.name.unique == x.name.unique
 
@@ -212,7 +212,7 @@ def test_eval_app():
     x = _id("Test", "x", 1, TyInt())
     lam = CoreLam(x, CoreVar(x))
     app = CoreApp(lam, CoreLit(LitInt(99)))
-    result = ev._eval_expr(app)
+    result = ev._eval_expr(app, {})
     assert isinstance(result, VLit)
     assert result.lit.value == 99
 
@@ -221,7 +221,7 @@ def test_eval_let_nonrec():
     ev = Evaluator(FakeCtx())
     x = _id("Test", "x", 1, TyInt())
     let_expr = CoreLet(NonRec(x, CoreLit(LitInt(7))), CoreVar(x))
-    result = ev._eval_expr(let_expr)
+    result = ev._eval_expr(let_expr, {})
     assert isinstance(result, VLit)
     assert result.lit.value == 7
 
@@ -233,7 +233,7 @@ def test_eval_let_rec_guarded():
     x = _id("Test", "x", 2, TyInt())
     body = CoreLam(x, CoreApp(CoreVar(f), CoreVar(x)))
     expr = CoreLet(Rec([(f, body)]), CoreVar(f))
-    result = ev._eval_expr(expr)
+    result = ev._eval_expr(expr, {})
     assert isinstance(result, VClosure)
 
 
@@ -245,7 +245,7 @@ def test_eval_ty_lam_ty_app_erasure():
     tlam = CoreTyLam(a, CoreLam(x, CoreVar(x)))
     tapp = CoreTyApp(tlam, TyInt())
     app = CoreApp(tapp, CoreLit(LitInt(5)))
-    result = ev._eval_expr(app)
+    result = ev._eval_expr(app, {})
     assert isinstance(result, VLit)
     assert result.lit.value == 5
 
@@ -267,7 +267,7 @@ def test_eval_case_data_alt():
             (DefaultAlt(), CoreLit(LitInt(-1))),
         ],
     )
-    result = ev._eval_expr(case_expr)
+    result = ev._eval_expr(case_expr, {})
     assert isinstance(result, VLit)
     assert result.lit.value == 1
 
@@ -280,13 +280,12 @@ def test_eval_case_default_alt():
         var=s,
         res_ty=TyInt(),
         alts=[
-            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), CoreLit(LitInt(1))),
+            (DataAlt(con=BUILTIN_TRUE, tag=99, vars=[]), CoreLit(LitInt(1))),
             (DefaultAlt(), CoreLit(LitInt(42))),
         ],
     )
-    result = ev._eval_expr(case_expr)
-    assert isinstance(result, VLit)
-    assert result.lit.value == 42
+    result = ev._eval_expr(case_expr, {})
+    assert result == VLit(LitInt(42))
 
 
 def test_eval_case_cons_pattern():
@@ -311,7 +310,7 @@ def test_eval_case_cons_pattern():
             (DataAlt(con=BUILTIN_LIST_NIL, tag=NIL_TAG, vars=[]), CoreLit(LitInt(0))),
         ],
     )
-    result = ev._eval_expr(case_expr)
+    result = ev._eval_expr(case_expr, {})
     assert isinstance(result, VLit)
     assert result.lit.value == 1
 
@@ -327,7 +326,7 @@ def test_builtin_int_plus():
         CoreApp(CoreVar(plus_id), CoreLit(LitInt(1))),
         CoreLit(LitInt(2)),
     )
-    result = ev._eval_expr(expr)
+    result = ev._eval_expr(expr, {})
     assert isinstance(result, VLit)
     assert result.lit.value == 3
 
@@ -339,7 +338,7 @@ def test_builtin_int_minus():
         CoreApp(CoreVar(minus_id), CoreLit(LitInt(10))),
         CoreLit(LitInt(3)),
     )
-    result = ev._eval_expr(expr)
+    result = ev._eval_expr(expr, {})
     assert isinstance(result, VLit)
     assert result.lit.value == 7
 
@@ -355,10 +354,10 @@ def test_builtin_int_eq():
         CoreApp(CoreVar(eq_id), CoreLit(LitInt(5))),
         CoreLit(LitInt(6)),
     )
-    assert isinstance(ev._eval_expr(true_expr), VData)
-    assert ev._eval_expr(true_expr).tag == TRUE_TAG
-    assert isinstance(ev._eval_expr(false_expr), VData)
-    assert ev._eval_expr(false_expr).tag == FALSE_TAG
+    assert isinstance(ev._eval_expr(true_expr, {}), VData)
+    assert ev._eval_expr(true_expr, {}).tag == TRUE_TAG
+    assert isinstance(ev._eval_expr(false_expr, {}), VData)
+    assert ev._eval_expr(false_expr, {}).tag == FALSE_TAG
 
 
 def test_builtin_string_concat():
@@ -368,7 +367,7 @@ def test_builtin_string_concat():
         CoreApp(CoreVar(concat_id), CoreLit(LitString("hello"))),
         CoreLit(LitString(" world")),
     )
-    result = ev._eval_expr(expr)
+    result = ev._eval_expr(expr, {})
     assert isinstance(result, VLit)
     assert result.lit.value == "hello world"
 
@@ -377,14 +376,14 @@ def test_builtin_bool_constructors():
     ev = Evaluator(FakeCtx())
     true_id = Id(BUILTIN_TRUE, TyInt())
     false_id = Id(BUILTIN_FALSE, TyInt())
-    assert isinstance(ev._eval_expr(CoreVar(true_id)), VData)
-    assert isinstance(ev._eval_expr(CoreVar(false_id)), VData)
+    assert isinstance(ev._eval_expr(CoreVar(true_id), {}), VData)
+    assert isinstance(ev._eval_expr(CoreVar(false_id), {}), VData)
 
 
 def test_builtin_list_nil():
     ev = Evaluator(FakeCtx())
     nil_id = Id(BUILTIN_LIST_NIL, TyInt())
-    result = ev._eval_expr(CoreVar(nil_id))
+    result = ev._eval_expr(CoreVar(nil_id), {})
     assert isinstance(result, VData)
     assert result.tag == NIL_TAG
 
@@ -395,12 +394,13 @@ def test_builtin_partial_saturation():
     cons_id = Id(BUILTIN_LIST_CONS, TyInt())
     nil_id = Id(BUILTIN_LIST_NIL, TyInt())
     # Cons 1 -> VPartial
-    p1 = ev._eval_expr(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))))
+    p1 = ev._eval_expr(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))), {})
     assert isinstance(p1, VPartial)
     assert p1.done == [VLit(LitInt(1))]
     # (Cons 1) Nil -> VData
     full = ev._eval_expr(
-        CoreApp(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))), CoreVar(nil_id))
+        CoreApp(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))), CoreVar(nil_id)),
+        {},
     )
     assert isinstance(full, VData)
     assert full.tag == CONS_TAG

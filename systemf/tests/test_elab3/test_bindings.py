@@ -65,10 +65,14 @@ class TestRecursiveBindings:
         result = tc.let(bindings, body, Check(TyFun(TyInt(), TyInt())))
         core = result()
         
-        # Should be: letrec { fact = \n -> fact n } in fact
+        # Should be: let fact = letrec { _fact_mono = \n -> _fact_mono n } in _fact_mono in fact
         assert isinstance(core, CoreLet)
-        assert isinstance(core.binding, Rec)
-        assert len(core.binding.bindings) == 1
+        assert isinstance(core.binding, NonRec)
+        # The RHS of the NonRec contains the letrec
+        inner_let = core.binding.expr
+        assert isinstance(inner_let, CoreLet)
+        assert isinstance(inner_let.binding, Rec)
+        assert len(inner_let.binding.bindings) == 1
         
     def test_mutual_recursion(self):
         """Mutually recursive bindings (even/odd)."""

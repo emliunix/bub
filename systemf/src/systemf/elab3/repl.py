@@ -7,12 +7,11 @@ resolves module-level names at runtime.  Module loading is typecheck-time
 """
 
 from dataclasses import dataclass
+import itertools
 from pathlib import Path
-from typing import override
+from typing import cast, override
 
-from systemf.elab3.types.tything import ACon, AnId
-from systemf.elab3.types.val import VPartial
-from systemf.surface.parser import parse_expression, ParseError
+from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
 from systemf.utils.uniq import Uniq
 
@@ -23,8 +22,10 @@ from .name_gen import NameCacheImpl
 from .reader_env import ImportSpec, ReaderEnv, RdrElt, ImportRdrElt
 from .pipeline import Code, execute
 from .eval import Evaluator, EvalCtx
-from .types.val import VData, VPartial, Val
 from .types import Module, TyThing, REPLContext, Name, NameCache
+from .types.ty import Ty, TyConApp, subst_ty
+from .types.tything import ACon, ATyCon, AnId
+from .types.val import Trap, VClosure, VData, VLit, VPartial, Val
 
 
 class REPLSession(EvalCtx):
@@ -58,7 +59,16 @@ class REPLSession(EvalCtx):
             mod_insts=self.mod_insts.copy() # Copy module instances
         )
 
-    def eval(self, input: str) -> Val | None:
+    def cmd_import(self, import_spec: ImportSpec) -> None:
+        """Handle an import command by loading the module and updating state."""
+        mod = self.ctx.load(import_spec.module_name)
+        new_rdr_env = ReaderEnv.from_elts([
+            ImportRdrElt.create(name, import_spec)
+            for name, _ in mod.tythings
+        ])
+        self.reader_env = self.reader_env.merge(new_rdr_env)
+
+    def eval(self, input: str) -> tuple[Ty, Val] | None:
         """
         Evaluate a REPL expression by wrapping it in a synthetic module,
         typechecking, then running ``eval_mod``.
@@ -73,17 +83,52 @@ class REPLSession(EvalCtx):
         # and for an expression, we need to make up a "it = <expr>" declaration
         file_path = f"<repl {repl_id}>"
         is_expr, ast = normalize_input(file_path, input)
-        repl_mod = pipeline.execute(self.ctx, mod_name, file_path, ast)
+        repl_mod = pipeline.execute(self.ctx, mod_name, file_path, ast, reader_env=self.reader_env)
         self.update_repl_with_mod(repl_mod)
         mod_inst = self.eval_mod(repl_mod)
 
         if is_expr:
             # Convention: REPL expressions bind to `it`
+            ty = [cast(AnId, thing).id for n, thing in repl_mod.tythings if n.surface == "it"]
             it = [v for k, v in mod_inst.items() if k.surface == "it"]
-            if it:
-                return it[0]
+            if ty and it:
+                return ty[0].ty, it[0]
             raise Exception("REPL expression did not produce a value")
         return None
+
+    def pp_val(self, ty: Ty, val: Val) -> str:
+        """Pretty print a value using the evaluator's machinery."""
+        def _pp(ty: Ty, val: Val) -> str:
+            match ty, val:
+                case TyConApp(name=con, args=arg_tys), VData(tag=tag, vals=args):
+                    tycon, dcon = self.get_data_con(con, tag)
+                    dcon_field_tys = [subst_ty(tycon.tyvars, arg_tys, ty) for ty in dcon.field_types]
+                    vals_str = " ".join(_pp(ty, arg) for ty, arg in zip(dcon_field_tys, args))
+                    return f"{dcon.name.surface} {vals_str}".strip()
+                case _, VLit(lit=lit):
+                    return f"{lit.v!r}"
+                case _, VPartial(name=name, arity=arity):
+                    return f"<func {name} {arity}>"
+                case _, VClosure():
+                    return "<closure>"
+                case _, Trap(v=None):
+                    return "<unfilled trap>"
+                case _, Trap(v=v) if v is not None:
+                    return _pp(ty, v)
+                case _, _: return "<unknown>"
+        return f"{_pp(ty, val)} :: {ty}"
+
+    def get_data_con(self, con: Name, tag: int) -> tuple[ATyCon, ACon]:
+        def _mod_lookup():
+            # lazy load, cause REPL modules are not loadable
+            for _, thing in self.ctx.load(con.mod).tythings:
+                yield thing
+        for tycon in itertools.chain(self.tythings, _mod_lookup()):
+            if isinstance(tycon, ATyCon) and tycon.name == con:
+                for acon in tycon.constructors:
+                    if acon.tag == tag:
+                        return tycon, acon
+        raise Exception(f"Data constructor not found for {con} with tag {tag}")
 
     # --- EvalCtx implementation ---------------------------------------------
 
@@ -118,7 +163,7 @@ class REPLSession(EvalCtx):
         mod_inst = self._evaluator.eval_mod(mod, mod_inst)
         self.mod_insts[mod.name] = mod_inst
         return mod_inst
-    
+
     # --- State management ---
 
     def update_repl_with_mod(self, mod: Module):
@@ -131,7 +176,7 @@ class REPLSession(EvalCtx):
         # update REPL session state
         self.reader_env = self.reader_env.shadow(set(new_names)).merge(new_rdr_env)
         self.tythings.extend(thing for _, thing in mod.tythings)
-    
+
     def mk_mod_inst(self, mod: Module) -> dict[Name, Val]:
         mod_inst: dict[Name, Val] = {}
         for name, thing in mod.tythings:
@@ -270,7 +315,11 @@ def _build_import_chain(loads: dict[str, str | None], start: str) -> str:
 
 def normalize_input(file_path: str, input: str) -> tuple[bool, Code]:
     """Normalize REPL input.
-    
+
+    Try expression parsing first. If that fails, try program parsing.
+    If program parsing also fails, report the expression parse error
+    (it's usually more informative).
+
     :returns: (is_expr, code)
     """
     try:
@@ -285,5 +334,14 @@ def normalize_input(file_path: str, input: str) -> tuple[bool, Code]:
                 pragma=None,
             )],
         )
+    except ParseError as expr_err:
+        pass
+
+    try:
+        code: Code = input
+        _, decls = parse_program(input, file_path)
+        if not decls:
+            raise expr_err
+        return False, code
     except ParseError:
-        return False, input
+        raise expr_err

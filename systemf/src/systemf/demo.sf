@@ -131,6 +131,13 @@ data Tree a = Leaf a | Node (Tree a) a (Tree a)
 --     Leaf x -> Cons x Nil
 --     Node l x r -> append (treeToList l) (Cons x (treeToList r))
 
+-- | Mutual recursion: even/odd
+even :: Int -> Bool = \n ->
+  if n == 0 then True else odd (n - 1)
+
+odd :: Int -> Bool = \n ->
+  if n == 0 then False else even (n - 1)
+
 -- | Test explicit type annotation narrowing polymorphism
 -- const has type forall a b. a -> b -> a
 -- Here we annotate it as forall a. a -> a -> a (forcing b = a)

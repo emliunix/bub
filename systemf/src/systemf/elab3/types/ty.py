@@ -342,7 +342,7 @@ def _ty_repr(ty: Ty, prec: int) -> str:
             case BoundTv(name=name):
                 return 3, name.surface
             case SkolemTv(name=name):
-                return 3, f"${name.unique}_{name.surface}"
+                return 3, f"${name.surface}"
             case TyConApp(name=name, args=[] | None):
                     return 3, name.surface
             case TyConApp(name=name, args=args):
@@ -351,9 +351,7 @@ def _ty_repr(ty: Ty, prec: int) -> str:
             case TyFun(arg=arg, result=res):
                 return 1, f"{_ty_repr(arg, 2)} -> {_ty_repr(res, 1)}"
             case TyForall(vars=vars, body=body):
-                var_strs = " ".join(
-                    v.name.surface for v in vars if isinstance(v, (BoundTv, SkolemTv))
-                )
+                var_strs = " ".join(_ty_repr(v, 0) for v in vars)
                 return 0, f"forall {var_strs}. {_ty_repr(body, 0)}"
             case MetaTv(uniq=uniq):
                 return 1, f"?{uniq}"

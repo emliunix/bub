@@ -41,6 +41,8 @@ BUILTIN_ENDS = 1000
 
 BUILTIN_NAMES: dict[str, list[Name]] = {
     "builtins": [
+        BUILTIN_UNIT,
+        BUILTIN_MK_UNIT,
         BUILTIN_BOOL,
         BUILTIN_TRUE,
         BUILTIN_FALSE,

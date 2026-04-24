@@ -86,21 +86,18 @@ class CoreTyApp(CoreTm):
 # =============================================================================
 
 
-@dataclass(repr=False)
-class Binding:
-    """Base class for bindings."""
-    pass
+type Binding = Rec | NonRec
 
 
 @dataclass(repr=False)
-class NonRec(Binding):
+class NonRec:
     """Non-recursive binding: let x = expr in body"""
     binder: Id
     expr: CoreTm
 
 
 @dataclass(repr=False)
-class Rec(Binding):
+class Rec:
     """Recursive bindings: letrec { x = e1; y = e2 } in body
 
     All names are in scope for all expressions (mutual recursion).

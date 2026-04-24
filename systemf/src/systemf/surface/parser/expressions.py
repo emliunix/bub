@@ -680,13 +680,16 @@ def lambda_param_parser() -> P[tuple[str, SurfaceType | None]]:
     - x (unannotated)
     - (x :: T) (annotated with parentheses)
 
+    Note: bare ``x :: T`` (without parens) is intentionally not supported because
+    it creates ambiguity with the lambda arrow: ``\\x :: Int -> body`` could be
+    parsed as ``\\x :: (Int -> body)`` or ``(\\x :: Int) -> body``.
+
     Returns:
         Tuple of (parameter_name, optional_type)
     """
 
     @generate
     def parser():
-        # Try parenthesized annotated parameter first: (x :: T)
         paren_param = (
             yield (match_token(LeftParenToken) >> match_ident() << match_token(DoubleColonToken))
             .bind(
@@ -701,7 +704,6 @@ def lambda_param_parser() -> P[tuple[str, SurfaceType | None]]:
         if paren_param is not None:
             return paren_param
 
-        # Otherwise parse simple identifier: x
         ident = yield match_ident()
         return (ident.name, None)
 

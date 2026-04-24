@@ -63,7 +63,6 @@ class TypeChecker(Unifier):
         self.name_gen = name_gen
         self.wrapper_runner = WrapperRunner(name_gen)
         self.matchc = MatchC(self, name_gen)
-        print(f"[TRACE TypeChecker.__init__] local type_env has {len(self.type_env)} entries (should be 0)")
 
     @override
     def lookup_gbl(self, name: Name) -> TyThing:
@@ -94,13 +93,15 @@ class TypeChecker(Unifier):
 
     def var(self, name: Name, exp: Expect) -> TyCkRes:
         match self.lookup(name):
-            case AnId(id=Id(ty=ty) as id):
+            case AnId(id=Id(ty=ty) as looked_up_id):
                 sigma = ty
+                core_name = looked_up_id.name
             case ACon(name=con):
                 sigma = self.datacon_fun(con)
+                core_name = name
             case thing: raise Exception(f"expected AnId for {name}, got: {thing}")
         w = self.inst(sigma, exp)
-        return self.with_wrapper(w, lambda: C.var(Id(name, sigma)))
+        return self.with_wrapper(w, lambda: C.var(Id(core_name, sigma)))
 
     def lit(self, lit: Lit, exp: Expect) -> TyCkRes:
         self.exp_set_ty(lit.ty, exp)
@@ -400,6 +401,7 @@ class TypeChecker(Unifier):
                 res = cb(mv_args, mv_res)
                 arg_tys = list(map(_exp_ty, mv_args))
                 res_ty = _exp_ty(mv_res)
+                self.fill_infer(exp, functools.reduce(lambda rty, aty: TyFun(aty, rty), reversed(arg_tys), res_ty))
                 return WP_HOLE, arg_tys, res_ty, res
             case Check(ty):
                 ws: list[Wrapper] = []
@@ -556,6 +558,9 @@ def ds_binding(binding: BindingGroup) -> core.Binding:
     match binding:
         case NonRecGroup(bndr, rhs):
             return core.NonRec(bndr, rhs())
+        case RecGroup(AbsBinds([], exports, binds)) if len(binds) == 1 and len(exports) == 1:
+            return core.NonRec(exports[0].poly_id,
+                         C.letrec([(binds[0][0], binds[0][1]())], C.var(binds[0][0])))
         case RecGroup(AbsBinds([], _, binds)):
             return core.Rec([(mono_id, rhs_c()) for mono_id, rhs_c in binds])
         case RecGroup(AbsBinds(tvs, [ABExport(poly_id, mono_id, _)], [(_, rhs_c)])):

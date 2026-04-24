@@ -65,21 +65,12 @@ class TcCtx(ABC):
     def lookup_gbl(self, name: Name) -> TyThing: ...
 
     def lookup_local(self, name: Name) -> TyThing | None:
-        th = self.type_env.get(name)
-        if th is None and name.surface in ['Nothing', 'Just', 'Left', 'Right', 'Leaf', 'Node']:
-            # trace name identity for datacon debugging
-            matching = [k for k in self.type_env.keys() if k.surface == name.surface]
-            print(f"[TRACE lookup_local] name={name} (id={id(name)}) not found in type_env")
-            for m in matching:
-                print(f"[TRACE lookup_local]   same-surface key: {m} (id={id(m)}, same_id={id(m) == id(name)})")
-        return th
+        return self.type_env.get(name)
 
     def lookup(self, name: Name) -> TyThing:
         if (th := self.lookup_local(name)) is not None:
             return th
         if name.mod == self.mod_name:
-            # Check if it's in gbl_type_env (for debugging)
-            print(f"[TRACE lookup] local miss for {name.surface} (id={id(name)}), mod={name.mod} == self.mod_name={self.mod_name}")
             raise Exception(f"local name not found: {name}")
         return self.lookup_gbl(name)
 

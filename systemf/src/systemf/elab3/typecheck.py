@@ -8,7 +8,7 @@ from .typecheck_expr import TypeChecker, ds_binding
 from .types import NameGenerator, REPLContext, Name, Ty
 from .types.ast import Binding, ModuleDecls, RnDataConDecl, RnDataDecl, RnPrimOpDecl, RnPrimTyDecl, RnTermDecl
 from .types.core import CoreTm, CoreLet, NonRec, Rec, C
-from .types.ty import Id
+from .types.ty import Id, zonk_type
 from .types.tything import APrimTy, AnId, TypeEnv, ATyCon, ACon
 from systemf.elab3.types import core
 
@@ -88,4 +88,15 @@ class Typecheck:
             ds_binding(group)
             for group in groups
         ]
-        return bs
+        return [zonk_binding(b) for b in bs]
+    
+
+def zonk_binding(binding: core.Binding) -> core.Binding:
+    match binding:
+        case NonRec(bndr, expr):
+            return NonRec(Id(bndr.name, zonk_type(bndr.ty)), expr)
+        case Rec(bindings):
+            new_bindings = [(Id(bndr.name, zonk_type(bndr.ty)), expr) for bndr, expr in bindings]
+            return Rec(new_bindings)
+        case _:
+            raise Exception(f"unexpected binding form {binding}")

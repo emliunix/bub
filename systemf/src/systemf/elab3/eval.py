@@ -10,7 +10,7 @@ Architecture:
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 from systemf.elab3.types.core import (
     CoreTm, CoreLit, CoreVar, CoreGlobalVar, CoreLam, CoreApp,
@@ -117,68 +117,38 @@ class Evaluator:
         Each binding is evaluated independently.  For NonRec, the expression
         result is stored under ``binder.name``.  For Rec, the whole group is
         evaluated once and all member values are extracted.
+
+        ``mod_inst`` is mutated in-place and serves as a same-module cache:
+        ``step(CoreVar)`` checks it before falling through to
+        ``ctx.lookup_gbl``.
         """
-        
+        init_env = {bndr.unique: v for bndr, v in mod_inst.items()}
         for binding in mod.bindings:
             match binding:
                 case NonRec(binder, expr):
-                    mod_inst[binder.name] = self._eval_expr(expr, {})
+                    val = self._eval_expr(expr, init_env)
+                    mod_inst[binder.name] = val
+                    init_env[binder.name.unique] = val
                 case Rec(rec_bindings):
-                    mod_inst.update(self._eval_rec_many(rec_bindings))
+                    # FIX: we should construct a tuple, then extracts each field
+                    # current approach causes re-evaluation for each binder
+                    for bndr, _ in rec_bindings:
+                        val = self._eval_expr(CoreLet(binding, CoreVar(bndr)), init_env)
+                        mod_inst[bndr.name] = val
+                        init_env[bndr.name.unique] = val
                 case _:
                     raise Exception(f"unexpected binding type: {binding!r}")
         return mod_inst
 
     # --- CEK machine --------------------------------------------------------
 
-    def _eval_expr(self, t: CoreTm, env: Env | None = None) -> Val:
+    def _eval_expr(self, t: CoreTm, env: Env) -> Val:
         """Evaluate a CoreTm to a Val using the CEK machine."""
-        if env is None:
-            env = {}
         cur: Config | Val = (t, env, Halt())
         while not isinstance(cur, Val):
             t1, env1, k1 = cur
             cur = self.step(t1, env1, k1)
         return cur
-
-    def _eval_rec_many(self, pairs: list[tuple[Id, CoreTm]]) -> dict[Name, Val]:
-        """Evaluate a Rec group once and return all bound values.
-
-        Implements the same trap/backpatch mechanism as ``step`` for Rec,
-        but extracts all filled trap values after the run instead of a
-        single body result.
-        """
-        if not pairs:
-            return {}
-
-        traps = [(Trap(), expr) for _, expr in pairs]
-        new_env: Env = {}
-        for (trap, _), (binder, _) in zip(traps, pairs):
-            new_env[binder.name.unique] = trap
-
-        first_trap, first_expr = traps[0]
-        rest = traps[1:]
-        cur: Config | Val = (
-            first_expr,
-            new_env,
-            BackpatchNext(first_trap, rest, new_env, CoreLit(LitInt(0)), Halt()),
-        )
-
-        while not isinstance(cur, Val):
-            t1, env1, k1 = cur
-            cur = self.step(t1, env1, k1)
-
-        results: dict[Name, Val] = {}
-        for (binder, _), (trap, _) in zip(pairs, traps):
-            v = trap.v
-            if v is None:
-                raise Exception(
-                    f"Rec binding {binder.name.surface!r} was not initialized "
-                    f"(non-productive recursion)"
-                )
-            results[binder.name] = v
-
-        return results
 
     def step(self, t: CoreTm, env: Env, k: Cont) -> Config | Val:
         match t:
@@ -254,7 +224,6 @@ class Evaluator:
                         raise Exception(
                             f"expected closure, partial, or primop in function position, got: {v!r}"
                         )
-
             case Ap(closure=f, k=k2):
                 match f:
                     case VClosure(env=cenv, param=param, body=body):
@@ -269,7 +238,6 @@ class Evaluator:
                             )
             case LetBind(binder=binder, body=body, env=env, k=k2):
                 return (body, env | {binder.name.unique: v}, k2)
-
             case BackpatchNext(trap=trap, rest=rest, new_env=new_env, body=body, k=k2):
                 trap.set(v)
                 if rest:
@@ -281,38 +249,21 @@ class Evaluator:
                     )
                 else:
                     return (body, new_env, k2)
-
             case Kases(alts=alts, scrut_var=scrut_var, env=env, k=k2):
                 scrut_key = scrut_var.name.unique
-                match v:
-                    case VLit(lit=lit):
-                        for alt, body in alts:
-                            match alt:
-                                case LitAlt(lit=lit_) if lit_ == lit:
-                                    return (body, env | {scrut_key: v}, k2)
-                                case DefaultAlt():
-                                    return (body, env | {scrut_key: v}, k2)
-                    case VData(tag=tag, vals=vals):
-                        for alt, body in alts:
-                            match alt:
-                                case DataAlt(tag=tag_, vars=alt_vars) if tag_ == tag:
-                                    alt_env: Env = dict(env)
-                                    alt_env[scrut_key] = v
-                                    for var_id, field_val in zip(alt_vars, vals):
-                                        alt_env[var_id.name.unique] = field_val
-                                    return (body, alt_env, k2)
-                                case DefaultAlt():
-                                    return (body, env | {scrut_key: v}, k2)
-                    case _:
-                        for alt, body in alts:
-                            match alt:
-                                case DefaultAlt():
-                                    return (body, env | {scrut_key: v}, k2)
-
+                for alt, body in alts:
+                    match alt, v:
+                        case LitAlt(lit=lit), Lit() if lit == v:
+                            return (body, env | {scrut_key: v}, k2)
+                        case DataAlt(tag=tag, vars=vars), VData(tag=tag_, vals=vals) if tag == tag_:
+                            new_env = env.copy()
+                            for var, val in zip(vars, vals):
+                                new_env[var.name.unique] = val
+                            return (body, new_env, k2)
+                        case DefaultAlt(), _:
+                            return (body, env | {scrut_key: v}, k2)
                 raise Exception(f"no matching case for value: {v!r}")
-
             case Halt():
                 return v
-
             case _:
                 raise Exception(f"invalid continuation: {k!r}")
