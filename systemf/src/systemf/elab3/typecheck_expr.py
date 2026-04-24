@@ -67,7 +67,7 @@ class TypeChecker(Unifier):
 
     @override
     def lookup_gbl(self, name: Name) -> TyThing:
-        if (r := self.ctx.load(name.mod).items.get(name)) is not None:
+        if (r := lookup_list(self.ctx.load(name.mod).tythings, name)) is not None:
             return r
         raise Exception(f"global item not found {name}")
 
@@ -570,14 +570,8 @@ def _tylams(tyvars: list[TyVar], tm: CoreTm) -> CoreTm:
     return functools.reduce(lambda acc, tv: C.tylam(tv, acc), reversed(tyvars), tm)
 
 
-# def mk_tuple(args: list[CoreTm], tys: list[Ty]) -> tuple[CoreTm, Ty]:
-#     match (args, tys):
-#         case [], []:
-#             raise Exception("cannot create tuple of arity 0")
-#         case [arg], [ty]:
-#             return arg, ty
-#         case [a,*ax], [ty, *tyx]:
-#             rest, rest_ty = mk_tuple(ax, tyx)
-#             ty = TyConApp(builtins.BUILTIN_PAIR, [ty, rest_ty])
-#             mk_pair = C.var(Id(builtins.BUILTIN_PAIR_MKPAIR, TyConApp(builtins.BUILTIN_PAIR, [ty, rest_ty])))
-#             return C.app(C.app(C.var(Id(builtins.BUILTIN_PAIR_MKPAIR, TyConApp(builtins.BUILTIN_PAIR, [])), a), rest), ty), ty
+def lookup_list(xs: list[tuple[T, R]], key: T) -> R | None:
+    for k, v in xs:
+        if k == key:
+            return v
+    return None

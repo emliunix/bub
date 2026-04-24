@@ -227,7 +227,9 @@ class MatchC:
         mr_alts = mr_bundle([_mk_alt1(con, ids, mr) for con, ids, mr in xs])
 
         tycon = cast(TyConApp, v.ty).name
-        all_cons = [c.name for c in self.tycon_datacons(tycon)]
+        cons = self.tycon_datacons(tycon)
+        cons_map = {con.name: con for con in cons}
+        all_cons = [c.name for c in cons]
         # just to decide if we need default alt
         unseen_cons = set(all_cons).difference([con for con, _, _ in xs])
         def _mk_defa() -> MatchResult1[None | CoreTm]:
@@ -240,7 +242,7 @@ class MatchC:
         def _map_res(t: tuple[list[tuple[Name, list[Id], CoreTm]], None | CoreTm]) -> CoreTm:
             alts, defa = t
             alts_: list[tuple[Alt, CoreTm]] = []
-            alts_.extend((DataAlt(con, ids), core) for con, ids, core in alts)
+            alts_.extend((DataAlt(con, cons_map[con].tag, ids), core) for con, ids, core in alts)
             if defa is not None:
                 alts_.append((DefaultAlt(), defa))
             return C.case_expr(

@@ -5,12 +5,18 @@ from systemf.elab3.typecheck import Typecheck
 from systemf.elab3.types import Module, REPLContext
 
 from systemf.surface.parser import parse_program
+from systemf.surface.types import SurfaceDeclaration, SurfaceImportDeclaration
+
+type Code = str | tuple[list[SurfaceImportDeclaration], list[SurfaceDeclaration]]
 
 
-def execute(ctx: REPLContext, mod_name: str, file_path: str, code: str,
+def execute(ctx: REPLContext, mod_name: str, file_path: str, code: Code,
             reader_env: ReaderEnv | None = None,
             ) -> Module:
-    imports, decls = parse_program(code, file_path)
+    if isinstance(code, str):
+        imports, decls = parse_program(code, file_path)
+    else:
+        imports, decls = code
 
     # 1. Parse
     if reader_env is None:
@@ -29,7 +35,7 @@ def execute(ctx: REPLContext, mod_name: str, file_path: str, code: str,
 
     return Module(
         name=mod_name,
-        items=type_env,
+        tythings=list(type_env.items()),
         bindings=bindings,
         exports=list(type_env.keys()),
         source_path=file_path

@@ -1,0 +1,58 @@
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from .ty import Lit, LitInt, LitString, Name, Id
+from .core import CoreTm
+
+
+# Environment: Name.unique -> Val
+type Env = dict[int, Val]
+
+
+class Val:
+    pass
+
+@dataclass
+class VLit(Val):
+    lit: Lit
+
+
+@dataclass
+class VPrimOp(Val):
+    """Primitive operation (e.g. int_plus, bool_and)."""
+    name: Name
+    arity: int
+    func: Callable[[list[Val]], Val]
+
+
+@dataclass
+class VPartial(Val):
+    """Partially-applied constructor or primop."""
+    name: str
+    arity: int
+    done: list[Val]
+    finish: Callable[[list[Val]], Val]
+
+
+@dataclass
+class VData(Val):
+    """Fully-applied data constructor."""
+    tag: int
+    vals: list[Val]
+
+
+@dataclass
+class VClosure(Val):
+    """Lambda closure."""
+    env: Env
+    param: Id
+    body: CoreTm
+
+
+@dataclass
+class Trap(Val):
+    """Mutable forward reference used to implement letrec."""
+    v: Val | None = None
+
+    def set(self, v: Val) -> None:
+        self.v = v

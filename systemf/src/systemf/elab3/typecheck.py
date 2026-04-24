@@ -7,7 +7,7 @@ from .typecheck_expr import TypeChecker, ds_binding
 
 from .types import NameGenerator, REPLContext, Name, Ty
 from .types.ast import Binding, ModuleDecls, RnDataConDecl, RnDataDecl, RnPrimOpDecl, RnPrimTyDecl, RnTermDecl
-from .types.core import CoreTm, CoreLet, Rec, C
+from .types.core import CoreTm, CoreLet, NonRec, Rec, C
 from .types.ty import Id
 from .types.tything import APrimTy, AnId, TypeEnv, ATyCon, ACon
 from systemf.elab3.types import core
@@ -35,7 +35,7 @@ class Typecheck:
             self.type_env
         )
 
-    def typecheck(self, mod: ModuleDecls) -> tuple[TypeEnv, dict[Name, core.Binding]]:
+    def typecheck(self, mod: ModuleDecls) -> tuple[TypeEnv, list[core.Binding]]:
         ty_env = self.tc_datas(mod.data_decls)
         ty_env.update(self.tc_prims(mod.prim_ty_decls, mod.prim_op_decls))
 
@@ -43,8 +43,18 @@ class Typecheck:
         self.type_env.update(ty_env)
         bindings = self.tc_valbinds(mod.term_decls)
 
-        ty_env.update((id.name, AnId.from_id(id)) for id, _ in bindings)
-        return ty_env, {n.name: tm for n, tm in bindings}
+        def _ids_binding(binding: core.Binding) -> list[Id]:
+            match binding:
+                case NonRec(bndr, _):
+                    return [bndr]
+                case Rec(bindings):
+                    return [bndr for bndr, _ in bindings]
+                case _: raise Exception(f"unexpected binding form {binding}")
+
+        ty_env.update((id.name, AnId.from_id(id))
+                      for binding in bindings
+                      for id in _ids_binding(binding))
+        return ty_env, bindings
 
     def tc_datas(self, data_decls: list[RnDataDecl]) -> TypeEnv:
         """
@@ -71,26 +81,11 @@ class Typecheck:
             env[name] = AnId(name, Id(name, ty), is_prim=True)
         return env
 
-    def tc_valbinds(self, valbinds: list[RnTermDecl]) -> list[tuple[Id, core.Binding]]:
+    def tc_valbinds(self, valbinds: list[RnTermDecl]) -> list[core.Binding]:
         groups, _ = self.typecheck_expr.bindings([Binding(b.name, b.expr) for b in valbinds], lambda: None)
         result = {}
         bs = [
             ds_binding(group)
             for group in groups
         ]
-
-        def _ids(b: core.Binding) -> list[Id]:
-            match b:
-                case core.NonRec(id, _):
-                    return [id]
-                case core.Rec(bindings):
-                    return [id for id, _ in bindings]
-                case _: raise Exception("unreachable")
-        res = []
-        for b in bs:
-            for n in _ids(b):
-                if n in res:
-                    raise Exception(f"duplicate binding for {n}")
-                # FIX: the sharing of RecGroup
-                res.append((n, b))
-        return res
+        return bs

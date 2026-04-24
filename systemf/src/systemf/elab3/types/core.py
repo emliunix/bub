@@ -131,6 +131,7 @@ class CoreCase(CoreTm):
 @dataclass(repr=False)
 class DataAlt:
     con: Name
+    tag: int
     vars: list[Id]
 
 
@@ -234,9 +235,12 @@ def subst_coretm(substs: dict[Id, CoreTm], expr: CoreTm) -> CoreTm:
 
 
 def _subst_alt(substs: dict[Id, CoreTm], scrut_var: Id, alt: Alt, tm: CoreTm) -> CoreTm:
+    """
+    Substitute Alt RHS, handling scrut_var and alt vars
+    """
     substs1 = shift_substs(substs, [scrut_var])
     match alt:
-        case DataAlt(_, vars):
+        case DataAlt(vars=vars):
             substs2 = shift_substs(substs1, vars)
             if len(substs2) > 0:
                 return subst_coretm(substs2, tm)

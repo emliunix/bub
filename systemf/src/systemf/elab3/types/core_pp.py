@@ -163,7 +163,7 @@ def _join_tyapp(fun_lines: list[str], ty_str: str) -> str:
 
 def _pp_alt(alt) -> str:
     match alt:
-        case DataAlt(con, vars):
+        case DataAlt(con=con, vars=vars):
             if vars:
                 return f"{con.surface} {' '.join(v.name.surface for v in vars)}"
             return con.surface

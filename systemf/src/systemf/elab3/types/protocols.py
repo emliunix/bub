@@ -5,6 +5,7 @@ from systemf.utils.location import Location
 
 from .mod import Module
 from .ty import Id, Name, Ty
+from .val import Val
 
 from systemf.utils.uniq import Uniq
 
@@ -23,6 +24,7 @@ class REPLContext(Protocol):
 
     def load(self, name: str) -> Module: ...
     def next_replmod_id(self) -> int: ...
+    def get_primop(self, name: Name) -> Val | None: ...
 
 
 class NameGenerator(Protocol):
