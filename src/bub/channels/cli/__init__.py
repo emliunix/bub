@@ -44,7 +44,6 @@ class CliChannel(Channel):
         self._mode = "agent"  # or "shell"
         self._main_task: asyncio.Task | None = None
         self._renderer = CliRenderer(get_console())
-        self._log_handler_id = self._install_log_sink()
         self._last_tape_info: TapeInfo | None = None
         self._workspace = self._agent.framework.workspace
         self._prompt = self._build_prompt(self._workspace)
@@ -66,6 +65,7 @@ class CliChannel(Channel):
             self._message_template["chat_id"] = chat_id
 
     async def start(self, stop_event: asyncio.Event) -> None:
+        self._log_handler_id = self._install_log_sink()
         self._stop_event = stop_event
         self._main_task = asyncio.create_task(self._main_loop())
 
