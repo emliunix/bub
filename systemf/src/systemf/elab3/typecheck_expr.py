@@ -4,8 +4,12 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Callable, TypeVar, cast, override
 
-from systemf.elab3 import builtins
 from systemf.utils import run_capture_return
+
+from . import builtins
+from .matchc import MRInfallible, MatchC, MatchResult, mr_run
+from .tc_ctx import Expect, Infer, Check, TyCkRes, Unifier
+from .scc import run_scc, SccGroup
 
 from .types import Name, NameGenerator, REPLContext
 from .types.ast import (
@@ -13,17 +17,13 @@ from .types.ast import (
     Expr, Lam, Let, LitExpr, Pat, ConPat, Var, VarPat,
     LitPat, WildcardPat, expr_names, name_of
 )
+from .types import core
 from .types.core import C, CoreTm, CoreLet, NonRec, Rec
 from .types.tything import ACon, AnId, TyThing, TypeEnv
 from .types.wrapper import WP_HOLE, WpTyApp, Wrapper, WrapperRunner, mk_wp_ty_lams, wp_compose, zonk_wrapper
 from .types.ty import Id, Lit, LitInt, MetaTv, Ty, TyConApp, TyForall, TyFun, TyVar, get_meta_vars, subst_ty, zonk_type
 from .types.xpat import XPat, XPatCo, XPatLit, XPatCon, XPatVar, XPatWild
 from .types.tc import *
-
-from .matchc import MRInfallible, MatchC, MatchResult, mr_run
-from .tc_ctx import Expect, Infer, Check, TyCkRes, Unifier
-from .scc import run_scc, SccGroup
-from systemf.elab3.types import core
 
 
 T = TypeVar("T")
@@ -291,7 +291,7 @@ class TypeChecker(Unifier):
             for bind in bindings    
         ]
         groups = run_scc(scc_input)
-        with self.extend_env([(b.name.name, AnId.from_id(Id(b.name.name, b.name.type_ann))) for b in bindings if isinstance(b.name, AnnotName)]):
+        with self.extend_env([(b.name.name, AnId.create(Id(b.name.name, b.name.type_ann))) for b in bindings if isinstance(b.name, AnnotName)]):
             return multiple(groups, self._binding_group, cb)
     
     def _binding_group(self, group: SccGroup[Binding], cb: CB[R]) -> tuple[BindingGroup, R]:
@@ -306,9 +306,9 @@ class TypeChecker(Unifier):
         def _mk_env(group: BindingGroup) -> list[tuple[Name, TyThing]]:
             match group:
                 case NonRecGroup(bndr, _):
-                    return [(bndr.name, AnId.from_id(bndr))]
+                    return [(bndr.name, AnId.create(bndr))]
                 case RecGroup(abs_binds):
-                    return [(exp.poly_id.name, AnId.from_id(exp.poly_id)) for exp in abs_binds.exports]
+                    return [(exp.poly_id.name, AnId.create(exp.poly_id)) for exp in abs_binds.exports]
 
         with self.extend_env(_mk_env(binding_grp)):
             return binding_grp, cb()
@@ -335,7 +335,7 @@ class TypeChecker(Unifier):
                 case Binding(Name(), rhs):
                     return self.expr(rhs, Check(mono_id.ty))
                 case _: raise Exception("unreachable")
-        with self.extend_env([(name, AnId.from_id(id)) for name, id in zip(names, mono_ids)]):
+        with self.extend_env([(name, AnId.create(id)) for name, id in zip(names, mono_ids)]):
             with self.push_level():
                 rhss = [
                     _tc_rhs(bind, mono_id)
@@ -423,6 +423,7 @@ class TypeChecker(Unifier):
                         res_ty,
                         cb([Check(ty) for ty in arg_tys], Check(res_ty))
                     )
+            case _: raise Exception("unreachable")
 
     def inst_fun(self, ty: Ty, arity: int) -> tuple[list[InstFun], Ty]:
         def _inst(ty: Ty, arity: int) -> Generator[InstFun, None, Ty]:

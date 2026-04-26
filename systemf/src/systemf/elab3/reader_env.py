@@ -50,6 +50,7 @@ type RdrName = UnqualName | QualName
 # ImportSpec (how a name entered scope)
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class ImportSpec:
     """How an imported name entered scope."""

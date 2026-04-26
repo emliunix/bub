@@ -19,6 +19,7 @@ from pathlib import Path
 from systemf.elab3.repl import REPL
 from systemf.elab3.reader_env import ImportSpec
 from systemf.elab3.types.ast import ImportDecl
+from systemf.elab3.val_pp import pp_val
 from systemf.surface.parser import import_decl_parser, lex
 from parsy import eof
 
@@ -64,13 +65,12 @@ def _handle_import(session, import_text: str) -> None:
 
 def _handle_eval(session, input_text: str) -> None:
     try:
-        result = session.eval(input_text)
+        match session.eval(input_text):
+            case (val, ty):
+                print(pp_val(session, val, ty))
     except Exception as e:
         print(f"*** {e}")
         return
-    if result is not None:
-        ty, val = result
-        print(session.pp_val(ty, val))
 
 
 def _read_multiline():

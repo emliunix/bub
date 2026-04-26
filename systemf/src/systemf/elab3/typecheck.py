@@ -51,7 +51,7 @@ class Typecheck:
                     return [bndr for bndr, _ in bindings]
                 case _: raise Exception(f"unexpected binding form {binding}")
 
-        ty_env.update((id.name, AnId.from_id(id))
+        ty_env.update((id.name, AnId.create(id))
                       for binding in bindings
                       for id in _ids_binding(binding))
         return ty_env, bindings

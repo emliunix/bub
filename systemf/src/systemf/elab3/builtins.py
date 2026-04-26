@@ -2,6 +2,8 @@
 # and we build a dict for NameCache to lookup
 
 from .types import Name
+from .types.val import VData
+
 
 BUILTIN_UNIT = Name("builtins", "Unit", 1)
 BUILTIN_MK_UNIT = Name("builtins", "MkUnit", 2)
@@ -84,3 +86,9 @@ BUILTIN_BIN_OPS = {
     "||": BUILTIN_BOOL_OR,
     "++": BUILTIN_STRING_CONCAT,
 }
+
+
+TRUE_VAL = VData(0, [])
+FALSE_VAL = VData(1, [])
+
+UNIT_VAL = VData(0, [])

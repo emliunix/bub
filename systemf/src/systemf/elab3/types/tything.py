@@ -19,8 +19,8 @@ class AnId(TyThing):
     is_prim: bool = False
 
     @staticmethod
-    def from_id(id: Id) -> AnId:
-        return AnId(id.name, id)
+    def create(id: Id, is_prim: bool = False) -> AnId:
+        return AnId(id.name, id, is_prim)
 
 
 @dataclass

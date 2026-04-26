@@ -6,11 +6,11 @@ resolves module-level names at runtime.  Module loading is typecheck-time
 (``_load``); evaluation happens on demand via ``lookup_gbl``.
 """
 
-import itertools
 from pathlib import Path
 from typing import cast, override
 
-from systemf.elab3.core_extra import CoreBuilderExtra, lookup_data_con_by_tag
+from systemf.elab3.core_extra import CoreBuilderExtra
+from systemf.elab3.types.protocols import NameGenerator
 from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
 from systemf.utils.uniq import Uniq
@@ -18,12 +18,12 @@ from systemf.utils.uniq import Uniq
 from . import pipeline
 from . import builtins as bi
 from . import builtins_rts as rts
-from .name_gen import NameCacheImpl
-from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt
+from .name_gen import NameCacheImpl, NameGeneratorImpl, check_dups
+from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt, UnqualName
 from .pipeline import Code, execute
 from .eval import Evaluator, EvalCtx
 from .types import Module, TyThing, REPLContext, Name, NameCache
-from .types.ty import Ty, TyConApp, subst_ty
+from .types.ty import Id, Ty, TyConApp, TyFun, subst_ty
 from .types.tything import ACon, ATyCon, AnId, tything_name
 from .types.val import Trap, VClosure, VData, VLit, VPartial, Val
 
@@ -72,7 +72,36 @@ class REPLSession(EvalCtx):
         ])
         self.reader_env = self.reader_env.merge(new_rdr_env)
 
-    def eval(self, input: str) -> tuple[Ty, Val] | None:
+    def cmd_add_args(self, args: list[tuple[str, Val, Ty]]) -> None:
+        """Add arguments module in the REPL session."""
+        arg_mod = f"Arg{self.ctx.next_replmod_id()}"
+        check_dups((n for n, _, _ in args))
+        arg_names = [self.name_gen(arg_mod).new_name(n, None) for n, _, _ in args]
+
+        tythings = [cast(TyThing, AnId.create(Id(name=name, ty=ty))) for name, (_, _, ty) in zip(arg_names, args)]
+        mod_inst = {
+            name: val
+            for name, (_, val, _) in zip(arg_names, args)
+        }
+        self.extend_tythings_rdr(tythings)
+        self.mod_insts[arg_mod] = mod_inst
+
+    def cmd_add_return(self, ref: list[Val], ty: Ty) -> None:
+        """Add a return value setter to the REPL session."""
+        ret_mod = f"Ret{self.ctx.next_replmod_id()}"
+        fun_ty = TyFun(ty, TyConApp(name=bi.BUILTIN_UNIT, args=[]))
+        def _fun(args: list[Val]) -> Val:
+            if len(args) != 1:
+                raise Exception(f"Expected exactly one argument for REPL return, got {len(args)}")
+            ref.append(args[0])
+            return bi.UNIT_VAL
+        fun_name = self.name_gen(ret_mod).new_name("set_return", None)
+        self.extend_tythings_rdr([cast(TyThing, AnId.create(Id(name=fun_name, ty=fun_ty), is_prim=True))])
+        self.mod_insts[ret_mod] = {
+            fun_name: VPartial.create(fun_name.surface, 0, _fun)
+        }
+
+    def eval(self, input: str) -> tuple[Val, Ty] | None:
         """
         Evaluate a REPL expression by wrapping it in a synthetic module,
         typechecking, then running ``eval_mod``.
@@ -90,38 +119,19 @@ class REPLSession(EvalCtx):
         repl_mod = pipeline.execute(self.ctx, mod_name, file_path, ast, reader_env=self.reader_env)
         self.update_repl_with_mod(repl_mod)
         mod_inst = self.eval_mod(repl_mod)
+        self.mod_insts[mod_name] = mod_inst
 
         if is_expr:
             # Convention: REPL expressions bind to `it`
-            ty = [cast(AnId, thing).id for n, thing in repl_mod.tythings if n.surface == "it"]
-            it = [v for k, v in mod_inst.items() if k.surface == "it"]
-            if ty and it:
-                return ty[0].ty, it[0]
-            raise Exception("REPL expression did not produce a value")
+            names = self.reader_env.lookup(UnqualName("it"))
+            match names:
+                case [ImportRdrElt(name=Name(mod=mod_name) as name)]:
+                    ty = cast(AnId, self._tythings_map[name]).id.ty
+                    val = mod_inst[name]
+                    return val, ty
+                case _:
+                    raise Exception(f"Expected single binding for `it`, got: {names}")
         return None
-
-    def pp_val(self, ty: Ty, val: Val) -> str:
-        """Pretty print a value using the evaluator's machinery."""
-        def _pp(ty: Ty, val: Val) -> str:
-            match ty, val:
-                case TyConApp(name=con, args=arg_tys), VData(tag=tag, vals=args):
-                    tycon, dcon, _ = lookup_data_con_by_tag(self, con, tag)
-                    dcon_field_tys = [subst_ty(tycon.tyvars, arg_tys, ty) for ty in dcon.field_types]
-                    vals_str = " ".join(_pp(ty, arg) for ty, arg in zip(dcon_field_tys, args))
-                    return f"{dcon.name.surface} {vals_str}".strip()
-                case _, VLit(lit=lit):
-                    return f"{lit.v!r}"
-                case _, VPartial(name=name, arity=arity):
-                    return f"<func {name} {arity}>"
-                case _, VClosure():
-                    return "<closure>"
-                case _, Trap(v=None):
-                    return "<unfilled trap>"
-                case _, Trap(v=v) if v is not None:
-                    return _pp(ty, v)
-                case _, _: return "<unknown>"
-        return f"{_pp(ty, val)} :: {ty}"
-
 
     # --- EvalCtx implementation ---------------------------------------------
 
@@ -158,6 +168,7 @@ class REPLSession(EvalCtx):
 
             # 4. Eager whole module processing & return
             mod_inst = self.eval_mod(mod)
+            self.mod_insts[mod.name] = mod_inst
             return mod_inst[name]
         finally:
             _ = self._evaling.pop()
@@ -165,7 +176,6 @@ class REPLSession(EvalCtx):
     def eval_mod(self, mod: Module) -> dict[Name, Val]:
         mod_inst = self.mk_mod_inst(mod)
         mod_inst = self._evaluator.eval_mod(mod, mod_inst)
-        self.mod_insts[mod.name] = mod_inst
         return mod_inst
 
     # --- State management ---
@@ -179,8 +189,25 @@ class REPLSession(EvalCtx):
 
         # update REPL session state
         self.reader_env = self.reader_env.shadow(set(new_names)).merge(new_rdr_env)
-        self.tythings.extend(thing for _, thing in mod.tythings)
-        self._tythings_map.update({tything_name(thing): thing for _, thing in mod.tythings})
+        self.extend_tythings_rdr([thing for _, thing in mod.tythings])
+
+    def extend_tythings_rdr(self, tythings: list[TyThing]):
+        """
+        This is opinionated for use in REPL, where names shadow previous ones if any
+        """
+        self.tythings.extend(tythings)
+        names = [tything_name(thing) for thing in tythings]
+        self._tythings_map.update({name: thing for name, thing in zip(names, tythings)})
+        new_rdr = ReaderEnv.from_elts([
+            ImportRdrElt.create(name, ImportSpec(name.mod, None, False))
+            for name in names
+        ])
+        self.reader_env = self.reader_env.shadow(set(names)).merge(new_rdr)
+
+    # --- helpers ---
+
+    def name_gen(self, mod_name: str) -> NameGenerator:
+        return NameGeneratorImpl(mod_name, self.ctx.uniq)
 
     def mk_mod_inst(self, mod: Module) -> dict[Name, Val]:
         mod_inst: dict[Name, Val] = {}
@@ -223,7 +250,9 @@ class REPL(REPLContext):
         self.search_paths = search_paths or [".", str(Path(__file__).parent.parent)]
         self._loading = {}
         self._replmod_counter = 0
-        self._prim_ops = _populate_primops()
+        self._prim_ops = {
+            "builtins": _builtins_primops(),
+        }
 
     # --- REPLContext implementation -----------------------------------------
 
@@ -281,7 +310,7 @@ class REPL(REPLContext):
         )
 
 
-def _populate_primops() -> dict[str, dict[str, Val]]:
+def _builtins_primops() -> dict[str, Val]:
     """Build the primop cache. Called once at REPL init."""
 
     # FIX: this is hacky, but we need rename phase of bulitins to get the tags assigned
@@ -307,7 +336,7 @@ def _populate_primops() -> dict[str, dict[str, Val]]:
     _reg(bi.BUILTIN_STRING_CONCAT.surface, 2, rts.string_concat)
     _reg(bi.BUILTIN_ERROR.surface, 1, rts.error)
 
-    return {"builtins": builtins}
+    return builtins
 
 
 def _build_import_chain(loads: dict[str, str | None], start: str) -> str:

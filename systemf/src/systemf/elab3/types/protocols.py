@@ -3,10 +3,11 @@ from typing import Callable, Protocol
 
 from systemf.utils.location import Location
 
+from .ast import ImportDecl
 from .mod import Module
 from .ty import Id, Name, Ty
 from .val import Val
-from .tything import TyThing
+from .tything import AnId, TyThing
 
 from systemf.utils.uniq import Uniq
 
@@ -28,6 +29,13 @@ class REPLContext(Protocol):
     def get_primop(self, name: Name) -> Val | None: ...
 
 
+class REPLSessionProto(Protocol):
+    def fork(self) -> REPLSessionProto: ...
+    def cmd_add_args(self, args: list[tuple[Name, Val, Ty]]) -> None: ...
+    def cmd_import(self, import_decl: ImportDecl) -> None: ...
+    def eval(self, input: str) -> tuple[Val, Ty]: ...
+
+
 class NameGenerator(Protocol):
     def new_name(self, name: str | Callable[[int], str], loc: Location | None) -> Name: ...
     def new_id(self, name: str | Callable[[int], str], ty: Ty) -> Id: ...
@@ -35,3 +43,7 @@ class NameGenerator(Protocol):
 
 class TyLookup(Protocol):
     def lookup(self, name: Name) -> TyThing: ...
+
+
+class Synthesizer(Protocol):
+    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Callable[[list[Val]], Val]: ...
