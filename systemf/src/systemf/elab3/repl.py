@@ -178,6 +178,8 @@ class SyntRouter(Synthesizer):
 
 
 class LLMSynth(Synthesizer):
+    # move to 
     def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
         # TODO: implement LLM-based synthesizer
+        # should be moved to bub_sf extension
         return None

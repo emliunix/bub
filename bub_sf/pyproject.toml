@@ -1,0 +1,24 @@
+[project]
+name = "bub-sf"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "emliunix", email = "emliunix@hotmail.com" }
+]
+requires-python = ">=3.14, <4.0"
+dependencies = [
+    "systemf",
+    "bub",
+]
+
+[project.scripts]
+bub-sf = "bub_sf:main"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+systemf = { path = "../systemf", editable = true }
+bub = { path = "../upstream/bub", editable = true }

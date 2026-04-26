@@ -82,19 +82,19 @@ class REPLSession(EvalCtx, REPLSessionProto):
         self.extend_tythings_rdr(tythings)
         self.mod_insts[arg_mod] = mod_inst
 
-    def cmd_add_return(self, ref: list[Val], ty: Ty) -> None:
+    def cmd_add_return(self, ref: list[Val | None], ty: Ty) -> None:
         """Add a return value setter to the REPL session."""
         ret_mod = f"Ret{self.ctx.next_replmod_id()}"
         fun_ty = TyFun(ty, TyConApp(name=bi.BUILTIN_UNIT, args=[]))
         def _fun(args: list[Val]) -> Val:
             if len(args) != 1:
                 raise Exception(f"Expected exactly one argument for REPL return, got {len(args)}")
-            ref.append(args[0])
+            ref[0] = args[0]
             return bi.UNIT_VAL
         fun_name = self.name_gen(ret_mod).new_name("set_return", None)
         self.extend_tythings_rdr([cast(TyThing, AnId.create(Id(name=fun_name, ty=fun_ty), is_prim=True))])
         self.mod_insts[ret_mod] = {
-            fun_name: VPartial.create(fun_name.surface, 0, _fun)
+            fun_name: VPartial.create(fun_name.surface, 1, _fun)
         }
 
     def eval(self, input: str) -> tuple[Val, Ty] | None:
