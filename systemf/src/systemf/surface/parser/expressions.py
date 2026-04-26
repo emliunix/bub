@@ -97,6 +97,7 @@ from systemf.surface.types import (
     SurfaceTypeApp,
     SurfaceVar,
     SurfaceVarPattern,
+    SurfaceWildcardPattern,
     ValBind,
 )
 
@@ -827,6 +828,9 @@ def pattern_atom_parser() -> P[SurfacePatternBase]:
         if name_token is None:
             yield fail("expected pattern")
 
+        if name_token.value == "_":
+            return SurfaceWildcardPattern(location=name_token.location)
+
         return SurfacePattern(
             patterns=[SurfaceVarPattern(name=name_token.value, location=name_token.location)],
             location=name_token.location
@@ -878,6 +882,11 @@ def pattern_base_parser() -> P[SurfacePatternBase]:
             if arg is None:
                 break
             args.append(arg)
+
+        if name == "_":
+            if args:
+                yield fail("wildcard pattern _ cannot have arguments")
+            return SurfaceWildcardPattern(location=loc)
 
         # Build flat pattern list: [VarPat(name), arg1, arg2, ...]
         # All identifiers are SurfaceVarPattern - rename phase disambiguates

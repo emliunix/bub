@@ -10,6 +10,7 @@ from pathlib import Path
 from systemf.elab3.repl import REPL
 from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types import Module, core
+from systemf.elab3.types.ast import ImportDecl
 from systemf.elab3.types.core_pp import pp_core
 from systemf.elab3.types.val import VLit, VData
 from systemf.elab3.types.ty import LitInt, LitString
@@ -44,8 +45,7 @@ def main() -> None:
     # === e2e evaluation ===
 
     session = ctx.new_session()
-    from systemf.elab3.reader_env import ImportSpec
-    session.cmd_import(ImportSpec("demo", None, False))
+    session.cmd_import(ImportDecl("demo", False, None, None, None))
 
     print("\n\n=== e2e evaluation ===\n")
 

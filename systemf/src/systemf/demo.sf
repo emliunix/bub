@@ -33,25 +33,16 @@ compose :: forall a b c. (b -> c) -> (a -> b) -> a -> c = \f g x -> f (g x)
 twice :: forall a. (a -> a) -> a -> a = \f x -> f (f x)
 
 -- | Map a function over a list
--- NOTE: Requires recursive binding + AnnotName support
--- map :: forall a b. (a -> b) -> List a -> List b = \f xs ->
---   case xs of
---     Nil -> Nil
---     Cons x xs' -> Cons (f x) (map f xs')
+map :: forall a b. (a -> b) -> List a -> List b = \f xs ->
+  case xs of
+    Nil -> Nil
+    Cons x xs' -> Cons (f x) (map f xs')
 
 -- | Left fold
--- NOTE: Requires recursive binding + AnnotName support
--- foldl :: forall a b. (b -> a -> b) -> b -> List a -> b = \f acc xs ->
---   case xs of
---     Nil -> acc
---     Cons x xs' -> foldl f (f acc x) xs'
-
--- | List length
--- NOTE: Requires recursive binding + AnnotName support
--- length :: forall a. List a -> Int = \xs ->
---   case xs of
---     Nil -> 0
---     Cons _ xs' -> 1 + length xs'
+foldl :: forall a b. (b -> a -> b) -> b -> List a -> b = \f acc xs ->
+  case xs of
+    Nil -> acc
+    Cons x xs' -> foldl f (f acc x) xs'
 
 -- | Check if list is empty (non-recursive)
 isEmpty :: forall a. List a -> Bool = \xs ->
@@ -64,23 +55,17 @@ head :: forall a. List a -> a = \xs ->
   case xs of
     Cons x _ -> x
 
--- | List length (recursive — needs binding fix)
--- length :: forall a. List a -> Int = \xs ->
---   case xs of
---     Nil -> 0
---     Cons _ xs' -> 1 + length xs'
+-- | List length
+length :: forall a. List a -> Int = \xs ->
+  case xs of
+    Nil -> 0
+    Cons _ xs' -> 1 + length xs'
 
--- | Map a function over a list (recursive — needs binding fix)
--- map :: forall a b. (a -> b) -> List a -> List b = \f xs ->
---   case xs of
---     Nil -> Nil
---     Cons x xs' -> Cons (f x) (map f xs')
-
--- | Append two lists (recursive — needs binding fix)
--- append :: forall a. List a -> List a -> List a = \xs ys ->
---   case xs of
---     Nil -> ys
---     Cons x xs' -> Cons x (append xs' ys)
+-- | Append two lists
+append :: forall a. List a -> List a -> List a = \xs ys ->
+  case xs of
+    Nil -> ys
+    Cons x xs' -> Cons x (append xs' ys)
 
 -- =============================================================================
 -- Custom polymorphic data types
@@ -119,17 +104,17 @@ either :: forall a b c. (a -> c) -> (b -> c) -> Either a b -> c = \f g e ->
 -- | Binary tree
 data Tree a = Leaf a | Node (Tree a) a (Tree a)
 
--- | Count nodes (recursive — needs binding fix)
--- treeSize :: forall a. Tree a -> Int = \t ->
---   case t of
---     Leaf _ -> 1
---     Node l _ r -> 1 + treeSize l + treeSize r
+-- | Count nodes
+treeSize :: forall a. Tree a -> Int = \t ->
+  case t of
+    Leaf _ -> 1
+    Node l _ r -> 1 + treeSize l + treeSize r
 
--- | In-order traversal to list (recursive — needs binding fix)
--- treeToList :: forall a. Tree a -> List a = \t ->
---   case t of
---     Leaf x -> Cons x Nil
---     Node l x r -> append (treeToList l) (Cons x (treeToList r))
+-- | In-order traversal to list
+treeToList :: forall a. Tree a -> List a = \t ->
+  case t of
+    Leaf x -> Cons x Nil
+    Node l x r -> append (treeToList l) (Cons x (treeToList r))
 
 -- | Mutual recursion: even/odd
 even :: Int -> Bool = \n ->

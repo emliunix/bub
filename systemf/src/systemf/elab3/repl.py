@@ -210,7 +210,8 @@ class REPLSession(EvalCtx, REPLSessionProto):
                 case ACon(name=con_name, tag=tag, arity=arity):
                     mod_inst[name] = VPartial.create(
                         con_name.surface, arity,
-                        lambda args: VData(tag, args),  # type: ignore[misc]
+                        # Capture tag by value in the lambda to avoid closure bug
+                        lambda args, tag=tag: VData(tag, args),
                     )
                 case AnId(name=name, is_prim=True):
                     mod_inst[name] = self.mk_primop(name, thing)

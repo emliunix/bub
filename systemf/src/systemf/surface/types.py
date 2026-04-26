@@ -541,6 +541,17 @@ class SurfaceVarPattern(SurfacePatternBase):
 
 
 @dataclass(frozen=True, kw_only=True)
+class SurfaceWildcardPattern(SurfacePatternBase):
+    """Wildcard pattern: _ — matches anything, binds no variable."""
+
+    pass
+
+    @override
+    def __str__(self) -> str:
+        return "_"
+
+
+@dataclass(frozen=True, kw_only=True)
 class SurfacePattern(SurfacePatternBase):
     """Flat pattern list: [Con, arg1, arg2, ...] or [var].
 

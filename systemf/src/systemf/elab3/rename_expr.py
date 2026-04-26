@@ -16,7 +16,7 @@ from .types.ty import Lit, LitInt, LitString, Name, Ty, TyConApp, TyForall, TyFu
 from .types.tything import ACon, TyThing
 from .types.ast import (
     Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl,
-    Lam, Let, LitExpr, LitPat, Pat, RnDataDecl, RnTermDecl, Var, VarPat
+    Lam, Let, LitExpr, LitPat, Pat, RnDataDecl, RnTermDecl, Var, VarPat, WildcardPat
 )
 
 from systemf.surface.types import (
@@ -24,6 +24,7 @@ from systemf.surface.types import (
     SurfaceDataDeclaration, SurfaceDeclaration, SurfaceDeclarationRepr,
     SurfaceIf, SurfaceLet,SurfaceLit, SurfaceLitPattern, SurfaceOp, SurfacePattern,
     SurfacePatternBase, SurfacePatternCons, SurfacePatternTuple, SurfaceTerm,
+    SurfaceWildcardPattern,
     SurfaceTermDeclaration, SurfaceTuple, SurfaceType, SurfaceTypeArrow,
     SurfaceTypeConstructor, SurfaceTypeForall, SurfaceTypeTuple, SurfaceTypeVar,
     SurfaceVar, SurfaceVarPattern, ValBind
@@ -207,6 +208,8 @@ class RenameExpr:
                     return r
                 case SurfaceLitPattern(prim_type=prim_ty, value=val):
                     return LitPat(prim_to_lit(prim_ty, val))
+                case SurfaceWildcardPattern():
+                    return WildcardPat()
                 case _:
                     raise Exception(f"unknown pattern: {pat}")
 
