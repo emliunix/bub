@@ -46,7 +46,19 @@ class TyLookup(Protocol):
 
 
 class Synthesizer(Protocol):
-    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Callable[[list[Val]], Val] | None: ...
+    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None: ...
+
+
+class PrimOpsSynth(Synthesizer):
+    """A simple synthesizer that provides primitive operations from a given dictionary."""
+    ops: dict[str, Val]
+
+    def __init__(self, ops: dict[str, Val]):
+        self.ops = ops
+
+    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
+        return self.ops.get(name.surface)
+
 
 class Ext(Protocol):
     @property
