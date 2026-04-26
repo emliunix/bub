@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from pyrsistent import PMap, pmap
 
@@ -17,6 +18,11 @@ class Val:
 @dataclass
 class VLit(Val):
     lit: Lit
+
+
+@dataclass
+class VPrim(Val):
+    val: Any
 
 
 @dataclass

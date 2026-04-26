@@ -330,6 +330,9 @@ def _builtins_primops() -> dict[str, Val]:
     _reg(bi.BUILTIN_INT_GE.surface, 2, rts.mk_int_ge(true_val, false_val))
     _reg(bi.BUILTIN_STRING_CONCAT.surface, 2, rts.string_concat)
     _reg(bi.BUILTIN_ERROR.surface, 1, rts.error)
+    _reg(bi.BUILTIN_MK_REF.surface, 0, rts.mk_ref)
+    _reg(bi.BUILTIN_SET_REF.surface, 2, rts.set_ref)
+    _reg(bi.BUILTIN_GET_REF.surface, 1, rts.get_ref)
 
     return builtins
 

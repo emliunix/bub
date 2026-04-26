@@ -8,10 +8,12 @@ Bool (``&&``, ``||``, ``not``) are NOT primops — they are regular
 SystemF functions defined in ``builtins.sf`` using ``case``.
 """
 
-from typing import Callable
+from typing import Callable, cast
 
-from .types.val import VLit, Val
+from .types.val import VLit, VPrim, Val
 from .types.ty import LitInt, LitString
+
+from . import builtins as bi
 
 
 # --- helpers ---
@@ -64,6 +66,26 @@ def error(args: list[Val]) -> Val:
             raise Exception(f"runtime error: {s}")
         case _:
             raise Exception(f"runtime error: {a!r}")
+        
+
+def set_ref(args: list[Val]) -> Val:
+    new_val, ref  = args
+    cast(list, ref)[0] = new_val
+    return bi.UNIT_VAL
+
+
+def get_ref(args: list[Val]) -> Val:
+    ref = args[0]
+    match ref:
+        case VPrim(val=[None]):
+            return bi.NOTHING_VAL
+        case VPrim(val=[val]):
+            return bi.JUST_VAL(val)
+        case _: raise Exception(f"Invalid ref value: {ref}")
+
+
+def mk_ref(_: list[Val]) -> Val:
+    return VPrim([])
 
 
 # --- int-relational primops (return True/False, received from caller) ---

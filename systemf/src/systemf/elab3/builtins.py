@@ -38,6 +38,15 @@ BUILTIN_STRING_CONCAT = Name("builtins", "string_concat", 24)
 
 BUILTIN_ERROR = Name("builtins", "error", 25)
 
+BUILTIN_MAYBE = Name("builtins", "Maybe", 26)
+BUILTIN_MAYBE_NOTHING = Name("builtins", "Nothing", 27)
+BUILTIN_MAYBE_JUST = Name("builtins", "Just", 28)
+
+BUILTIN_REF = Name("builtins", "Ref", 29)
+BUILTIN_MK_REF = Name("builtins", "mk_ref", 30)
+BUILTIN_SET_REF = Name("builtins", "set_ref", 31)
+BUILTIN_GET_REF = Name("builtins", "get_ref", 32)
+
 BUILTIN_ENDS = 1000
 
 
@@ -68,6 +77,9 @@ BUILTIN_NAMES: dict[str, list[Name]] = {
         BUILTIN_BOOL_NOT,
         BUILTIN_STRING_CONCAT,
         BUILTIN_ERROR,
+        BUILTIN_MAYBE,
+        BUILTIN_MAYBE_NOTHING,
+        BUILTIN_MAYBE_JUST,
     ]
 }
 
@@ -92,3 +104,6 @@ TRUE_VAL = VData(0, [])
 FALSE_VAL = VData(1, [])
 
 UNIT_VAL = VData(0, [])
+
+NOTHING_VAL = VData(0, [])
+JUST_VAL = lambda x: VData(1, [x])
