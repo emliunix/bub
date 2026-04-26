@@ -239,7 +239,6 @@ def _shadow_rdr_elt(elt: RdrElt) -> RdrElt:
                 # force qualified import spec
                 ImportSpec(spec.module_name, spec.alias, True)
                 for spec in specs
-                if not spec.is_qual
             ])
         case _:
             return elt

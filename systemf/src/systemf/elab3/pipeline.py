@@ -33,7 +33,7 @@ def execute(ctx: REPLContext, mod_name: str, file_path: str, code: Code,
     res = rename.rename(imports, decls)
 
     # 3. Typecheck
-    typecheck = Typecheck(mod_name, ctx, name_gen)
+    typecheck = Typecheck(mod_name, ctx, name_gen, type_env)
     type_env, bindings = typecheck.typecheck(res.rn_mod)
 
     return Module(
