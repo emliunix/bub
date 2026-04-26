@@ -6,6 +6,7 @@ from systemf.utils.location import Location
 from .mod import Module
 from .ty import Id, Name, Ty
 from .val import Val
+from .tything import TyThing
 
 from systemf.utils.uniq import Uniq
 
@@ -30,3 +31,7 @@ class REPLContext(Protocol):
 class NameGenerator(Protocol):
     def new_name(self, name: str | Callable[[int], str], loc: Location | None) -> Name: ...
     def new_id(self, name: str | Callable[[int], str], ty: Ty) -> Id: ...
+
+
+class TyLookup(Protocol):
+    def lookup(self, name: Name) -> TyThing: ...

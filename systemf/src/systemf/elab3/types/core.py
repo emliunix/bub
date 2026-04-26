@@ -21,7 +21,7 @@ pp_core: Any = None
 
 class CoreTm(ABC):
     """Base class for core language terms."""
-    
+
     def __repr__(self) -> str:
         global pp_core
         if pp_core is None:
@@ -110,6 +110,17 @@ class CoreLet(CoreTm):
     """Let binding with NonRec or Rec."""
     binding: Binding
     body: CoreTm
+
+
+def binding_names(binding: Binding) -> list[Name]:
+    match binding:
+        case NonRec(bndr, _):
+            return [bndr.name]
+        case Rec(bx):
+            return [
+                b.name
+                for b, _ in bx
+            ]
 
 
 # =============================================================================

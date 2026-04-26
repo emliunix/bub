@@ -1,13 +1,13 @@
 """
 TyThing (type environment entries)
 """
+from abc import ABC
 from dataclasses import dataclass
 
 from .ty import Id, Name, Ty, TyVar
 
 
-@dataclass
-class TyThing:
+class TyThing(ABC):
     pass
 
 
@@ -49,3 +49,17 @@ class APrimTy(TyThing):
 
 
 type TypeEnv = dict[Name, TyThing]
+
+
+def tything_name(thing: TyThing) -> Name:
+    match thing:
+        case AnId(name=name):
+            return name
+        case ATyCon(name=name):
+            return name
+        case ACon(name=name):
+            return name
+        case APrimTy(name=name):
+            return name
+        case _:
+            raise Exception(f"Unknown TyThing {thing}")

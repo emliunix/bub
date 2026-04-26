@@ -14,13 +14,14 @@ from typing import Protocol, cast
 
 from pyrsistent import pmap
 
+from systemf.elab3.core_extra import CoreBuilderExtra
 from systemf.elab3.types.core import (
-    CoreTm, CoreLit, CoreVar, CoreGlobalVar, CoreLam, CoreApp,
+    C, CoreTm, CoreLit, CoreVar, CoreGlobalVar, CoreLam, CoreApp,
     CoreTyLam, CoreTyApp, CoreLet, CoreCase,
     NonRec, Rec,
     DataAlt, LitAlt, DefaultAlt, Alt,
 )
-from .types.ty import Id, Lit, LitInt, Name
+from .types.ty import Id, Name
 from .types.mod import Module
 from .types.val import Val, VLit, VClosure, VPartial, VData, Trap, Env
 
@@ -96,6 +97,8 @@ class EvalCtx(Protocol):
     """Protocol for the context that resolves module-level names at runtime."""
 
     def lookup_gbl(self, name: Name) -> Val: ...
+    @property
+    def core_extra(self) -> CoreBuilderExtra: ...
 
 
 # =============================================================================
@@ -107,6 +110,7 @@ type Config = tuple[CoreTm, Env, Cont]
 
 class Evaluator:
     """Strict CBV CEK evaluator."""
+    ctx: EvalCtx
 
     def __init__(self, ctx: EvalCtx):
         self.ctx = ctx
@@ -131,15 +135,22 @@ class Evaluator:
                     val = self._eval_expr(expr, init_env)
                     mod_inst[binder.name] = val
                     init_env = init_env.set(binder.name.unique, val)
-                case Rec(rec_bindings):
-                    # FIX: we should construct a tuple, then extracts each field
-                    # current approach causes re-evaluation for each binder
-                    for bndr, _ in rec_bindings:
-                        val = self._eval_expr(CoreLet(binding, CoreVar(bndr)), init_env)
-                        mod_inst[bndr.name] = val
+                case Rec([(bndr, _)]):
+                    val = self._eval_expr(CoreLet(binding, CoreVar(bndr)), init_env)
+                    mod_inst[bndr.name] = val
+                    init_env = init_env.set(bndr.name.unique, val)
+                case Rec():
+                    bndrs = [bndr for bndr, _ in binding.bindings]
+                    vars = [C.var(bndr) for bndr in bndrs]
+                    tup, _ = self.ctx.core_extra.mk_tuple(vars, [b.ty for b in bndrs])
+                    val = self._eval_expr(CoreLet(binding, tup), init_env) # eval once
+                    # unwrap the tuple
+                    for bndr in bndrs[:-1]:
+                        v1, val = cast(VData, val).vals
+                        mod_inst[bndr.name] = v1
                         init_env = init_env.set(bndr.name.unique, val)
-                case _:
-                    raise Exception(f"unexpected binding type: {binding!r}")
+                    mod_inst[bndrs[-1].name] = val
+                    init_env = init_env.set(bndrs[-1].name.unique, val)
         return mod_inst
 
     # --- CEK machine --------------------------------------------------------
@@ -165,7 +176,7 @@ class Evaluator:
                             return self.call_continue(inner, k)
                         case Trap():
                             raise Exception(
-                                f"referencing uninitialized letrec trap for "
+                                "referencing uninitialized letrec trap for " +
                                 f"{id.name.surface!r} (possible non-productive recursion)"
                             )
                         case _:
@@ -255,7 +266,7 @@ class Evaluator:
                 scrut_key = scrut_var.name.unique
                 for alt, body in alts:
                     match alt, v:
-                        case LitAlt(lit=lit), Lit() if lit == v:
+                        case LitAlt(lit=lit), VLit(lit=lit_) if lit == lit_:
                             return (body, env.set(scrut_key, v), k2)
                         case DataAlt(tag=tag, vars=vars), VData(tag=tag_, vals=vals) if tag == tag_:
                             new_env = env
@@ -264,6 +275,8 @@ class Evaluator:
                             return (body, new_env, k2)
                         case DefaultAlt(), _:
                             return (body, env.set(scrut_key, v), k2)
+                        case _:
+                            pass
                 raise Exception(f"no matching case for value: {v!r}")
             case Halt():
                 return v

@@ -6,11 +6,11 @@ resolves module-level names at runtime.  Module loading is typecheck-time
 (``_load``); evaluation happens on demand via ``lookup_gbl``.
 """
 
-from dataclasses import dataclass
 import itertools
 from pathlib import Path
 from typing import cast, override
 
+from systemf.elab3.core_extra import CoreBuilderExtra, lookup_data_con_by_tag
 from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
 from systemf.utils.uniq import Uniq
@@ -19,12 +19,12 @@ from . import pipeline
 from . import builtins as bi
 from . import builtins_rts as rts
 from .name_gen import NameCacheImpl
-from .reader_env import ImportSpec, ReaderEnv, RdrElt, ImportRdrElt
+from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt
 from .pipeline import Code, execute
 from .eval import Evaluator, EvalCtx
 from .types import Module, TyThing, REPLContext, Name, NameCache
 from .types.ty import Ty, TyConApp, subst_ty
-from .types.tything import ACon, ATyCon, AnId
+from .types.tything import ACon, ATyCon, AnId, tything_name
 from .types.val import Trap, VClosure, VData, VLit, VPartial, Val
 
 
@@ -36,6 +36,9 @@ class REPLSession(EvalCtx):
     # keep all evaluated REPL modules and normal modules
     mod_insts: dict[str, dict[Name, Val]] # Cache for evaluated module instances
 
+    _tythings_map: dict[Name, TyThing]
+    _core_extra: CoreBuilderExtra
+
     _evaling: list[str]                   # Modules currently being evaluated (for cycle detection)
     _evaluator: Evaluator
 
@@ -43,7 +46,8 @@ class REPLSession(EvalCtx):
         self.ctx = ctx
         self.reader_env = reader_env
         self.tythings = tythings
-        self.mod_insts: dict[str, dict[Name, Val]] = mod_insts
+        self._tythings_map = {tything_name(thing): thing for thing in tythings}
+        self._core_extra = CoreBuilderExtra(self)
         self._evaluator = Evaluator(self)
         self._evaling = []
 
@@ -101,7 +105,7 @@ class REPLSession(EvalCtx):
         def _pp(ty: Ty, val: Val) -> str:
             match ty, val:
                 case TyConApp(name=con, args=arg_tys), VData(tag=tag, vals=args):
-                    tycon, dcon = self.get_data_con(con, tag)
+                    tycon, dcon, _ = lookup_data_con_by_tag(self, con, tag)
                     dcon_field_tys = [subst_ty(tycon.tyvars, arg_tys, ty) for ty in dcon.field_types]
                     vals_str = " ".join(_pp(ty, arg) for ty, arg in zip(dcon_field_tys, args))
                     return f"{dcon.name.surface} {vals_str}".strip()
@@ -118,20 +122,20 @@ class REPLSession(EvalCtx):
                 case _, _: return "<unknown>"
         return f"{_pp(ty, val)} :: {ty}"
 
-    def get_data_con(self, con: Name, tag: int) -> tuple[ATyCon, ACon]:
-        def _mod_lookup():
-            # lazy load, cause REPL modules are not loadable
-            for _, thing in self.ctx.load(con.mod).tythings:
-                yield thing
-        for tycon in itertools.chain(self.tythings, _mod_lookup()):
-            if isinstance(tycon, ATyCon) and tycon.name == con:
-                for acon in tycon.constructors:
-                    if acon.tag == tag:
-                        return tycon, acon
-        raise Exception(f"Data constructor not found for {con} with tag {tag}")
 
     # --- EvalCtx implementation ---------------------------------------------
 
+    @property
+    @override
+    def core_extra(self) -> CoreBuilderExtra:
+        return self._core_extra
+
+    def lookup(self, name: Name) -> TyThing:
+        if (thing := self._tythings_map.get(name)) is not None:
+            return thing
+        raise Exception(f"Name {name} not found in REPL session")
+
+    @override
     def lookup_gbl(self, name: Name) -> Val:
         """Resolve a global name, loading and evaluating modules on demand."""
         mod_name = name.mod
@@ -151,12 +155,12 @@ class REPLSession(EvalCtx):
         try:
             # 3. Load the typechecked module
             mod = self.ctx.load(mod_name)
-            
+
             # 4. Eager whole module processing & return
             mod_inst = self.eval_mod(mod)
             return mod_inst[name]
         finally:
-            self._evaling.pop()
+            _ = self._evaling.pop()
 
     def eval_mod(self, mod: Module) -> dict[Name, Val]:
         mod_inst = self.mk_mod_inst(mod)
@@ -176,6 +180,7 @@ class REPLSession(EvalCtx):
         # update REPL session state
         self.reader_env = self.reader_env.shadow(set(new_names)).merge(new_rdr_env)
         self.tythings.extend(thing for _, thing in mod.tythings)
+        self._tythings_map.update({tything_name(thing): thing for _, thing in mod.tythings})
 
     def mk_mod_inst(self, mod: Module) -> dict[Name, Val]:
         mod_inst: dict[Name, Val] = {}
@@ -188,6 +193,7 @@ class REPLSession(EvalCtx):
                     )
                 case AnId(name=name, is_prim=True):
                     mod_inst[name] = self.mk_primop(name)
+                case _: pass
         return mod_inst
 
     def mk_primop(self, name: Name) -> Val:
@@ -322,6 +328,7 @@ def normalize_input(file_path: str, input: str) -> tuple[bool, Code]:
 
     :returns: (is_expr, code)
     """
+    expr_err = None
     try:
         expr = parse_expression(input, file_path)
         return True, (
@@ -334,14 +341,16 @@ def normalize_input(file_path: str, input: str) -> tuple[bool, Code]:
                 pragma=None,
             )],
         )
-    except ParseError as expr_err:
-        pass
+    except ParseError as _expr_err:
+        expr_err = _expr_err
 
     try:
         code: Code = input
         _, decls = parse_program(input, file_path)
-        if not decls:
+
+        # prefer throw expression parse error
+        if not decls and expr_err:
             raise expr_err
         return False, code
-    except ParseError:
-        raise expr_err
+    except ParseError as prog_err:
+        raise expr_err or prog_err

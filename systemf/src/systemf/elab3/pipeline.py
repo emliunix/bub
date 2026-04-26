@@ -38,5 +38,6 @@ def execute(ctx: REPLContext, mod_name: str, file_path: str, code: Code,
         tythings=list(type_env.items()),
         bindings=bindings,
         exports=list(type_env.keys()),
+        _tythings_map=type_env,
         source_path=file_path
     )

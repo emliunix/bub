@@ -30,6 +30,7 @@ from systemf.elab3.eval import (
     Evaluator,
     EvalCtx,
 )
+from systemf.elab3.core_extra import CoreBuilderExtra
 from pyrsistent import pmap
 
 from systemf.elab3.types.val import (
@@ -154,6 +155,55 @@ class FakeCtx:
 
         self.mod_insts["builtins"] = insts
 
+    @property
+    def core_extra(self) -> CoreBuilderExtra:
+        return CoreBuilderExtra(self)
+
+    def lookup(self, name: Name) -> TyThing:
+        # Minimal lookup for CoreBuilderExtra in tests
+        from systemf.elab3.types.tything import ACon, ATyCon, AnId
+        from systemf.elab3.types.ty import TyVar, TyConApp, TyForall, TyFun
+        import functools
+        
+        if name == BUILTIN_PAIR_MKPAIR:
+            from systemf.elab3.types.ty import BoundTv
+            a = BoundTv(name=Name("builtins", "a", 1001))
+            b = BoundTv(name=Name("builtins", "b", 1002))
+            pair_tycon = ATyCon(
+                name=BUILTIN_PAIR,
+                tyvars=[a, b],
+                constructors=[ACon(
+                    name=BUILTIN_PAIR_MKPAIR,
+                    tag=0,
+                    arity=2,
+                    field_types=[a, b],
+                    parent=BUILTIN_PAIR,
+                )],
+            )
+            return pair_tycon.constructors[0]
+        if name == BUILTIN_PAIR:
+            from systemf.elab3.types.ty import BoundTv
+            a = BoundTv(name=Name("builtins", "a", 1001))
+            b = BoundTv(name=Name("builtins", "b", 1002))
+            return ATyCon(
+                name=BUILTIN_PAIR,
+                tyvars=[a, b],
+                constructors=[ACon(
+                    name=BUILTIN_PAIR_MKPAIR,
+                    tag=0,
+                    arity=2,
+                    field_types=[a, b],
+                    parent=BUILTIN_PAIR,
+                )],
+            )
+        for mod in self.mod_insts.values():
+            if name in mod:
+                val = mod[name]
+                if isinstance(val, VData):
+                    # Return a synthetic AnId for data constructors
+                    return AnId(name=name, id=Id(name=name, ty=TyConApp(BUILTIN_PAIR, [])))
+        raise Exception(f"Name {name} not found")
+
     def _ensure_evaluated(self, mod_name: str) -> None:
         if mod_name in self.mod_insts:
             return
@@ -174,6 +224,7 @@ class FakeCtx:
                 tythings=[],
                 bindings=bindings_list,
                 exports=[],
+                _tythings_map={},
             )
             mod_inst: dict[Name, Val] = {}
             mod_inst = ev.eval_mod(mod, mod_inst)
