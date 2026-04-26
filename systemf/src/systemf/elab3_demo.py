@@ -75,6 +75,26 @@ def main() -> None:
     check("fromMaybe 0 (Just 42)", VLit(LitInt(42)))
     check("fromMaybe 0 Nothing", VLit(LitInt(0)))
 
+    # Ref tests
+    print("\n  --- Ref ---")
+    # Create a ref and get its initial value (Nothing)
+    result = session.eval("get_ref (mk_ref MkUnit)")
+    print(f">> get_ref (mk_ref MkUnit)")
+    print(f"  {pp_val(session, result[0], result[1])}  ✓")
+    assert result[0] == VData(0, []), f"Expected Nothing, got {result[0]}"
+    
+    # Set and get
+    result = session.eval("let r = mk_ref MkUnit in let _ = set_ref 42 r in get_ref r")
+    print(f">> let r = mk_ref MkUnit in let _ = set_ref 42 r in get_ref r")
+    print(f"  {pp_val(session, result[0], result[1])}  ✓")
+    assert result[0] == VData(1, [VLit(LitInt(42))]), f"Expected Just 42, got {result[0]}"
+    
+    # Multiple sets
+    result = session.eval("let r = mk_ref MkUnit in let _ = set_ref 1 r in let _ = set_ref 2 r in get_ref r")
+    print(f">> let r = mk_ref MkUnit in let _ = set_ref 1 r in let _ = set_ref 2 r in get_ref r")
+    print(f"  {pp_val(session, result[0], result[1])}  ✓")
+    assert result[0] == VData(1, [VLit(LitInt(2))]), f"Expected Just 2, got {result[0]}"
+
     print("\nAll e2e assertions passed.")
 
 

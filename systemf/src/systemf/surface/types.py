@@ -762,20 +762,24 @@ class SurfaceTermDeclaration(SurfaceDeclaration):
 
 @dataclass(frozen=True, kw_only=True)
 class SurfacePrimTypeDecl(SurfaceDeclaration):
-    """Primitive type declaration: prim_type Name.
+    """Primitive type declaration: prim_type Name [params].
 
     Declares a primitive type in the prelude. This registers the type
     name in the primitive_types registry for use by the type checker.
 
     Example: prim_type Int
+             prim_type Ref a
     """
 
     name: str
+    params: list[str]
     docstring: str | None
     pragma: dict[str, str] | None
 
     @override
     def __str__(self) -> str:
+        if self.params:
+            return f"prim_type {self.name} {' '.join(self.params)}"
         return f"prim_type {self.name}"
 
 

@@ -1,4 +1,4 @@
--- | Builtins module: defines primitive types, data types, and primitive operations.
+-- Builtins module: defines primitive types, data types, and primitive operations.
 -- This file must stay in sync with systemf/elab3/builtins.py.
 
 -- Unit type
@@ -60,7 +60,7 @@ prim_op error :: forall a. String -> a
 
 -- Ref
 
-prim_ty Ref a
+prim_type Ref a
 
 prim_op mk_ref :: forall a. Unit -> Ref a
 

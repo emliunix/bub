@@ -28,7 +28,10 @@ from systemf.surface.types import (
     SurfaceLitPattern,
     SurfaceLet,
     SurfaceVarPattern,
+    SurfaceWildcardPattern,
     SurfaceOp,
+    SurfacePrimTypeDecl,
+    SurfacePrimOpDecl,
 )
 from systemf.utils.ast_utils import equals_ignore_location
 
@@ -637,3 +640,61 @@ class TestTupleParser:
         assert len(result.elements) == 2
         assert isinstance(result.elements[0], SurfaceTuple)
         assert isinstance(result.elements[1], SurfaceLit)
+
+
+class TestPrimTypeParser:
+    """Test primitive type declaration parser."""
+
+    def test_prim_type_simple(self):
+        """Parse simple prim_type declaration."""
+        from systemf.surface.parser.declarations import prim_type_parser
+
+        tokens = lex("prim_type Int")
+        result = prim_type_parser().parse(tokens)
+        assert isinstance(result, SurfacePrimTypeDecl)
+        assert result.name == "Int"
+        assert result.params == []
+
+    def test_prim_type_with_params(self):
+        """Parse prim_type declaration with type parameters."""
+        from systemf.surface.parser.declarations import prim_type_parser
+
+        tokens = lex("prim_type Ref a")
+        result = prim_type_parser().parse(tokens)
+        assert isinstance(result, SurfacePrimTypeDecl)
+        assert result.name == "Ref"
+        assert result.params == ["a"]
+
+    def test_prim_type_multiple_params(self):
+        """Parse prim_type declaration with multiple type parameters."""
+        from systemf.surface.parser.declarations import prim_type_parser
+
+        tokens = lex("prim_type Map k v")
+        result = prim_type_parser().parse(tokens)
+        assert isinstance(result, SurfacePrimTypeDecl)
+        assert result.name == "Map"
+        assert result.params == ["k", "v"]
+
+
+class TestPrimOpParser:
+    """Test primitive operation declaration parser."""
+
+    def test_prim_op_simple(self):
+        """Parse simple prim_op declaration."""
+        from systemf.surface.parser.declarations import prim_op_parser
+
+        tokens = lex("prim_op int_plus :: Int -> Int -> Int")
+        result = prim_op_parser().parse(tokens)
+        assert isinstance(result, SurfacePrimOpDecl)
+        assert result.name == "int_plus"
+        assert result.type_annotation is not None
+
+    def test_prim_op_with_forall(self):
+        """Parse prim_op declaration with forall type."""
+        from systemf.surface.parser.declarations import prim_op_parser
+
+        tokens = lex("prim_op mk_ref :: forall a. Unit -> Ref a")
+        result = prim_op_parser().parse(tokens)
+        assert isinstance(result, SurfacePrimOpDecl)
+        assert result.name == "mk_ref"
+        assert result.type_annotation is not None

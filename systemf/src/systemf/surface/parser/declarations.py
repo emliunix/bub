@@ -369,10 +369,10 @@ def term_parser() -> P[SurfaceTermDeclaration]:
 
 
 def prim_type_parser() -> P[SurfacePrimTypeDecl]:
-    """Parse a primitive type declaration: prim_type CONSTRUCTOR.
+    """Parse a primitive type declaration: prim_type CONSTRUCTOR [ident*].
 
     Returns:
-        SurfacePrimTypeDecl with the primitive type name
+        SurfacePrimTypeDecl with the primitive type name and optional params
     """
 
     @generate
@@ -385,7 +385,11 @@ def prim_type_parser() -> P[SurfacePrimTypeDecl]:
         name_token = yield match_ident()
         name = name_token.value
 
-        return SurfacePrimTypeDecl(name=name, location=loc, docstring=None, pragma=None)
+        # Parse optional type parameters (identifiers)
+        params_tokens = yield match_ident().many()
+        params = [t.value for t in params_tokens]
+
+        return SurfacePrimTypeDecl(name=name, params=params, location=loc, docstring=None, pragma=None)
 
     return parser
 

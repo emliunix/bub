@@ -66,10 +66,14 @@ class Rename:
         # lhs
         lhs_datas = self.rename_lhs_datas(ast_datas)
         lhs_terms = self.rename_lhs_terms(ast_terms)
+        lhs_prim_tys = [self.new_lhs_name(p.name, p.location) for p in ast_prim_tys]
+        lhs_prim_ops = [self.new_lhs_name(p.name, p.location) for p in ast_prim_ops]
         lhs_names = itertools.chain(
                 [r.name for r in lhs_datas],
                 itertools.chain.from_iterable(r.datacons for r in lhs_datas),
-                [r.name for r in lhs_terms])
+                [r.name for r in lhs_terms],
+                lhs_prim_tys,
+                lhs_prim_ops)
         self.reader_env = self.reader_env + env_from_local_names(lhs_names)
 
         # rhs
@@ -77,8 +81,8 @@ class Rename:
         rn_terms = [self.rename_rhs_term(lt) for lt in lhs_terms]
 
         # prims
-        rn_prim_tys = [self.rename_prim_ty(p) for p in ast_prim_tys]
-        rn_prim_ops = [self.rename_prim_op(p) for p in ast_prim_ops]
+        rn_prim_tys = [self.rename_prim_ty(p, name) for p, name in zip(ast_prim_tys, lhs_prim_tys)]
+        rn_prim_ops = [self.rename_prim_op(p, name) for p, name in zip(ast_prim_ops, lhs_prim_ops)]
 
         return RenameResult(ModuleDecls(rn_datas, rn_terms, rn_prim_tys, rn_prim_ops))
 
@@ -148,16 +152,16 @@ class Rename:
         check_dups(names, loc)
         return [self.new_lhs_name(name, loc) for name in names]
 
-    def rename_prim_ty(self, pt: SurfacePrimTypeDecl) -> RnPrimTyDecl:
-        # FIX: enhance surface to support prim ty args
-        return RnPrimTyDecl(self.new_lhs_name(pt.name, pt.location), [])
+    def rename_prim_ty(self, pt: SurfacePrimTypeDecl, name: Name) -> RnPrimTyDecl:
+        var_names = self.new_lhs_names(pt.params, pt.location)
+        return RnPrimTyDecl(name, [BoundTv(v) for v in var_names])
 
-    def rename_prim_op(self, op: SurfacePrimOpDecl) -> RnPrimOpDecl:
+    def rename_prim_op(self, op: SurfacePrimOpDecl, name: Name) -> RnPrimOpDecl:
         ty = op.type_annotation
         # FIX: at parser level, make types requried
         if ty is None:
             raise Exception(f"primitive operator {op.name} must have a type annotation at {op.location}")
-        return RnPrimOpDecl(AnnotName(self.new_lhs_name(op.name, op.location), self.rename_expr.rename_type(ty)))
+        return RnPrimOpDecl(AnnotName(name, self.rename_expr.rename_type(ty)))
 
 
 @dataclass

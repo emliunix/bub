@@ -80,6 +80,10 @@ BUILTIN_NAMES: dict[str, list[Name]] = {
         BUILTIN_MAYBE,
         BUILTIN_MAYBE_NOTHING,
         BUILTIN_MAYBE_JUST,
+        BUILTIN_REF,
+        BUILTIN_MK_REF,
+        BUILTIN_SET_REF,
+        BUILTIN_GET_REF,
     ]
 }
 
