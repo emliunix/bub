@@ -10,17 +10,18 @@ from pathlib import Path
 from typing import cast, override
 
 from systemf.elab3.core_extra import CoreBuilderExtra
-from systemf.elab3.types.protocols import NameGenerator
+from systemf.elab3.types.ast import ImportDecl
+from systemf.elab3.types.protocols import NameGenerator, REPLSessionProto
 from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
 from systemf.utils.uniq import Uniq
 
 from . import pipeline
+from .pipeline import Code
 from . import builtins as bi
 from . import builtins_rts as rts
 from .name_gen import NameCacheImpl, NameGeneratorImpl, check_dups
-from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt, UnqualName
-from .pipeline import Code, execute
+from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt, UnqualName, QualName
 from .eval import Evaluator, EvalCtx
 from .types import Module, TyThing, REPLContext, Name, NameCache
 from .types.ty import Id, Ty, TyConApp, TyFun, subst_ty
@@ -28,7 +29,7 @@ from .types.tything import ACon, ATyCon, AnId, tything_name
 from .types.val import Trap, VClosure, VData, VLit, VPartial, Val
 
 
-class REPLSession(EvalCtx):
+class REPLSession(EvalCtx, REPLSessionProto):
     """Accumulates imports and bindings. Corresponds to InteractiveContext."""
     ctx: REPLContext
     reader_env: ReaderEnv                 # Accumulated imports
@@ -46,6 +47,7 @@ class REPLSession(EvalCtx):
         self.ctx = ctx
         self.reader_env = reader_env
         self.tythings = tythings
+        self.mod_insts = mod_insts
         self._tythings_map = {tything_name(thing): thing for thing in tythings}
         self._core_extra = CoreBuilderExtra(self)
         self._evaluator = Evaluator(self)
@@ -63,11 +65,12 @@ class REPLSession(EvalCtx):
             mod_insts=self.mod_insts.copy() # Copy module instances
         )
 
-    def cmd_import(self, import_spec: ImportSpec) -> None:
+    def cmd_import(self, decl: ImportDecl) -> None:
         """Handle an import command by loading the module and updating state."""
-        mod = self.ctx.load(import_spec.module_name)
+        spec = ImportSpec.from_decl(decl)
+        mod = self.ctx.load(spec.module_name)
         new_rdr_env = ReaderEnv.from_elts([
-            ImportRdrElt.create(name, import_spec)
+            ImportRdrElt.create(name, spec)
             for name, _ in mod.tythings
         ])
         self.reader_env = self.reader_env.merge(new_rdr_env)
@@ -110,24 +113,22 @@ class REPLSession(EvalCtx):
         """
         repl_id = self.ctx.next_replmod_id()
         mod_name = f"REPL{repl_id}"
-
-        # FIX: the pipeline should be able to take ast directly
-        # cause we need to probe if input is an expression or a valid program
-        # and for an expression, we need to make up a "it = <expr>" declaration
         file_path = f"<repl {repl_id}>"
         is_expr, ast = normalize_input(file_path, input)
-        repl_mod = pipeline.execute(self.ctx, mod_name, file_path, ast, reader_env=self.reader_env)
-        self.update_repl_with_mod(repl_mod)
+        repl_mod = pipeline.execute(self.ctx, mod_name, file_path, ast,
+                                    reader_env=self.reader_env,
+                                    type_env=self._tythings_map.copy())
+        self.extend_tythings_rdr([thing for _, thing in repl_mod.tythings])
         mod_inst = self.eval_mod(repl_mod)
         self.mod_insts[mod_name] = mod_inst
 
         if is_expr:
             # Convention: REPL expressions bind to `it`
-            names = self.reader_env.lookup(UnqualName("it"))
+            names = self.reader_env.lookup(QualName(mod_name, "it"))
             match names:
-                case [ImportRdrElt(name=Name(mod=mod_name) as name)]:
-                    ty = cast(AnId, self._tythings_map[name]).id.ty
+                case [ImportRdrElt(name=name)]:
                     val = mod_inst[name]
+                    ty = cast(AnId, self._tythings_map[name]).id.ty
                     return val, ty
                 case _:
                     raise Exception(f"Expected single binding for `it`, got: {names}")
@@ -141,7 +142,11 @@ class REPLSession(EvalCtx):
         return self._core_extra
 
     def lookup(self, name: Name) -> TyThing:
+        # REPL Session is like a special module, check first.
         if (thing := self._tythings_map.get(name)) is not None:
+            return thing
+        # then normal modules
+        if (thing := self.ctx.load(name.mod)._tythings_map.get(name)) is not None:
             return thing
         raise Exception(f"Name {name} not found in REPL session")
 
@@ -180,17 +185,6 @@ class REPLSession(EvalCtx):
 
     # --- State management ---
 
-    def update_repl_with_mod(self, mod: Module):
-        new_names = [n for n, _ in mod.tythings]
-        new_rdr_env = ReaderEnv.from_elts([
-            ImportRdrElt.create(name, ImportSpec(mod.name, None, False))
-            for name, _ in mod.tythings
-        ])
-
-        # update REPL session state
-        self.reader_env = self.reader_env.shadow(set(new_names)).merge(new_rdr_env)
-        self.extend_tythings_rdr([thing for _, thing in mod.tythings])
-
     def extend_tythings_rdr(self, tythings: list[TyThing]):
         """
         This is opinionated for use in REPL, where names shadow previous ones if any
@@ -219,12 +213,12 @@ class REPLSession(EvalCtx):
                         lambda args: VData(tag, args),  # type: ignore[misc]
                     )
                 case AnId(name=name, is_prim=True):
-                    mod_inst[name] = self.mk_primop(name)
+                    mod_inst[name] = self.mk_primop(name, thing)
                 case _: pass
         return mod_inst
 
-    def mk_primop(self, name: Name) -> Val:
-        if (p := self.ctx.get_primop(name)) is not None:
+    def mk_primop(self, name: Name, thing: AnId) -> Val:
+        if (p := self.ctx.get_primop(name, thing, self)) is not None:
             return p
         raise Exception(f"Unknown primitive operation: {name}")
 
@@ -268,7 +262,7 @@ class REPL(REPLContext):
         return self._load(name, None)
 
     @override
-    def get_primop(self, name: Name) -> Val | None:
+    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
         return self._prim_ops.get(name.mod, {}).get(name.surface)
 
     def _load(self, name: str, from_mod: str | None = None) -> Module:
@@ -298,7 +292,7 @@ class REPL(REPLContext):
 
     def _load_module(self, name: str, file: Path) -> Module:
         text = file.read_text(encoding="utf-8")
-        return execute(self, name, str(file), text)
+        return pipeline.execute(self, name, str(file), text)
 
     def new_session(self) -> REPLSession:
         """Create a new REPL session with given state."""

@@ -20,7 +20,7 @@ def mk_id(surface: str, mod: str, unique: int, ty: TyInt | TyVar = TyInt()) -> I
 def test_anid_creation():
     name = mk_name("id", "Test", 1)
     ty = TyInt()
-    anid = AnId.from_id(Id(name=name, ty=ty))
+    anid = AnId.create(Id(name=name, ty=ty))
     assert anid.name == name
     assert anid.id.ty == ty
 

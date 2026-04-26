@@ -8,6 +8,7 @@ Usage:
 from pathlib import Path
 
 from systemf.elab3.repl import REPL
+from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types import Module, core
 from systemf.elab3.types.core_pp import pp_core
 from systemf.elab3.types.val import VLit, VData
@@ -49,11 +50,11 @@ def main() -> None:
     print("\n\n=== e2e evaluation ===\n")
 
     def check(expr: str, expected_val, msg: str | None = None):
-        ty, val = session.eval(expr)
+        val, ty = session.eval(expr)
         assert val == expected_val, f"for {expr}: expected {expected_val}, got {val}"
         label = msg or expr
         print(f">> {label}")
-        print(f"  {session.pp_val(ty, val)}  ✓")
+        print(f"  {pp_val(session, val, ty)}  ✓")
 
     check("1", VLit(LitInt(1)))
     check("True", VData(0, []))

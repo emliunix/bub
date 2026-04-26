@@ -20,11 +20,11 @@ class Typecheck:
     type_env: TypeEnv
 
 
-    def __init__(self, mod_name: str, ctx: REPLContext, name_gen: NameGenerator):
+    def __init__(self, mod_name: str, ctx: REPLContext, name_gen: NameGenerator, type_env: TypeEnv | None = None):
         self.mod_name = mod_name
         self.ctx = ctx
         self.name_gen = name_gen
-        self.type_env = {}
+        self.type_env = type_env if type_env is not None else {}
     
     @property
     def typecheck_expr(self):

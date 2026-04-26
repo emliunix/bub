@@ -4,6 +4,8 @@ from systemf.elab3.rename import Rename
 from systemf.elab3.typecheck import Typecheck
 from systemf.elab3.types import Module, REPLContext
 
+from systemf.elab3.types.ty import Name
+from systemf.elab3.types.tything import TyThing
 from systemf.surface.parser import parse_program
 from systemf.surface.types import SurfaceDeclaration, SurfaceImportDeclaration
 
@@ -12,6 +14,7 @@ type Code = str | tuple[list[SurfaceImportDeclaration], list[SurfaceDeclaration]
 
 def execute(ctx: REPLContext, mod_name: str, file_path: str, code: Code,
             reader_env: ReaderEnv | None = None,
+            type_env: dict[Name, TyThing] | None = None
             ) -> Module:
     if isinstance(code, str):
         imports, decls = parse_program(code, file_path)

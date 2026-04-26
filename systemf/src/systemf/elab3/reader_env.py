@@ -15,6 +15,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import override
 
+from systemf.elab3.types.ast import ImportDecl
+
 from .types import Name
 
 
@@ -56,13 +58,22 @@ class ImportSpec:
     """How an imported name entered scope."""
     module_name: str        # Source module (e.g., "Data.Maybe")
     alias: str | None       # Import alias if `as M` used
-    is_qual: bool           # Qualified-only? (changes during shadowing)
+    is_qual: bool           # Qualified-only?
+
+    @staticmethod
+    def from_decl(decl: ImportDecl) -> ImportSpec:
+        return ImportSpec(
+            module_name=decl.module,
+            alias=decl.alias,
+            is_qual=decl.qualified
+        )
 
 
 # =============================================================================
 # RdrElt (one binding in scope)
 # =============================================================================
 
+# TODO: think the usecases of LocalRdrElt, doesn't seem to be necessary
 @dataclass(frozen=True)
 class LocalRdrElt:
     """Locally defined binding.
@@ -136,13 +147,14 @@ class ReaderEnv:
         return self.merge(other)
 
     def shadow(self, new_names: set[Name]) -> ReaderEnv:
-        """Convert to qualified-only for names not in new_names.
+        """Convert to qualified-only for names sharing surface names with new_names.
 
         Old interactive bindings become accessible only via qualified syntax.
         """
+        new_surfaces = {n.surface for n in new_names}
         table = {
             occ_name: [
-                _shadow_rdr_elt(elt) if elt.name in new_names else elt
+                _shadow_rdr_elt(elt) if elt.name.surface in new_surfaces else elt
                 for elt in elts
             ]
             for (occ_name, elts) in self.table.items()
@@ -221,5 +233,13 @@ def _shadow_rdr_elt(elt: RdrElt) -> RdrElt:
                 is_qual=True  # Qualified-only!
             )
             return ImportRdrElt(name, [spec])
+        case ImportRdrElt(name, specs):
+            # Convert all specs to qualified-only
+            return ImportRdrElt(name, [
+                # force qualified import spec
+                ImportSpec(spec.module_name, spec.alias, True)
+                for spec in specs
+                if not spec.is_qual
+            ])
         case _:
             return elt

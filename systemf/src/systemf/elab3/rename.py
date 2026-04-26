@@ -226,7 +226,7 @@ def get_imports(mod: str, imports: list[SurfaceImportDeclaration]) -> list[Impor
 
 
 def env_from_import_decl(mod: Module, decl: ImportDecl) -> ReaderEnv:
-    spec = ImportSpec(decl.module, decl.alias, decl.qualified)
+    spec = ImportSpec.from_decl(decl)
     if decl.import_items:
         imports = set(decl.import_items)
         items = [item for item in mod.exports if item.surface in imports]
