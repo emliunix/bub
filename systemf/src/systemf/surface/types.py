@@ -29,10 +29,11 @@ class SurfaceNode:
 # =============================================================================
 
 
+@dataclass(frozen=True, kw_only=True)
 class SurfaceType(SurfaceNode):
     """Base class for surface types."""
 
-    pass
+    docstring: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -48,23 +49,24 @@ class SurfaceTypeVar(SurfaceType):
 
 @dataclass(frozen=True, kw_only=True)
 class SurfaceTypeArrow(SurfaceType):
-    """Function type: arg -> ret with optional parameter docstring.
+    """Function type: arg -> ret.
+
+    Parameter documentation is stored on the ``arg`` type node's
+    ``docstring`` field (inherited from ``SurfaceType``).
 
     Example:
         String -- ^ Input text -> String
 
     Representation:
         SurfaceTypeArrow(
-            arg=SurfaceTypeConstructor(name="String"),
+            arg=SurfaceTypeConstructor(name="String", docstring="Input text"),
             ret=SurfaceTypeConstructor(name="String"),
-            param_doc="Input text",
             location=loc
         )
     """
 
     arg: SurfaceType
     ret: SurfaceType
-    param_doc: str | None  # Populated when parser sees -- ^ after type
 
     @override
     def __str__(self) -> str:
@@ -73,7 +75,9 @@ class SurfaceTypeArrow(SurfaceType):
                 arg_str = f"({self.arg})"
             case _:
                 arg_str = str(self.arg)
-        doc_suffix = f" -- ^ {self.param_doc}" if self.param_doc else ""
+        # Pull param doc from arg node's docstring field
+        param_doc = self.arg.docstring
+        doc_suffix = f" -- ^ {param_doc}" if param_doc else ""
         return f"{arg_str}{doc_suffix} -> {self.ret}"
 
 
@@ -208,52 +212,6 @@ class SurfaceAbs(SurfaceTerm):
 
 
 @dataclass(frozen=True, kw_only=True)
-class ScopedVar(SurfaceTerm):
-    """Variable reference by de Bruijn index (after scope checking).
-
-    Replaces SurfaceVar during scope checking. Index 0 refers to the
-    nearest binder, index 1 to the next outer binder, etc.
-
-    Attributes:
-        index: De Bruijn index (0 = nearest binder)
-        debug_name: Original name for error messages and debugging
-        location: Source location
-    """
-
-    index: int
-    debug_name: str
-
-    @override
-    def __str__(self) -> str:
-        return f"#{self.index}({self.debug_name})"
-
-
-@dataclass(frozen=True, kw_only=True)
-class ScopedAbs(SurfaceTerm):
-    """Lambda with parameter name preserved (after scope checking).
-
-    Replaces SurfaceAbs during scope checking. The body contains ScopedVar
-    references instead of SurfaceVar.
-
-    Attributes:
-        var_name: Original parameter name (for error messages)
-        var_type: Optional type annotation
-        body: The function body (contains ScopedVar references)
-        location: Source location
-    """
-
-    var_name: str
-    var_type: SurfaceType | None
-    body: SurfaceTerm
-
-    @override
-    def __str__(self) -> str:
-        if self.var_type:
-            return f"\\{self.var_name}:{self.var_type} -> {self.body}"
-        return f"\\{self.var_name} -> {self.body}"
-
-
-@dataclass(frozen=True, kw_only=True)
 class SurfaceApp(SurfaceTerm):
     """Function application: f arg."""
 
@@ -263,56 +221,6 @@ class SurfaceApp(SurfaceTerm):
     @override
     def __str__(self) -> str:
         return f"({self.func} {self.arg})"
-
-
-@dataclass(frozen=True, kw_only=True)
-class SurfaceTypeAbs(SurfaceTerm):
-    """Type abstraction: /\a. body (written as /\a. or Λa.).
-
-    Supports multiple type variables: /\a b c. body (desugared to nested type abstractions)
-    """
-
-    # Multi-var support: list of type variable names
-    # For single var, use vars=["a"]
-    vars: list[str]
-    body: SurfaceTerm
-
-    # Backwards compatibility property
-    @property
-    def var(self) -> str:
-        """First type variable name (backwards compatibility)."""
-        return self.vars[0] if self.vars else ""
-
-    def __init__(
-        self,
-        vars: list[str] | None = None,
-        body: SurfaceTerm | None = None,
-        location: Location | None = None,
-        # Backwards compatibility kwargs
-        var: str | None = None,
-    ):
-        """Initialize with backwards compatibility for old API.
-
-        Old API: SurfaceTypeAbs(var="a", body=..., location=...)
-        New API: SurfaceTypeAbs(vars=["a"], body=..., location=...)
-        """
-        # Handle old API: if var is provided, build vars from it
-        if var is not None:
-            vars = [var]
-        elif vars is None:
-            vars = []
-
-        # Use object.__setattr__ since dataclass is frozen
-        object.__setattr__(self, "vars", vars)
-        object.__setattr__(self, "body", body)
-        object.__setattr__(self, "location", location)
-
-    @override
-    def __str__(self) -> str:
-        if not self.vars:
-            return f"/\\. {self.body}"
-        vars_str = " ".join(self.vars)
-        return f"/\\{vars_str}. {self.body}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -380,34 +288,6 @@ class SurfaceLet(SurfaceTerm):
 
 
 @dataclass(frozen=True, kw_only=True)
-class ValBindsScoped(SurfaceTerm):
-    """Scoped let binding after name resolution.
-
-    This is the post-scope-checking representation of SurfaceLet.
-    Variable references within bindings and body use de Bruijn indices
-    via ScopedVar nodes.
-
-    The bindings remain name-based for readability, but the values and
-    body contain scoped (index-based) variable references.
-    """
-
-    bindings: list[ValBind]
-    body: SurfaceTerm
-
-    @override
-    def __str__(self) -> str:
-        if len(self.bindings) == 1:
-            return f"let {self.bindings[0]} in {self.body}"
-        else:
-            bindings_str = "\n".join(f"  {b}" for b in self.bindings)
-            return f"let\n{bindings_str}\nin {self.body}"
-
-
-# Backwards compatibility alias
-ValBinds = SurfaceLet  # DEPRECATED: Use SurfaceLet instead
-
-
-@dataclass(frozen=True, kw_only=True)
 class SurfaceAnn(SurfaceTerm):
     """Type annotation: term : type."""
 
@@ -433,21 +313,6 @@ class SurfaceIf(SurfaceTerm):
     @override
     def __str__(self) -> str:
         return f"if {self.cond} then {self.then_branch} else {self.else_branch}"
-
-
-@dataclass(frozen=True, kw_only=True)
-class SurfaceConstructor(SurfaceTerm):
-    """Data constructor application: Con args."""
-
-    name: str
-    args: list[SurfaceTerm]
-
-    @override
-    def __str__(self) -> str:
-        if not self.args:
-            return self.name
-        args_str = " ".join(str(arg) for arg in self.args)
-        return f"({self.name} {args_str})"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -638,40 +503,17 @@ class SurfaceCase(SurfaceTerm):
         return f"case {self.scrutinee} of {{ {branches_str} }}"
 
 
-@dataclass(frozen=True, kw_only=True)
-class SurfaceToolCall(SurfaceTerm):
-    """Tool invocation: @tool_name arg1 arg2 ...
-
-    Tool calls allow SystemF code to invoke external operations.
-    The tool name is resolved at runtime from the tool registry.
-    """
-
-    tool_name: str
-    args: list[SurfaceTerm]
-
-    @override
-    def __str__(self) -> str:
-        if not self.args:
-            return f"@{self.tool_name}"
-        args_str = " ".join(str(arg) for arg in self.args)
-        return f"(@{self.tool_name} {args_str})"
-
-
 type SurfaceTermRepr = (
     SurfaceVar |
     SurfaceAbs |
     SurfaceApp |
-    SurfaceTypeAbs |
     SurfaceTypeApp |
     SurfaceLet |
     SurfaceAnn |
-    SurfaceConstructor |
     SurfaceCase |
-    SurfaceToolCall |
     SurfaceLit |
     GlobalVar |
     SurfaceOp )
-
 
 
 # =============================================================================

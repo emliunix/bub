@@ -93,7 +93,6 @@ from systemf.surface.types import (
     SurfaceTerm,
     SurfaceTuple,
     SurfaceType,
-    SurfaceTypeAbs,
     SurfaceTypeApp,
     SurfaceVar,
     SurfaceVarPattern,

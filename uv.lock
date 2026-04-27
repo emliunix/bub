@@ -5,6 +5,7 @@ requires-python = ">=3.14, <4.0"
 [manifest]
 members = [
     "bub",
+    "bub-sf",
     "systemf",
 ]
 
@@ -324,6 +325,21 @@ dev = [
     { name = "types-pyyaml", specifier = ">=6.0.12" },
     { name = "watchdog", specifier = ">=6.0.0" },
     { name = "websockets", specifier = ">=16.0" },
+]
+
+[[package]]
+name = "bub-sf"
+version = "0.1.0"
+source = { editable = "bub_sf" }
+dependencies = [
+    { name = "bub" },
+    { name = "systemf" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bub", editable = "." },
+    { name = "systemf", editable = "systemf" },
 ]
 
 [[package]]
@@ -1609,7 +1625,7 @@ wheels = [
 [[package]]
 name = "systemf"
 version = "0.1.0"
-source = { virtual = "systemf" }
+source = { editable = "systemf" }
 dependencies = [
     { name = "anthropic" },
     { name = "openai" },

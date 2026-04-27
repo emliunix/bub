@@ -15,7 +15,7 @@ import pytest
 from parsy import eof
 
 from systemf.elab3.rename_expr import RenameExpr
-from systemf.elab3.rename import NameGeneratorImpl
+from systemf.elab3.name_gen import NameGeneratorImpl
 from systemf.elab3.builtins import (
     BUILTIN_TRUE, BUILTIN_FALSE, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL,
     BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_BIN_OPS

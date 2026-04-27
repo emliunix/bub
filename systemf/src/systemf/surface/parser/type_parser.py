@@ -106,6 +106,40 @@ def match_inline_docstring() -> P[str | None]:
     return parser
 
 
+def match_inline_docstring_strict() -> P[str]:
+    """Match an inline docstring token (``-- ^``).
+
+    Fails if no inline docstring is present. Required for ``many``
+    combinator in ``doc_type_parser``.
+    """
+
+    @Parser
+    def parser(tokens: list, index: int) -> Result:
+        if index >= len(tokens):
+            return Result.failure(index, "expected inline docstring")
+        token = tokens[index]
+        if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.INLINE:
+            return Result.success(index + 1, token.content)
+        return Result.failure(index, "expected inline docstring")
+
+    return parser
+
+
+def attach_docs(ty: SurfaceType, pre: list[str], post: list[str]) -> SurfaceType:
+    """Attach pre/post docstrings to a type node.
+
+    Concatenates pre and post docs with newline separator if both exist.
+    Uses dataclasses.replace to update the frozen dataclass.
+    """
+    from dataclasses import replace
+
+    docs = pre + post
+    if not docs:
+        return ty
+    docstring = "\n".join(docs)
+    return replace(ty, docstring=docstring)
+
+
 # =============================================================================
 # Forward Declaration for Recursive Type Parser
 # =============================================================================
@@ -252,6 +286,35 @@ def type_app_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
     return parser
 
 
+def doc_type_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
+    """Parse a type with optional pre/post inline docstrings.
+
+    Grammar::
+
+        doc_type ::= ("--^" doc)* type_app ("--^" doc)*
+
+    This wraps ``type_app_parser`` with docstring absorption at a
+    precedence level tighter than arrow but looser than type application.
+
+    Args:
+        constraint: Layout constraint propagated to ``type_app_parser``.
+
+    Returns:
+        ``SurfaceType`` with ``docstring`` field populated if docs present.
+    """
+    if constraint is None:
+        constraint = AnyIndent()
+
+    @generate
+    def parser():
+        pre_docs = yield match_inline_docstring_strict().many()
+        ty = yield type_app_parser(constraint)
+        post_docs = yield match_inline_docstring_strict().many()
+        return attach_docs(ty, pre_docs, post_docs)
+
+    return parser
+
+
 def type_arrow_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
     """Parse a function type.  Right-associative.
 
@@ -276,11 +339,8 @@ def type_arrow_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
     def parser():
         from systemf.surface.types import SurfaceTypeArrow
 
-        left = yield type_app_parser(constraint)
+        left = yield doc_type_parser(constraint)
         loc = left.location
-
-        # Inline docstring may appear between the parameter type and the arrow.
-        param_doc = yield match_inline_docstring()
 
         # Guard the arrow with a column check before consuming it.
         # Non-consuming failure here causes the optional(..) below to yield None
@@ -295,7 +355,7 @@ def type_arrow_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
             return left
 
         right = yield type_arrow_parser(constraint)
-        return SurfaceTypeArrow(arg=left, ret=right, param_doc=param_doc, location=loc)
+        return SurfaceTypeArrow(arg=left, ret=right, location=loc)
 
     return parser
 
@@ -377,10 +437,13 @@ __all__ = [
     "match_token",
     "match_forall",
     "match_inline_docstring",
+    "match_inline_docstring_strict",
+    "attach_docs",
     # Type parsers (factories — call to get a Parser)
     "type_tuple_parser",   # @generate Parser object (zero-arg, used inside parens)
     "type_atom_parser",
     "type_app_parser",
+    "doc_type_parser",
     "type_arrow_parser",
     "type_forall_parser",
     # Main entry point
