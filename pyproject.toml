@@ -160,4 +160,19 @@ preview = true
 [tool.uv.workspace]
 members = [
     "systemf",
+    "bub_sf",
+    "upstream/bub",
 ]
+
+[tool.uv.sources]
+systemf = { workspace = true }
+bub_sf = { workspace = true }
+bub = { workspace = true }
+
+[tool.pyright]
+extraPaths = [
+  "bub_sf/src/",
+  "systemf/src/",
+  "upstream/bub/src/",
+]
+stubPath = "systemf/typings/"
