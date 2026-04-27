@@ -52,6 +52,7 @@ from systemf.elab3.types.core import (
     NonRec,
     Rec,
     DataAlt,
+    LitAlt,
     DefaultAlt,
     Binding,
 )
@@ -665,3 +666,501 @@ def test_primops_are_vpartial():
     assert result.name == "int_plus"
     assert result.arity == 2
     assert result.done == []
+
+
+# =============================================================================
+# Ported from elab2: variable shadowing, closures, church encodings
+# =============================================================================
+
+def test_eval_shadow():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 200, TyInt())
+    x2 = _id("Test", "x", 201, TyInt())
+    inner = CoreLam(x2, CoreVar(x2))
+    outer = CoreLam(x, inner)
+    t = CoreApp(CoreApp(outer, CoreLit(LitInt(1))), CoreLit(LitInt(2)))
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(2))
+
+
+def test_eval_closure_captures_env():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 202, TyInt())
+    y = _id("Test", "y", 203, TyInt())
+    outer = CoreLam(x, CoreLam(y, CoreVar(x)))
+    t = CoreApp(outer, CoreLit(LitInt(10)))
+    result = ev._eval_expr(t, pmap())
+    assert isinstance(result, VClosure)
+
+
+def test_eval_apply_returned_closure():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 204, TyInt())
+    y = _id("Test", "y", 205, TyInt())
+    outer = CoreLam(x, CoreLam(y, CoreVar(x)))
+    t = CoreApp(CoreApp(outer, CoreLit(LitInt(10))), CoreLit(LitInt(20)))
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(10))
+
+
+def test_eval_nested_application():
+    ev = Evaluator(FakeCtx())
+    f = _id("Test", "f", 206, TyFun(TyInt(), TyInt()))
+    x = _id("Test", "x", 207, TyInt())
+    y = _id("Test", "y", 208, TyInt())
+    apply_f = CoreLam(f, CoreLam(x, CoreApp(CoreVar(f), CoreVar(x))))
+    id_fn = CoreLam(y, CoreVar(y))
+    t = CoreApp(CoreApp(apply_f, id_fn), CoreLit(LitInt(7)))
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(7))
+
+
+def test_eval_church_true():
+    ev = Evaluator(FakeCtx())
+    t_var = _id("Test", "t", 209, TyInt())
+    f_var = _id("Test", "f", 210, TyInt())
+    church_true = CoreLam(t_var, CoreLam(f_var, CoreVar(t_var)))
+    expr = CoreApp(CoreApp(church_true, CoreLit(LitInt(1))), CoreLit(LitInt(0)))
+    result = ev._eval_expr(expr, pmap())
+    assert result == VLit(LitInt(1))
+
+
+def test_eval_church_false():
+    ev = Evaluator(FakeCtx())
+    t_var = _id("Test", "t", 211, TyInt())
+    f_var = _id("Test", "f", 212, TyInt())
+    church_false = CoreLam(t_var, CoreLam(f_var, CoreVar(f_var)))
+    expr = CoreApp(CoreApp(church_false, CoreLit(LitInt(1))), CoreLit(LitInt(0)))
+    result = ev._eval_expr(expr, pmap())
+    assert result == VLit(LitInt(0))
+
+
+def test_eval_omega_like():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 213, TyInt())
+    id_fn = CoreLam(x, CoreVar(x))
+    x2 = _id("Test", "x", 214, TyInt())
+    id_fn2 = CoreLam(x2, CoreVar(x2))
+    t = CoreApp(id_fn, id_fn2)
+    result = ev._eval_expr(t, pmap())
+    assert isinstance(result, VClosure)
+
+
+def test_eval_deep_nesting():
+    ev = Evaluator(FakeCtx())
+    a = _id("Test", "a", 215, TyInt())
+    b = _id("Test", "b", 216, TyInt())
+    c = _id("Test", "c", 217, TyInt())
+    nested = CoreLam(a, CoreLam(b, CoreLam(c, CoreVar(a))))
+    t = CoreApp(
+        CoreApp(CoreApp(nested, CoreLit(LitInt(1))), CoreLit(LitInt(2))),
+        CoreLit(LitInt(3)),
+    )
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(1))
+
+
+# =============================================================================
+# Ported from elab2: let patterns
+# =============================================================================
+
+def test_eval_let_in_body():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 220, TyInt())
+    y = _id("Test", "y", 221, TyInt())
+    inner = CoreLet(NonRec(y, CoreLit(LitInt(2))), CoreVar(x))
+    t = CoreLet(NonRec(x, CoreLit(LitInt(1))), inner)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(1))
+
+
+def test_eval_let_shadow():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 222, TyInt())
+    x2 = _id("Test", "x", 223, TyInt())
+    inner = CoreLet(NonRec(x2, CoreLit(LitInt(2))), CoreVar(x2))
+    t = CoreLet(NonRec(x, CoreLit(LitInt(1))), inner)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(2))
+
+
+def test_eval_let_with_lambda():
+    ev = Evaluator(FakeCtx())
+    f = _id("Test", "f", 224, TyFun(TyInt(), TyInt()))
+    x = _id("Test", "x", 225, TyInt())
+    id_fn = CoreLam(x, CoreVar(x))
+    t = CoreLet(NonRec(f, id_fn), CoreApp(CoreVar(f), CoreLit(LitInt(42))))
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(42))
+
+
+def test_eval_let_expr_uses_outer():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 226, TyInt())
+    y = _id("Test", "y", 227, TyInt())
+    inner = CoreLet(NonRec(y, CoreVar(x)), CoreVar(y))
+    t = CoreLet(NonRec(x, CoreLit(LitInt(10))), inner)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(10))
+
+
+def test_eval_let_recursive_factorial():
+    r"""let rec f n = case n of 0 -> 1; _ -> * n (f (- n 1)) in f 5 => 120"""
+    ev = Evaluator(FakeCtx())
+    f = _id("Test", "f", 228, TyFun(TyInt(), TyInt()))
+    n = _id("Test", "n", 229, TyInt())
+    s = _id("Test", "s", 230, TyInt())
+    minus_id = Id(BUILTIN_INT_MINUS, TyInt())
+    mul_id = Id(BUILTIN_INT_MULTIPLY, TyInt())
+    n_minus_1 = CoreApp(CoreApp(CoreVar(minus_id), CoreVar(n)), CoreLit(LitInt(1)))
+    f_body = CoreCase(
+        scrut=CoreVar(n),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (LitAlt(LitInt(0)), CoreLit(LitInt(1))),
+            (DefaultAlt(), CoreApp(
+                CoreApp(CoreVar(mul_id), CoreVar(n)),
+                CoreApp(CoreVar(f), n_minus_1),
+            )),
+        ],
+    )
+    lam = CoreLam(n, f_body)
+    t = CoreLet(Rec([(f, lam)]), CoreApp(CoreVar(f), CoreLit(LitInt(5))))
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(120))
+
+
+# =============================================================================
+# Ported from elab2: case expressions (lit, data, fallthrough, no-match)
+# =============================================================================
+
+def test_eval_case_lit_second():
+    ev = Evaluator(FakeCtx())
+    s = _id("Test", "s", 240, TyInt())
+    case_expr = CoreCase(
+        scrut=CoreLit(LitInt(2)),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (LitAlt(LitInt(1)), CoreLit(LitInt(10))),
+            (LitAlt(LitInt(2)), CoreLit(LitInt(20))),
+        ],
+    )
+    result = ev._eval_expr(case_expr, pmap())
+    assert result == VLit(LitInt(20))
+
+
+def test_eval_case_data_with_fields_second():
+    ev = Evaluator(FakeCtx())
+    a = _id("Test", "a", 241, TyInt())
+    b = _id("Test", "b", 242, TyInt())
+    s = _id("Test", "s", 243, TyInt())
+    pair_id = Id(BUILTIN_PAIR_MKPAIR, TyInt())
+    scrut = CoreApp(CoreApp(CoreVar(pair_id), CoreLit(LitInt(3))), CoreLit(LitInt(4)))
+    case_expr = CoreCase(
+        scrut=scrut,
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_PAIR_MKPAIR, tag=MKPAIR_TAG, vars=[a, b]), CoreVar(b)),
+        ],
+    )
+    result = ev._eval_expr(case_expr, pmap())
+    assert result == VLit(LitInt(4))
+
+
+def test_eval_case_nested_data():
+    ev = Evaluator(FakeCtx())
+    a = _id("Test", "a", 244, TyInt())
+    b = _id("Test", "b", 245, TyInt())
+    x = _id("Test", "x", 246, TyInt())
+    s = _id("Test", "s", 247, TyInt())
+    pair_id = Id(BUILTIN_PAIR_MKPAIR, TyInt())
+    pair_val = CoreApp(
+        CoreApp(CoreVar(pair_id), CoreLit(LitInt(10))),
+        CoreLit(LitInt(20)),
+    )
+    case_expr = CoreCase(
+        scrut=CoreVar(x),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_PAIR_MKPAIR, tag=MKPAIR_TAG, vars=[a, b]), CoreVar(a)),
+        ],
+    )
+    t = CoreLet(NonRec(x, pair_val), case_expr)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(10))
+
+
+def test_eval_case_data_fallthrough():
+    ev = Evaluator(FakeCtx())
+    h = _id("Test", "h", 248, TyInt())
+    t_var = _id("Test", "t", 249, TyInt())
+    s = _id("Test", "s", 250, TyInt())
+    nil_id = Id(BUILTIN_LIST_NIL, TyInt())
+    case_expr = CoreCase(
+        scrut=CoreVar(nil_id),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_LIST_CONS, tag=CONS_TAG, vars=[h, t_var]), CoreVar(h)),
+            (DataAlt(con=BUILTIN_LIST_NIL, tag=NIL_TAG, vars=[]), CoreLit(LitInt(0))),
+        ],
+    )
+    result = ev._eval_expr(case_expr, pmap())
+    assert result == VLit(LitInt(0))
+
+
+def test_eval_case_no_match():
+    ev = Evaluator(FakeCtx())
+    s = _id("Test", "s", 251, TyInt())
+    case_expr = CoreCase(
+        scrut=CoreLit(LitInt(3)),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (LitAlt(LitInt(1)), CoreLit(LitInt(10))),
+            (LitAlt(LitInt(2)), CoreLit(LitInt(20))),
+        ],
+    )
+    with pytest.raises(Exception, match="no matching case"):
+        ev._eval_expr(case_expr, pmap())
+
+
+# =============================================================================
+# Ported from elab2: data constructors (nested cons, nested pair)
+# =============================================================================
+
+def test_eval_cons_nested():
+    ev = Evaluator(FakeCtx())
+    cons_id = Id(BUILTIN_LIST_CONS, TyInt())
+    nil_id = Id(BUILTIN_LIST_NIL, TyInt())
+    inner = CoreApp(
+        CoreApp(CoreVar(cons_id), CoreLit(LitInt(2))),
+        CoreVar(nil_id),
+    )
+    outer = CoreApp(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))), inner)
+    result = ev._eval_expr(outer, pmap())
+    assert isinstance(result, VData)
+    assert result.tag == CONS_TAG
+    assert result.vals[0] == VLit(LitInt(1))
+    assert isinstance(result.vals[1], VData)
+    assert result.vals[1].tag == CONS_TAG
+
+
+def test_eval_pair_nested():
+    ev = Evaluator(FakeCtx())
+    pair_id = Id(BUILTIN_PAIR_MKPAIR, TyInt())
+    inner = CoreApp(
+        CoreApp(CoreVar(pair_id), CoreLit(LitInt(1))),
+        CoreLit(LitInt(2)),
+    )
+    outer = CoreApp(CoreApp(CoreVar(pair_id), inner), CoreLit(LitInt(3)))
+    result = ev._eval_expr(outer, pmap())
+    assert isinstance(result, VData)
+    assert result.tag == MKPAIR_TAG
+    assert isinstance(result.vals[0], VData)
+    assert result.vals[0].vals[0] == VLit(LitInt(1))
+    assert result.vals[0].vals[1] == VLit(LitInt(2))
+    assert result.vals[1] == VLit(LitInt(3))
+
+
+# =============================================================================
+# Ported from elab2: ifte (case on bool)
+# =============================================================================
+
+def test_eval_ifte_true():
+    ev = Evaluator(FakeCtx())
+    s = _id("Test", "s", 260, TyInt())
+    true_id = Id(BUILTIN_TRUE, TyInt())
+    case_expr = CoreCase(
+        scrut=CoreVar(true_id),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), CoreLit(LitInt(1))),
+            (DefaultAlt(), CoreLit(LitInt(0))),
+        ],
+    )
+    result = ev._eval_expr(case_expr, pmap())
+    assert result == VLit(LitInt(1))
+
+
+def test_eval_ifte_false():
+    ev = Evaluator(FakeCtx())
+    s = _id("Test", "s", 261, TyInt())
+    false_id = Id(BUILTIN_FALSE, TyInt())
+    case_expr = CoreCase(
+        scrut=CoreVar(false_id),
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), CoreLit(LitInt(1))),
+            (DefaultAlt(), CoreLit(LitInt(0))),
+        ],
+    )
+    result = ev._eval_expr(case_expr, pmap())
+    assert result == VLit(LitInt(0))
+
+
+def test_eval_ifte_nested():
+    ev = Evaluator(FakeCtx())
+    s1 = _id("Test", "s1", 262, TyInt())
+    s2 = _id("Test", "s2", 263, TyInt())
+    true_id = Id(BUILTIN_TRUE, TyInt())
+    false_id = Id(BUILTIN_FALSE, TyInt())
+    inner_case = CoreCase(
+        scrut=CoreVar(false_id),
+        var=s2,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), CoreLit(LitInt(1))),
+            (DefaultAlt(), CoreLit(LitInt(2))),
+        ],
+    )
+    outer_case = CoreCase(
+        scrut=CoreVar(true_id),
+        var=s1,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_TRUE, tag=TRUE_TAG, vars=[]), inner_case),
+            (DefaultAlt(), CoreLit(LitInt(3))),
+        ],
+    )
+    result = ev._eval_expr(outer_case, pmap())
+    assert result == VLit(LitInt(2))
+
+
+# =============================================================================
+# Ported from elab2: case on list (head/tail destructuring)
+# =============================================================================
+
+def test_eval_case_cons_head():
+    ev = Evaluator(FakeCtx())
+    h = _id("Test", "h", 270, TyInt())
+    t_var = _id("Test", "t", 271, TyInt())
+    s = _id("Test", "s", 272, TyInt())
+    cons_id = Id(BUILTIN_LIST_CONS, TyInt())
+    nil_id = Id(BUILTIN_LIST_NIL, TyInt())
+    scrut = CoreApp(
+        CoreApp(CoreVar(cons_id), CoreLit(LitInt(42))),
+        CoreVar(nil_id),
+    )
+    case_expr = CoreCase(
+        scrut=scrut,
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_LIST_CONS, tag=CONS_TAG, vars=[h, t_var]), CoreVar(h)),
+            (DataAlt(con=BUILTIN_LIST_NIL, tag=NIL_TAG, vars=[]), CoreLit(LitInt(0))),
+        ],
+    )
+    result = ev._eval_expr(case_expr, pmap())
+    assert result == VLit(LitInt(42))
+
+
+def test_eval_case_cons_tail():
+    ev = Evaluator(FakeCtx())
+    h = _id("Test", "h", 273, TyInt())
+    t_var = _id("Test", "t", 274, TyInt())
+    s = _id("Test", "s", 275, TyInt())
+    cons_id = Id(BUILTIN_LIST_CONS, TyInt())
+    nil_id = Id(BUILTIN_LIST_NIL, TyInt())
+    scrut = CoreApp(
+        CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))),
+        CoreVar(nil_id),
+    )
+    case_expr = CoreCase(
+        scrut=scrut,
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_LIST_CONS, tag=CONS_TAG, vars=[h, t_var]), CoreVar(t_var)),
+            (DataAlt(con=BUILTIN_LIST_NIL, tag=NIL_TAG, vars=[]), CoreVar(nil_id)),
+        ],
+    )
+    result = ev._eval_expr(case_expr, pmap())
+    assert isinstance(result, VData)
+    assert result.tag == NIL_TAG
+
+
+# =============================================================================
+# Ported from elab2: primops in let
+# =============================================================================
+
+def test_eval_primop_in_let():
+    ev = Evaluator(FakeCtx())
+    x = _id("Test", "x", 280, TyInt())
+    plus_id = Id(BUILTIN_INT_PLUS, TyInt())
+    mul_id = Id(BUILTIN_INT_MULTIPLY, TyInt())
+    x_val = CoreApp(CoreApp(CoreVar(plus_id), CoreLit(LitInt(1))), CoreLit(LitInt(2)))
+    body = CoreApp(CoreApp(CoreVar(mul_id), CoreVar(x)), CoreLit(LitInt(10)))
+    t = CoreLet(NonRec(x, x_val), body)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(30))
+
+
+# =============================================================================
+# Ported from elab2: partial application
+# =============================================================================
+
+def test_eval_partial_primop_via_let():
+    ev = Evaluator(FakeCtx())
+    add1 = _id("Test", "add1", 290, TyFun(TyInt(), TyInt()))
+    plus_id = Id(BUILTIN_INT_PLUS, TyInt())
+    add1_val = CoreApp(CoreVar(plus_id), CoreLit(LitInt(1)))
+    body = CoreApp(CoreVar(add1), CoreLit(LitInt(2)))
+    t = CoreLet(NonRec(add1, add1_val), body)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(3))
+
+
+def test_eval_partial_primop_passed_to_lambda():
+    ev = Evaluator(FakeCtx())
+    f = _id("Test", "f", 291, TyFun(TyInt(), TyInt()))
+    x = _id("Test", "x", 292, TyInt())
+    plus_id = Id(BUILTIN_INT_PLUS, TyInt())
+    lam = CoreLam(f, CoreApp(CoreVar(f), CoreLit(LitInt(5))))
+    arg = CoreApp(CoreVar(plus_id), CoreLit(LitInt(3)))
+    t = CoreApp(lam, arg)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(8))
+
+
+def test_eval_partial_data_via_let():
+    ev = Evaluator(FakeCtx())
+    mkpair = _id("Test", "mkpair", 293, TyInt())
+    pair_id = Id(BUILTIN_PAIR_MKPAIR, TyInt())
+    mkpair_val = CoreApp(CoreVar(pair_id), CoreLit(LitInt(1)))
+    body = CoreApp(CoreVar(mkpair), CoreLit(LitInt(2)))
+    t = CoreLet(NonRec(mkpair, mkpair_val), body)
+    result = ev._eval_expr(t, pmap())
+    assert isinstance(result, VData)
+    assert result.tag == MKPAIR_TAG
+    assert result.vals == [VLit(LitInt(1)), VLit(LitInt(2))]
+
+
+def test_eval_partial_data_in_case():
+    ev = Evaluator(FakeCtx())
+    a = _id("Test", "a", 294, TyInt())
+    b = _id("Test", "b", 295, TyInt())
+    mk = _id("Test", "mk", 296, TyInt())
+    s = _id("Test", "s", 297, TyInt())
+    plus_id = Id(BUILTIN_INT_PLUS, TyInt())
+    pair_id = Id(BUILTIN_PAIR_MKPAIR, TyInt())
+    mk_val = CoreApp(CoreVar(pair_id), CoreLit(LitInt(10)))
+    app_mk = CoreApp(CoreVar(mk), CoreLit(LitInt(20)))
+    case_body = CoreCase(
+        scrut=app_mk,
+        var=s,
+        res_ty=TyInt(),
+        alts=[
+            (DataAlt(con=BUILTIN_PAIR_MKPAIR, tag=MKPAIR_TAG, vars=[a, b]),
+             CoreApp(CoreApp(CoreVar(plus_id), CoreVar(a)), CoreVar(b))),
+        ],
+    )
+    t = CoreLet(NonRec(mk, mk_val), case_body)
+    result = ev._eval_expr(t, pmap())
+    assert result == VLit(LitInt(30))

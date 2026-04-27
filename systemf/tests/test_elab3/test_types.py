@@ -3,6 +3,7 @@ from __future__ import annotations
 from systemf.elab3.types.ty import (
     BoundTv, Id, LitInt, LitString, MetaTv, Name, Ref,
     TyConApp, TyForall, TyFun, TyInt, TyString, TyVar, subst_ty, zonk_type,
+    get_meta_vars,
 )
 from systemf.elab3.types.tything import AnId, ATyCon, ACon, TyThing
 from systemf.elab3.types.core import CoreLet, CoreLit, CoreTm, CoreVar, NonRec, Rec
@@ -92,3 +93,56 @@ def test_subst_ty_substitutes_multiple_args_in_tyconapp():
     ty = TyConApp(name=either_name, args=[a, b])
     res = subst_ty([a, b], [TyInt(), TyString()], ty)
     assert res == TyConApp(name=either_name, args=[TyInt(), TyString()])
+
+
+# ---
+# subst_ty — ported from elab2 test_types.py
+
+def test_subst_ty_replaces_vars_in_type():
+    a = BoundTv(name=mk_name("a", "Test", 20))
+    ty = TyFun(a, TyInt())
+    res = subst_ty([a], [TyInt()], ty)
+    assert res == TyFun(TyInt(), TyInt())
+
+
+def test_subst_ty_respects_forall_shadowing():
+    a = BoundTv(name=mk_name("a", "Test", 21))
+    forall_ty = TyForall([a], TyFun(a, TyInt()))
+    res = subst_ty([a], [TyInt()], forall_ty)
+    assert res == forall_ty
+
+
+def test_subst_ty_ignores_unrelated_vars():
+    a = BoundTv(name=mk_name("a", "Test", 22))
+    b = BoundTv(name=mk_name("b", "Test", 23))
+    ty = TyFun(a, TyInt())
+    res = subst_ty([b], [TyInt()], ty)
+    assert res == ty
+
+
+def test_subst_ty_substitutes_free_vars_in_nested_forall():
+    a = BoundTv(name=mk_name("a", "Test", 24))
+    b = BoundTv(name=mk_name("b", "Test", 25))
+    forall_ty = TyForall([a], TyFun(b, a))
+    res = subst_ty([b], [TyInt()], forall_ty)
+    assert res == TyForall([a], TyFun(TyInt(), a))
+
+
+def test_subst_ty_arg_forall():
+    a = BoundTv(name=mk_name("a", "Test", 26))
+    b = BoundTv(name=mk_name("b", "Test", 27))
+    ty = TyFun(TyForall([b], TyFun(a, b)), TyFun(a, b))
+    res = subst_ty([a], [TyInt()], ty)
+    assert res == TyFun(TyForall([b], TyFun(TyInt(), b)), TyFun(TyInt(), b))
+
+
+# ---
+# get_meta_vars — ported from elab2 test_types.py
+
+def test_get_meta_vars_excludes_bound():
+    m_bound = MetaTv(uniq=1, level=0, ref=Ref(TyInt()))
+    m_free = MetaTv(uniq=2, level=0, ref=Ref(None))
+    a = BoundTv(name=mk_name("a", "Test", 30))
+    ty = TyFun(TyForall([a], a), m_free)
+    result = get_meta_vars([ty])
+    assert m_free in result

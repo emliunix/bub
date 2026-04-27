@@ -20,7 +20,6 @@ from systemf.surface.types import (
     SurfaceVar,
     SurfaceLit,
     SurfaceAbs,
-    SurfaceTypeAbs,
     SurfaceApp,
     SurfaceCase,
     SurfaceBranch,

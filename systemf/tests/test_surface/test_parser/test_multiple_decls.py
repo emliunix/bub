@@ -299,7 +299,7 @@ class TestElab3SyntaxSample:
                 name="id",
                 type_annotation=SurfaceTypeForall(
                     var="a",
-                    body=SurfaceTypeArrow(arg=SurfaceTypeVar(name="a"), ret=SurfaceTypeVar(name="a"), param_doc=None),
+                    body=SurfaceTypeArrow(arg=SurfaceTypeVar(name="a"), ret=SurfaceTypeVar(name="a"), ),
                 ),
                 body=SurfaceAbs(params=[("x", None)], body=SurfaceVar(name="x")),
                 docstring=None,
@@ -316,9 +316,7 @@ class TestElab3SyntaxSample:
                             ret=SurfaceTypeArrow(
                                 arg=SurfaceTypeVar(name="b"),
                                 ret=SurfaceTypeVar(name="a"),
-                                param_doc=None,
                             ),
-                            param_doc=None,
                         ),
                     ),
                 ),
@@ -338,9 +336,7 @@ class TestElab3SyntaxSample:
                         ret=SurfaceTypeArrow(
                             arg=SurfaceTypeConstructor(name="Maybe", args=[SurfaceTypeVar(name="a")]),
                             ret=SurfaceTypeVar(name="a"),
-                            param_doc=None,
                         ),
-                        param_doc=None,
                     ),
                 ),
                 body=SurfaceAbs(
@@ -376,7 +372,6 @@ class TestElab3SyntaxSample:
                     body=SurfaceTypeArrow(
                         arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar(name="a")]),
                         ret=SurfaceTypeConstructor(name="Int", args=[]),
-                        param_doc=None,
                     ),
                 ),
                 body=SurfaceAbs(
@@ -444,7 +439,6 @@ class TestElab3SyntaxSample:
                 type_annotation=SurfaceTypeArrow(
                     arg=SurfaceTypeConstructor(name="Int", args=[]),
                     ret=SurfaceTypeConstructor(name="Int", args=[]),
-                    param_doc=None,
                 ),
                 body=SurfaceAbs(
                     params=[("n", None)],
@@ -483,7 +477,6 @@ class TestElab3SyntaxSample:
                 type_annotation=SurfaceTypeArrow(
                     arg=SurfaceTypeConstructor(name="String", args=[]),
                     ret=SurfaceTypeConstructor(name="String", args=[]),
-                    param_doc=None,
                 ),
                 body=SurfaceAbs(
                     params=[("name", None)],
