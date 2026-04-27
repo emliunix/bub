@@ -9,15 +9,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import cast
 
-from systemf.elab3.name_gen import NameGeneratorImpl, check_dups
+from systemf.elab3.name_gen import check_dups
 
 from .rename_expr import RenameExpr
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
 from .types import NameGenerator, REPLContext, Module
 from .types.ty import Name, BoundTv
 from .types.ast import (
-    Ann, AnnotName, App, Binding, Case, CaseBranch, ConPat, Expr, ImportDecl,
-    Lam, Let, LitExpr, LitPat, ModuleDecls, Pat, RnDataConDecl, RnDataDecl, RnPrimOpDecl, RnPrimTyDecl, RnTermDecl, Var, VarPat
+    AnnotName, ImportDecl, ModuleDecls,
+    RnDataConDecl, RnDataDecl, RnPrimOpDecl, RnPrimTyDecl, RnTermDecl,
 )
 
 from systemf.surface.types import (
@@ -39,14 +39,14 @@ class RenameResult:
 
 
 class Rename:
+    """
+    Assign unique to names lexically.
+    """
     ctx: REPLContext
     reader_env: ReaderEnv
     mod_name: str
     name_gen: NameGenerator
 
-    """
-    Assign unique to names lexically.
-    """
     def __init__(self, ctx: REPLContext, reader_env: ReaderEnv, mod_name: str, name_gen: NameGenerator):
         self.ctx = ctx
         self.reader_env = reader_env
@@ -87,7 +87,6 @@ class Rename:
         return RenameResult(ModuleDecls(rn_datas, rn_terms, rn_prim_tys, rn_prim_ops))
 
     def do_imports(self, imports: list[ImportDecl]):
-        # TODO: implement import handling
         for imp in imports:
             mod = self.ctx.load(imp.module)
             env = env_from_import_decl(mod, imp)
@@ -141,6 +140,8 @@ class Rename:
         
         when name is builtin, we return from the cache
         otherwise we generate a new name and put it in the cache so later occ_name lookup finds it.
+
+        NOTE: we only put toplevel LHS names, or more specifically, the exported names, into the cache.
         """
         if (n := self.ctx.name_cache.get(self.mod_name, name)) is not None:
             return n

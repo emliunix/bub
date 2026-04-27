@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from .ty import Id, Name, Ty, TyVar
 
 
+@dataclass
+class Metas:
+    pragma: dict[str, str]
+    docs: list[str]
+
+
 class TyThing(ABC):
     pass
 
@@ -16,11 +22,12 @@ class AnId(TyThing):
     """Term-level binding: variable or function."""
     name: Name
     id: Id
-    is_prim: bool = False
+    is_prim: bool
+    metas: Metas | None
 
     @staticmethod
     def create(id: Id, is_prim: bool = False) -> AnId:
-        return AnId(id.name, id, is_prim)
+        return AnId(id.name, id, is_prim, None)
 
 
 @dataclass

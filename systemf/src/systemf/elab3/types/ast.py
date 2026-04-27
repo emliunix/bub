@@ -33,6 +33,7 @@ from collections.abc import Generator
 from dataclasses import dataclass
 
 from .ty import Lit, Name, Ty, TyVar
+from .tything import Metas
 
 
 # =============================================================================

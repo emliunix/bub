@@ -213,7 +213,7 @@ class TypeChecker(Unifier):
     def pat_var(self, var: Name, exp: Expect, cb: CB[R]) -> tuple[XPat, R]:
         ty = self.exp_to_ty(exp)
         id = Id(var, ty)
-        with self.extend_env([(var, AnId(var, id))]):
+        with self.extend_env([(var, AnId.create(id))]):
             # this is why we pass CB[R] for the whole family of pat methods
             return XPatVar(id), cb()
     

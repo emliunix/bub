@@ -223,7 +223,7 @@ class RenameExpr:
         match ty:
             case SurfaceTypeVar(name=name, location=loc):
                 return BoundTv(self.lookup(UnqualName(name)))
-            case SurfaceTypeArrow(arg=arg, ret=ret, param_doc=param_doc):
+            case SurfaceTypeArrow(arg=arg, ret=ret):
                 return TyFun(
                     self.rename_type(arg),
                     self.rename_type(ret),

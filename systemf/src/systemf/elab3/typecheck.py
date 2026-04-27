@@ -49,7 +49,6 @@ class Typecheck:
                     return [bndr]
                 case Rec(bindings):
                     return [bndr for bndr, _ in bindings]
-                case _: raise Exception(f"unexpected binding form {binding}")
 
         ty_env.update((id.name, AnId.create(id))
                       for binding in bindings
@@ -74,16 +73,15 @@ class Typecheck:
 
     def tc_prims(self, ptys: list[RnPrimTyDecl], pops: list[RnPrimOpDecl]) -> TypeEnv:
         env: TypeEnv = {}
-        for pty in ptys:
-            env[pty.name] = APrimTy(pty.name, pty.tyvars)
-        for pop in pops:
-            name, ty = pop.name.name, pop.name.type_ann
-            env[name] = AnId(name, Id(name, ty), is_prim=True)
+        for ty in ptys:
+            env[ty.name] = APrimTy(ty.name, ty.tyvars)
+        for op in pops:
+            name, ty = op.name.name, op.name.type_ann
+            env[name] = AnId.create(Id(name, ty), is_prim=True)
         return env
 
     def tc_valbinds(self, valbinds: list[RnTermDecl]) -> list[core.Binding]:
         groups, _ = self.typecheck_expr.bindings([Binding(b.name, b.expr) for b in valbinds], lambda: None)
-        result = {}
         bs = [
             ds_binding(group)
             for group in groups
@@ -98,5 +96,3 @@ def zonk_binding(binding: core.Binding) -> core.Binding:
         case Rec(bindings):
             new_bindings = [(Id(bndr.name, zonk_type(bndr.ty)), expr) for bndr, expr in bindings]
             return Rec(new_bindings)
-        case _:
-            raise Exception(f"unexpected binding form {binding}")
