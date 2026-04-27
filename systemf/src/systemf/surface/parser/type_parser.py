@@ -99,7 +99,7 @@ def match_inline_docstring() -> P[str | None]:
         if index >= len(tokens):
             return Result.success(index, None)
         token = tokens[index]
-        if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.INLINE:
+        if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.FOLLOWING:
             return Result.success(index + 1, token.content)
         return Result.success(index, None)
 
@@ -118,7 +118,7 @@ def match_inline_docstring_strict() -> P[str]:
         if index >= len(tokens):
             return Result.failure(index, "expected inline docstring")
         token = tokens[index]
-        if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.INLINE:
+        if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.FOLLOWING:
             return Result.success(index + 1, token.content)
         return Result.failure(index, "expected inline docstring")
 
@@ -389,13 +389,13 @@ def type_forall_parser(constraint: ValidIndent = None) -> P[SurfaceType]:
         var_tokens = yield match_token(IdentifierToken).at_least(1)
         yield match_token(DotToken)
 
-        # Propagate constraint so that the forall body respects layout.
         body = yield type_parser(constraint)
 
-        # Build nested foralls right-to-left.
-        result = body
-        for var_token in reversed(var_tokens):
-            result = SurfaceTypeForall(var=var_token.value, body=result, location=loc)
+        result = SurfaceTypeForall(
+            vars=[vt.value for vt in var_tokens],
+            body=body,
+            location=loc,
+        )
 
         return result
 

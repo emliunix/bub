@@ -10,7 +10,8 @@ from .ty import Id, Name, Ty, TyVar
 @dataclass
 class Metas:
     pragma: dict[str, str]
-    docs: list[str]
+    doc: str | None
+    arg_docs: list[str | None]
 
 
 class TyThing(ABC):
@@ -26,8 +27,8 @@ class AnId(TyThing):
     metas: Metas | None
 
     @staticmethod
-    def create(id: Id, is_prim: bool = False) -> AnId:
-        return AnId(id.name, id, is_prim, None)
+    def create(id: Id, is_prim: bool = False, metas: Metas | None = None) -> AnId:
+        return AnId(id.name, id, is_prim, metas)
 
 
 @dataclass

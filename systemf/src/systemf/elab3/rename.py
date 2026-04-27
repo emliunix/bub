@@ -5,11 +5,12 @@ rename all names with a unique id.
 """
 import itertools
 
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from typing import cast
 
 from systemf.elab3.name_gen import check_dups
+from systemf.elab3.types.tything import Metas
 
 from .rename_expr import RenameExpr
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
@@ -28,6 +29,10 @@ from systemf.surface.types import (
     SurfacePrimOpDecl,
     SurfacePrimTypeDecl,
     SurfaceTermDeclaration,
+    SurfaceType,
+    SurfaceTypeArrow,
+    SurfaceTypeForall,
+    SurfaceTypeVar,
 )
 
 from systemf.utils.location import Location
@@ -110,13 +115,18 @@ class Rename:
 
     def rename_rhs_data(self, lhs_res: RnLhsDataResult) -> RnDataDecl:
         var_names = self.new_lhs_names(lhs_res.decl.params, lhs_res.decl.location)
-        rn_data = RnDataDecl(name=lhs_res.name, tyvars=[BoundTv(v) for v in var_names], constructors=[])
+        rn_data = RnDataDecl(
+            name=lhs_res.name,
+            tyvars=[BoundTv(v) for v in var_names],
+            constructors=[],
+            metas=None,
+        )
 
         def _go(con: SurfaceConstructorInfo, con_name: Name) -> RnDataConDecl:
             tys = [
                 self.rename_expr.rename_forall_type(var_names, arg)
                 for arg in con.args]
-            return RnDataConDecl(con_name, rn_data, tys)
+            return RnDataConDecl(con_name, rn_data, tys, None)
 
         for con, con_name in zip(lhs_res.decl.constructors, lhs_res.datacons):
             rn_data.constructors.append(_go(con, con_name))
@@ -131,7 +141,8 @@ class Rename:
         term = self.rename_expr.rename_expr(lhs_res.decl.body)
         return RnTermDecl(
             name=AnnotName(lhs_res.name, term_ty) if term_ty else lhs_res.name,
-            expr=term
+            expr=term,
+            metas=None,
         )
     
     def new_lhs_name(self, name: str, loc: Location | None) -> Name:
@@ -155,14 +166,22 @@ class Rename:
 
     def rename_prim_ty(self, pt: SurfacePrimTypeDecl, name: Name) -> RnPrimTyDecl:
         var_names = self.new_lhs_names(pt.params, pt.location)
-        return RnPrimTyDecl(name, [BoundTv(v) for v in var_names])
+        return RnPrimTyDecl(
+            name=name,
+            tyvars=[BoundTv(v) for v in var_names],
+            metas=None,
+        )
 
     def rename_prim_op(self, op: SurfacePrimOpDecl, name: Name) -> RnPrimOpDecl:
         ty = op.type_annotation
         # FIX: at parser level, make types requried
         if ty is None:
             raise Exception(f"primitive operator {op.name} must have a type annotation at {op.location}")
-        return RnPrimOpDecl(AnnotName(name, self.rename_expr.rename_type(ty)))
+        metas = Metas(pragma=op.pragma or {}, doc=op.docstring, arg_docs=funty_to_argdocs(ty))
+        return RnPrimOpDecl(
+            name=AnnotName(name, self.rename_expr.rename_type(ty)),
+            metas=metas,
+        )
 
 
 @dataclass
@@ -203,6 +222,7 @@ def split_ast(
             case _:
                 raise Exception(f"unexpected declaration: {decl}")
     return datas, terms, prim_tys, prim_ops
+
 
 DEFAULT_IMPORTS = [
     ("builtins", ImportDecl(
@@ -249,3 +269,34 @@ def env_from_local_names(names: Iterable[Name]) -> ReaderEnv:
         LocalRdrElt(name=name)
         for name in names
     ])
+
+
+def funty_to_argdocs(ty: SurfaceType) -> list[str | None]:
+    """
+    Extract argument documentation from a function type.
+    """
+    def _go(ty: SurfaceType) -> Generator[str | None, None, None]:
+        match ty:
+            case SurfaceTypeArrow(arg=arg_ty, ret=res_ty):
+                yield arg_ty.docstring
+                yield from _go(res_ty)
+            case SurfaceTypeForall(body=body):
+                yield from _go(body)
+            case ty:
+                yield ty.docstring
+    arg_docs = list(_go(ty))
+    return arg_docs
+
+
+def tyvars_to_argdocs(tyvars: list[SurfaceTypeVar]) -> list[str | None]:
+    """
+    Extract argument documentation from a list of type variables.
+    """
+    return [tv.docstring for tv in tyvars]
+
+
+def datacon_to_argdocs(con: SurfaceConstructorInfo) -> list[str | None]:
+    """
+    Extract argument documentation from a data constructor.
+    """
+    return [arg.docstring for arg in con.args]

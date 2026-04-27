@@ -9,6 +9,8 @@ Modules:
 - helpers: Parser combinators (block, terminator, etc.)
 - declarations: Declaration parsers (data, let, etc.) and type parser
 - expressions: Expression parsers (case, lambda, etc.)
+
+NOTE: the whole parser is AI generated.
 """
 
 from __future__ import annotations

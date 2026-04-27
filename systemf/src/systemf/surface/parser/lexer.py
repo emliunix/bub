@@ -86,7 +86,7 @@ class Lexer:
         ("NEWLINE", r"\n|\r\n?"),
         # Docstrings (-- | or -- ^) - single line only, no merging
         (DocstringType.PRECEDING, r"--\s*\|([^\n]*)"),
-        (DocstringType.INLINE, r"--\s*\^([^\n]*)"),
+        (DocstringType.FOLLOWING, r"--\s*\^([^\n]*)"),
         # Regular comments
         ("COMMENT", r"--[^\n]*"),
         # Keywords
@@ -304,7 +304,7 @@ class Lexer:
             # value is like "-- | some content", keep "| some content"
             content = value[2:].strip() if len(value) > 2 else ""
             return DocstringToken(docstring_type=token_type, content=content, location=loc)
-        elif token_type == DocstringType.INLINE:
+        elif token_type == DocstringType.FOLLOWING:
             # Keep the full content including '^' marker - post-pass will handle it
             content = value[2:].strip() if len(value) > 2 else ""
             return DocstringToken(docstring_type=token_type, content=content, location=loc)
@@ -523,7 +523,7 @@ def process_comments(tokens: list[TokenBase]) -> list[TokenBase]:
 
                 # Create the docstring token
                 content = "\n".join(lines)
-                doc_type = DocstringType.PRECEDING if marker == "|" else DocstringType.INLINE
+                doc_type = DocstringType.PRECEDING if marker == "|" else DocstringType.FOLLOWING
                 result.append(
                     DocstringToken(docstring_type=doc_type, content=content, location=location)
                 )
@@ -557,6 +557,6 @@ def strip_comments_and_whitespace(tokens: list[TokenBase]) -> list[TokenBase]:
         if not isinstance(t, CommentToken)
         and (
             not isinstance(t, DocstringToken)
-            or t.docstring_type in (DocstringType.PRECEDING, DocstringType.INLINE)
+            or t.docstring_type in (DocstringType.PRECEDING, DocstringType.FOLLOWING)
         )
     ]

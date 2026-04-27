@@ -298,7 +298,7 @@ class TestElab3SyntaxSample:
             SurfaceTermDeclaration(
                 name="id",
                 type_annotation=SurfaceTypeForall(
-                    var="a",
+                    vars=["a"],
                     body=SurfaceTypeArrow(arg=SurfaceTypeVar(name="a"), ret=SurfaceTypeVar(name="a"), ),
                 ),
                 body=SurfaceAbs(params=[("x", None)], body=SurfaceVar(name="x")),
@@ -308,15 +308,12 @@ class TestElab3SyntaxSample:
             SurfaceTermDeclaration(
                 name="const",
                 type_annotation=SurfaceTypeForall(
-                    var="a",
-                    body=SurfaceTypeForall(
-                        var="b",
-                        body=SurfaceTypeArrow(
-                            arg=SurfaceTypeVar(name="a"),
-                            ret=SurfaceTypeArrow(
-                                arg=SurfaceTypeVar(name="b"),
-                                ret=SurfaceTypeVar(name="a"),
-                            ),
+                    vars=["a", "b"],
+                    body=SurfaceTypeArrow(
+                        arg=SurfaceTypeVar(name="a"),
+                        ret=SurfaceTypeArrow(
+                            arg=SurfaceTypeVar(name="b"),
+                            ret=SurfaceTypeVar(name="a"),
                         ),
                     ),
                 ),
@@ -330,7 +327,7 @@ class TestElab3SyntaxSample:
             SurfaceTermDeclaration(
                 name="fromMaybe",
                 type_annotation=SurfaceTypeForall(
-                    var="a",
+                    vars=["a"],
                     body=SurfaceTypeArrow(
                         arg=SurfaceTypeVar(name="a"),
                         ret=SurfaceTypeArrow(
@@ -368,7 +365,7 @@ class TestElab3SyntaxSample:
             SurfaceTermDeclaration(
                 name="length",
                 type_annotation=SurfaceTypeForall(
-                    var="a",
+                    vars=["a"],
                     body=SurfaceTypeArrow(
                         arg=SurfaceTypeConstructor(name="List", args=[SurfaceTypeVar(name="a")]),
                         ret=SurfaceTypeConstructor(name="Int", args=[]),

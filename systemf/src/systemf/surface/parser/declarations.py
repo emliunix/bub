@@ -59,7 +59,7 @@ def skip_inline_docstrings() -> P[None]:
         i = index
         while i < len(tokens):
             token = tokens[i]
-            if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.INLINE:
+            if isinstance(token, DocstringToken) and token.docstring_type == DocstringType.FOLLOWING:
                 i += 1
             else:
                 break
@@ -610,7 +610,6 @@ def top_decl_parser() -> P[list[RawDecl]]:
 
 __all__ = [
     # Token matching
-    "match_token",
     "match_keyword",
     "match_symbol",
     "match_ident",

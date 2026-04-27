@@ -180,6 +180,7 @@ class RnDataConDecl:
     name: Name
     tycon: RnDataDecl
     fields: list[Ty]
+    metas: Metas | None
 
 
 @dataclass
@@ -188,6 +189,7 @@ class RnDataDecl:
     name: Name
     tyvars: list[TyVar]
     constructors: list[RnDataConDecl]
+    metas: Metas | None
 
 
 @dataclass
@@ -195,17 +197,20 @@ class RnTermDecl:
     """Parsed term declaration (str names)."""
     name: Name | AnnotName
     expr: Expr
+    metas: Metas | None
 
 
 @dataclass
 class RnPrimTyDecl:
     name: Name
     tyvars: list[TyVar]
+    metas: Metas | None
 
 
 @dataclass
 class RnPrimOpDecl:
     name: AnnotName
+    metas: Metas | None
 
 
 # =============================================================================

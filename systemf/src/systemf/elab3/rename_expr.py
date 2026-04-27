@@ -228,10 +228,10 @@ class RenameExpr:
                     self.rename_type(arg),
                     self.rename_type(ret),
                 )
-            case SurfaceTypeForall(var=var, body=body, location=loc):
-                name = self.new_name(var, loc)
-                body_ = self.rename_forall_type([name], body)
-                return TyForall([BoundTv(name)], body_)
+            case SurfaceTypeForall(vars=vars, body=body, location=loc):
+                names = [self.new_name(v, loc) for v in vars]
+                body_ = self.rename_forall_type(names, body)
+                return TyForall([BoundTv(n) for n in names], body_)
             case SurfaceTypeConstructor(name=name, args=args):
                 match name:
                     case "Int":

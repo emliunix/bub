@@ -297,7 +297,7 @@ class DocstringType:
     """Docstring type constants."""
 
     PRECEDING = "DOCSTRING_PRECEDING"
-    INLINE = "DOCSTRING_INLINE"
+    FOLLOWING = "DOCSTRING_FOLLOWING"
 
 
 class TokenType:

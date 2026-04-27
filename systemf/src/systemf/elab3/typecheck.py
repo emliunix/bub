@@ -77,7 +77,7 @@ class Typecheck:
             env[ty.name] = APrimTy(ty.name, ty.tyvars)
         for op in pops:
             name, ty = op.name.name, op.name.type_ann
-            env[name] = AnId.create(Id(name, ty), is_prim=True)
+            env[name] = AnId.create(Id(name, ty), is_prim=True, metas=op.metas)
         return env
 
     def tc_valbinds(self, valbinds: list[RnTermDecl]) -> list[core.Binding]:

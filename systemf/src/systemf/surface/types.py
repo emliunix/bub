@@ -83,14 +83,14 @@ class SurfaceTypeArrow(SurfaceType):
 
 @dataclass(frozen=True, kw_only=True)
 class SurfaceTypeForall(SurfaceType):
-    """Polymorphic type: forall a. body."""
+    """Polymorphic type: forall a b c. body."""
 
-    var: str
+    vars: list[str]
     body: SurfaceType
 
     @override
     def __str__(self) -> str:
-        return f"forall {self.var}. {self.body}"
+        return f"forall {' '.join(self.vars)}. {self.body}"
 
 
 @dataclass(frozen=True, kw_only=True)
