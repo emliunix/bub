@@ -137,6 +137,41 @@ def test_subst_ty_arg_forall():
 
 
 # ---
+# quantify — ported from elab2 test_tyck.py
+
+def test_quantify_replaces_meta_vars():
+    from systemf.elab3.typecheck_expr import TypeChecker
+    from systemf.elab3.types.ty import MetaTv
+    from systemf.utils.uniq import Uniq
+
+    class FakeCtx:
+        def __init__(self):
+            self.uniq = Uniq(100)
+
+    class FakeTcCtx(TypeChecker):
+        def __init__(self):
+            ctx = FakeCtx()
+            super().__init__(ctx, "Test", None, None)
+
+        def lookup_gbl(self, name):
+            raise KeyError(name)
+
+    ctx = FakeTcCtx()
+    m1 = ctx.make_meta()
+    m2 = ctx.make_meta()
+    ty = TyFun(m1, TyFun(TyInt(), m2))
+    sks, tys = ctx.quantify([m1, m2], [ty])
+
+    assert len(sks) == 2
+    a, b = sks
+    expected = TyForall([a, b], TyFun(a, TyFun(TyInt(), b)))
+    assert tys[0] == expected
+    # Meta refs should be set to skolems
+    assert m1.ref.get() == a
+    assert m2.ref.get() == b
+
+
+# ---
 # get_meta_vars — ported from elab2 test_types.py
 
 def test_get_meta_vars_excludes_bound():

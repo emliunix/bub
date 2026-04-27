@@ -55,6 +55,16 @@ def _ctx() -> FakeUnifier:
     return FakeUnifier()
 
 
+class FakeCtx:
+    def __init__(self):
+        self.uniq = Uniq(6000)
+
+
+class FakeNameGen:
+    def new_name(self, name, loc=None):
+        return Name("PuttingTest", name, FakeCtx().uniq.make_uniq(), loc)
+
+
 def _bound(name: str) -> BoundTv:
     return BoundTv(name=Name("PuttingTest", name, hash(name) % 10000))
 
@@ -263,6 +273,65 @@ def test_subs_check_spec_paper():
     assert wrap == wp_fun(INT, WP_HOLE, WpTyApp(INT))
 
 
+def test_subs_check_spec_nested():
+    a = _bound("a")
+    b = _bound("b")
+    poly_fun = TyForall([a], TyForall([b], TyFun(a, b)))
+    mono_fun = TyFun(INT, STRING)
+
+    ctx = _ctx()
+    wrap = ctx.subs_check(poly_fun, mono_fun)
+    wrap = zonk_wrapper(wrap)
+    assert wrap == wp_compose(wp_fun(INT, WP_HOLE, WP_HOLE), wp_compose(WpTyApp(STRING), WpTyApp(INT)))
+
+
+def test_subs_check_fun_identity():
+    fun_ty = TyFun(INT, STRING)
+
+    ctx = _ctx()
+    wrap = ctx.subs_check(fun_ty, fun_ty)
+    wrap = zonk_wrapper(wrap)
+    assert wrap == WP_HOLE
+
+
+def test_subs_check_fun_paper():
+    a = _bound("a")
+    poly_arg = TyForall([a], TyFun(a, a))
+    lhs = TyFun(TyFun(INT, INT), INT)
+    rhs = TyFun(poly_arg, INT)
+
+    ctx = _ctx()
+    wrap = ctx.subs_check(lhs, rhs)
+    wrap = zonk_wrapper(wrap)
+    assert wrap == wp_fun(poly_arg, WpTyApp(INT), WP_HOLE)
+
+
+def test_subs_check_deep_skol_prenex_fwd():
+    a = _bound("a")
+    b = _bound("b")
+    lhs = TyForall([a], TyForall([b], TyFun(a, TyFun(b, b))))
+    rhs = TyForall([a], TyFun(a, TyForall([b], TyFun(b, b))))
+
+    ctx = _ctx()
+    wrap = ctx.subs_check(lhs, rhs)
+    wrap = zonk_wrapper(wrap)
+    # Wrapper is a composition of skolemization, subsumption, and instantiation
+    assert isinstance(wrap, WpCompose)
+
+
+def test_subs_check_deep_skol_prenex_rev():
+    a = _bound("a")
+    b = _bound("b")
+    lhs = TyForall([a], TyFun(a, TyForall([b], TyFun(b, b))))
+    rhs = TyForall([a], TyForall([b], TyFun(a, TyFun(b, b))))
+
+    ctx = _ctx()
+    wrap = ctx.subs_check(lhs, rhs)
+    wrap = zonk_wrapper(wrap)
+    # Wrapper is a composition of skolemization, subsumption, and instantiation
+    assert isinstance(wrap, WpCompose)
+
+
 # =============================================================================
 # Instantiation Tests
 # =============================================================================
@@ -283,3 +352,24 @@ def test_instantiate_mono():
     ty, wrap = ctx.instantiate(INT)
     assert ty == INT
     assert wrap == WP_HOLE
+
+
+def test_inst_check_contra():
+    from systemf.elab3.typecheck_expr import TypeChecker
+    from systemf.elab3.types.tc import Check
+
+    class FakeTcCtx(TypeChecker):
+        def __init__(self):
+            super().__init__(FakeCtx(), "PuttingTest", FakeNameGen())
+
+        def lookup_gbl(self, name):
+            raise KeyError(name)
+
+    ctx = FakeTcCtx()
+    a = _bound("a")
+    ty = TyForall([a], TyFun(a, a))
+    ty2 = TyFun(INT, INT)
+
+    wrap = ctx.inst(ty, Check(ty2))
+    wrap = zonk_wrapper(wrap)
+    assert wrap == WpTyApp(INT)
