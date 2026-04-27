@@ -293,8 +293,10 @@ The primitive system architecture positions elab3 as a host language for:
 
 ### Next Steps
 
-1. **LLM Agent Synthesizer**: Implement `LLMSynth.get_primop()` to call an LLM API, generate code, and evaluate it in a forked session
-2. **More Built-in Types**: Add `Array`, `Map`, `IO` primitive types with corresponding operations
-3. **Error Handling**: Improve error messages in the typechecker and evaluator
-4. **Performance**: Profile and optimize the evaluator for larger programs
-5. **Documentation**: Add user-facing documentation for the surface language syntax
+1. **Clean Up Codebase**: Remove experimental and legacy code
+2. **Recover Pragma and Docstring Passing**: Restore pragma and docstring support in the pipeline. See `analysis/DOCSTRING_RECOVERY_BLUEPRINT.md` for the new precedence-based docstring model that attaches docs to type nodes rather than arrow nodes.
+3. **LLM Agent Synthesizer**: Implement `LLMSynth.get_primop()` to call an LLM API, generate code, and evaluate it in a forked session
+4. **More Built-in Types**: Add `Array`, `Map`, `IO` primitive types with corresponding operations
+5. **Error Handling**: Improve error messages in the typechecker and evaluator
+6. **Performance**: Profile and optimize the evaluator for larger programs
+7. **Documentation**: Add user-facing documentation for the surface language syntax
