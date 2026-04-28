@@ -15,10 +15,10 @@ not :: Bool -> Bool = \b ->
     False -> True
 
 -- | Factorial
--- factorial :: Int -> Int = \n ->
---   case n of
---     0 -> 1
---     m -> m * factorial (m - 1)
+factorial :: Int -> Int = \n ->
+  case n of
+    0 -> 1
+    _ -> n * factorial (n - 1)
 
 -- | Greeting function with literal pattern
 greet :: String -> String = \name ->

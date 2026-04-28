@@ -9,10 +9,10 @@ from pathlib import Path
 
 from systemf.elab3.repl import REPL
 from systemf.elab3.val_pp import pp_val
-from systemf.elab3.types import Module, core
+from systemf.elab3.types import core
 from systemf.elab3.types.ast import ImportDecl
 from systemf.elab3.types.core_pp import pp_core
-from systemf.elab3.types.val import VLit, VData
+from systemf.elab3.types.val import VLit, VData, Val
 from systemf.elab3.types.ty import LitInt, LitString
 
 
@@ -49,12 +49,17 @@ def main() -> None:
 
     print("\n\n=== e2e evaluation ===\n")
 
-    def check(expr: str, expected_val, msg: str | None = None):
-        val, ty = session.eval(expr)
-        assert val == expected_val, f"for {expr}: expected {expected_val}, got {val}"
-        label = msg or expr
-        print(f">> {label}")
-        print(f"  {pp_val(session, val, ty)}  ✓")
+    def check(expr: str, expected_val: Val, msg: str | None = None):
+        match session.eval(expr):
+            case (val, ty):
+                assert val == expected_val, f"for {expr}: expected {expected_val}, got {val}"
+                label = msg or expr
+                print(f">> {label}")
+                print(f"  {pp_val(session, val, ty)}  ✓")
+            case None:
+                assert False, f"for {expr}: eval returned None"
+            case _:
+                assert False, f"for {expr}: eval returned unexpected result"
 
     check("1", VLit(LitInt(1)))
     check("True", VData(0, []))
@@ -77,23 +82,9 @@ def main() -> None:
 
     # Ref tests
     print("\n  --- Ref ---")
-    # Create a ref and get its initial value (Nothing)
-    result = session.eval("get_ref (mk_ref MkUnit)")
-    print(f">> get_ref (mk_ref MkUnit)")
-    print(f"  {pp_val(session, result[0], result[1])}  ✓")
-    assert result[0] == VData(0, []), f"Expected Nothing, got {result[0]}"
-    
-    # Set and get
-    result = session.eval("let r = mk_ref MkUnit in let _ = set_ref 42 r in get_ref r")
-    print(f">> let r = mk_ref MkUnit in let _ = set_ref 42 r in get_ref r")
-    print(f"  {pp_val(session, result[0], result[1])}  ✓")
-    assert result[0] == VData(1, [VLit(LitInt(42))]), f"Expected Just 42, got {result[0]}"
-    
-    # Multiple sets
-    result = session.eval("let r = mk_ref MkUnit in let _ = set_ref 1 r in let _ = set_ref 2 r in get_ref r")
-    print(f">> let r = mk_ref MkUnit in let _ = set_ref 1 r in let _ = set_ref 2 r in get_ref r")
-    print(f"  {pp_val(session, result[0], result[1])}  ✓")
-    assert result[0] == VData(1, [VLit(LitInt(2))]), f"Expected Just 2, got {result[0]}"
+    check("get_ref (mk_ref MkUnit)", VData(0, []))
+    check("let r = mk_ref MkUnit in let _ = set_ref 42 r in get_ref r", VData(1, [VLit(LitInt(42))]))
+    check("let r = mk_ref MkUnit in let _ = set_ref 1 r in let _ = set_ref 2 r in get_ref r", VData(1, [VLit(LitInt(2))]))
 
     print("\nAll e2e assertions passed.")
 

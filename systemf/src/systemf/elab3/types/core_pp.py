@@ -56,14 +56,12 @@ def _pp(tm: CoreTm, depth: int, width: int) -> list[str]:
         case CoreLam(param, body):
             ty_str = _ty_str(param.ty)
             return [
-                f"{ind}\\{param.name.surface} :: {ty_str} ->",
-                *_pp(body, depth + 1, width),
+                *join_expr_lines(f"{ind}\\{param.name.surface} :: {ty_str} -> ", _pp(body, depth + 1, width)),
             ]
 
         case CoreTyLam(var, body):
             return [
-                f"{ind}/\\{_ty_str(var)}.",
-                *_pp(body, depth + 1, width),
+                *join_expr_lines(f"{ind}/\\{_ty_str(var)}. ", _pp(body, depth + 1, width)),
             ]
 
         case CoreApp(fun, arg):
@@ -78,19 +76,15 @@ def _pp(tm: CoreTm, depth: int, width: int) -> list[str]:
 
         case CoreLet(NonRec(binder, expr), body):
             return [
-                f"{ind}let {binder.name.surface} =",
-                *_pp(expr, depth + 1, width),
-                f"{ind}in",
-                *_pp(body, depth + 1, width),
+                *join_expr_lines(f"{ind}let {binder.name.surface} = ", _pp(expr, depth + 1, width)),
+                *join_expr_lines(f"{ind}in ", _pp(body, depth + 1, width)),
             ]
 
         case CoreLet(Rec(bindings), body):
             lines = [f"{ind}letrec"]
             for b, e in bindings:
-                lines.append(f"{ind}{' ' * width}{b.name.surface} =")
-                lines.extend(_pp(e, depth + 2, width))
-            lines.append(f"{ind}in")
-            lines.extend(_pp(body, depth + 1, width))
+                lines.extend(join_expr_lines(f"{ind}{' ' * width}{b.name.surface} = ", _pp(e, depth + 2, width)))
+            lines.extend(join_expr_lines(f"{ind}in ", _pp(body, depth + 1, width)))
             return lines
 
         case CoreCase(scrut, var, res_ty, alts):
@@ -102,12 +96,7 @@ def _pp(tm: CoreTm, depth: int, width: int) -> list[str]:
                 sep = "|" if i > 0 else "{"
                 alt_str = _pp_alt(alt)
                 rhs_lines = _pp(rhs, depth + 3, width)
-                rhs_text = rhs_lines[0].lstrip() if rhs_lines else ""
-                if len(rhs_lines) == 1:
-                    lines.append(f"{inner_ind} {sep} {alt_str} -> {rhs_text}")
-                else:
-                    lines.append(f"{inner_ind} {sep} {alt_str} -> {rhs_text}")
-                    lines.extend(rhs_lines[1:])
+                lines.extend(join_expr_lines(f"{inner_ind} {sep} {alt_str} -> ", rhs_lines))
             lines.append(f"{inner_ind} }}")
             return lines
 
@@ -182,3 +171,11 @@ def scrut_id(tm: CoreTm) -> str:
             return id.name.surface
         case _:
             return "..."
+
+
+def join_expr_lines(line: str, expr_lines: list[str]) -> list[str]:
+    """Join the first line of an expression with a preceding line, if possible."""
+    if not expr_lines:
+        return [line]
+    first_line = expr_lines[0].lstrip()
+    return [f"{line}{first_line}"] + expr_lines[1:]
