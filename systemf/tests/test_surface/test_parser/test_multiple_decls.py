@@ -270,7 +270,7 @@ class TestElab3SyntaxSample:
             ),
             SurfaceDataDeclaration(
                 name="Maybe",
-                params=["a"],
+                params=[SurfaceTypeVar(name="a")],
                 constructors=[
                     SurfaceConstructorInfo(name="Nothing", args=[], docstring=None),
                     SurfaceConstructorInfo(name="Just", args=[SurfaceTypeVar(name="a")], docstring=None),
@@ -280,7 +280,7 @@ class TestElab3SyntaxSample:
             ),
             SurfaceDataDeclaration(
                 name="List",
-                params=["a"],
+                params=[SurfaceTypeVar(name="a")],
                 constructors=[
                     SurfaceConstructorInfo(name="Nil", args=[], docstring=None),
                     SurfaceConstructorInfo(

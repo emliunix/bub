@@ -69,7 +69,7 @@ def error(args: list[Val]) -> Val:
         
 
 def set_ref(args: list[Val]) -> Val:
-    new_val, ref = args
+    ref, new_val = args
     cast(VPrim, ref).val[0] = new_val
     return bi.UNIT_VAL
 
@@ -77,15 +77,14 @@ def set_ref(args: list[Val]) -> Val:
 def get_ref(args: list[Val]) -> Val:
     ref = args[0]
     match ref:
-        case VPrim(val=[None]):
-            return bi.NOTHING_VAL
         case VPrim(val=[val]):
-            return bi.JUST_VAL(val)
+            return val
         case _: raise Exception(f"Invalid ref value: {ref}")
 
 
 def mk_ref(args: list[Val]) -> Val:
-    return VPrim([None])
+    (initial,) = args
+    return VPrim([initial])
 
 
 # --- int-relational primops (return True/False, received from caller) ---

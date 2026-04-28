@@ -78,12 +78,12 @@ def pp_tything(thing: TyThing) -> str:
     match thing:
         case AnId(name=name, id=id, is_prim=is_prim, metas=metas):
             return _pp_binding(name.surface, id.ty, is_prim, metas)
-        case ATyCon(name=name, tyvars=tyvars, constructors=cons):
-            return _pp_data(name.surface, tyvars, cons)
-        case ACon(name=name, field_types=fields):
-            return _pp_acon(name.surface, fields)
-        case APrimTy(name=name, tyvars=tyvars):
-            return _pp_prim_type(name.surface, tyvars)
+        case ATyCon(name=name, tyvars=tyvars, constructors=cons, metas=metas):
+            return _pp_data(name.surface, tyvars, cons, metas)
+        case ACon(name=name, field_types=fields, metas=metas):
+            return _pp_acon(name.surface, fields, metas)
+        case APrimTy(name=name, tyvars=tyvars, metas=metas):
+            return _pp_prim_type(name.surface, tyvars, metas)
         case _:
             return f"<unknown TyThing: {type(thing).__name__}>\n"
 
@@ -126,41 +126,138 @@ def _pp_binding(name: str, ty: Ty, is_prim: bool, metas: Metas | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _pp_data(name: str, tyvars: list[TyVar], constructors: list[ACon]) -> str:
-    var_str = " ".join(_ty_repr(v, 0) for v in tyvars) if tyvars else ""
-    header = f"data {name}"
-    if var_str:
-        header += f" {var_str}"
+def _pp_data(name: str, tyvars: list[TyVar], constructors: list[ACon], metas: Metas | None) -> str:
+    lines: list[str] = []
+    lines.extend(_pp_doc_lines(metas.doc if metas else None))
+    lines.extend(_pp_pragma_lines(metas))
+
+    arg_docs = (metas.arg_docs if metas else None) or []
+
+    if not tyvars:
+        header = f"data {name}"
+    elif not _has_arg_docs(metas):
+        var_str = " ".join(_ty_repr(v, 0) for v in tyvars)
+        header = f"data {name} {var_str}"
+    else:
+        first_var = tyvars[0]
+        first_doc = arg_docs[0] if arg_docs else None
+        first_s = _ty_repr(first_var, 0)
+        first_doc_s = f" -- ^ {first_doc}" if first_doc else ""
+        lines.append(f"data {name} {first_s}{first_doc_s}")
+
+        for i, tv in enumerate(tyvars[1:], start=1):
+            doc = arg_docs[i] if i < len(arg_docs) else None
+            var_s = _ty_repr(tv, 0)
+            doc_s = f" -- ^ {doc}" if doc else ""
+            lines.append(f"    {var_s}{doc_s}")
+
+        header = None
 
     if not constructors:
-        return header + "\n"
+        if header:
+            lines.append(header)
+        return "\n".join(lines) + "\n"
 
-    lines: list[str] = [header]
-    if constructors:
-        lines.append(f"    = {_pp_acon_inline(constructors[0])}")
-        for con in constructors[1:]:
-            lines.append(f"    | {_pp_acon_inline(con)}")
+    if header:
+        lines.append(header)
+
+    # Constructors
+    first_con_lines = _pp_acon_inline(constructors[0])
+    lines.append(f"    = {first_con_lines[0]}")
+    for cl in first_con_lines[1:]:
+        lines.append(f"      {cl}")
+
+    for con in constructors[1:]:
+        con_lines = _pp_acon_inline(con)
+        lines.append(f"    | {con_lines[0]}")
+        for cl in con_lines[1:]:
+            lines.append(f"      {cl}")
 
     return "\n".join(lines) + "\n"
 
 
-def _pp_acon_inline(con: ACon) -> str:
-    """Format a data constructor and its fields on one line."""
-    parts = [con.name.surface]
-    for ft in con.field_types:
-        parts.append(_ty_str_arg(ft))
-    return " ".join(parts)
+def _pp_acon_inline(con: ACon) -> list[str]:
+    """Format a data constructor and its fields, returning list of lines."""
+    lines: list[str] = []
+    metas = con.metas
+    lines.extend(_pp_doc_lines(metas.doc if metas else None))
+    lines.extend(_pp_pragma_lines(metas))
+
+    fields = con.field_types
+    arg_docs = (metas.arg_docs if metas else None) or []
+
+    if not fields or not _has_arg_docs(metas):
+        parts = [con.name.surface]
+        for ft in fields:
+            parts.append(_ty_str_arg(ft))
+        lines.append(" ".join(parts))
+    else:
+        first_field = fields[0]
+        first_doc = arg_docs[0] if arg_docs else None
+        first_s = _ty_str_arg(first_field)
+        first_doc_s = f" -- ^ {first_doc}" if first_doc else ""
+        lines.append(f"{con.name.surface} {first_s}{first_doc_s}")
+
+        for i, ft in enumerate(fields[1:], start=1):
+            doc = arg_docs[i] if i < len(arg_docs) else None
+            field_s = _ty_str_arg(ft)
+            doc_s = f" -- ^ {doc}" if doc else ""
+            lines.append(f"    {field_s}{doc_s}")
+
+    return lines
 
 
-def _pp_acon(name: str, fields: list[Ty]) -> str:
-    parts = [name]
-    for f in fields:
-        parts.append(_ty_str_arg(f))
-    return " ".join(parts) + "\n"
+def _pp_acon(name: str, fields: list[Ty], metas: Metas | None) -> str:
+    lines: list[str] = []
+    lines.extend(_pp_doc_lines(metas.doc if metas else None))
+    lines.extend(_pp_pragma_lines(metas))
+
+    arg_docs = (metas.arg_docs if metas else None) or []
+
+    if not fields or not _has_arg_docs(metas):
+        parts = [name]
+        for f in fields:
+            parts.append(_ty_str_arg(f))
+        lines.append(" ".join(parts))
+    else:
+        first_field = fields[0]
+        first_doc = arg_docs[0] if arg_docs else None
+        first_s = _ty_str_arg(first_field)
+        first_doc_s = f" -- ^ {first_doc}" if first_doc else ""
+        lines.append(f"{name} {first_s}{first_doc_s}")
+
+        for i, f in enumerate(fields[1:], start=1):
+            doc = arg_docs[i] if i < len(arg_docs) else None
+            field_s = _ty_str_arg(f)
+            doc_s = f" -- ^ {doc}" if doc else ""
+            lines.append(f"    {field_s}{doc_s}")
+
+    return "\n".join(lines) + "\n"
 
 
-def _pp_prim_type(name: str, tyvars: list[TyVar]) -> str:
-    var_str = " ".join(_ty_repr(v, 0) for v in tyvars) if tyvars else ""
-    if var_str:
-        return f"prim_type {name} {var_str}\n"
-    return f"prim_type {name}\n"
+def _pp_prim_type(name: str, tyvars: list[TyVar], metas: Metas | None) -> str:
+    lines: list[str] = []
+    lines.extend(_pp_doc_lines(metas.doc if metas else None))
+    lines.extend(_pp_pragma_lines(metas))
+
+    arg_docs = (metas.arg_docs if metas else None) or []
+
+    if not tyvars:
+        lines.append(f"prim_type {name}")
+    elif not _has_arg_docs(metas):
+        var_str = " ".join(_ty_repr(v, 0) for v in tyvars)
+        lines.append(f"prim_type {name} {var_str}")
+    else:
+        first_var = tyvars[0]
+        first_doc = arg_docs[0] if arg_docs else None
+        first_s = _ty_repr(first_var, 0)
+        first_doc_s = f" -- ^ {first_doc}" if first_doc else ""
+        lines.append(f"prim_type {name} {first_s}{first_doc_s}")
+
+        for i, tv in enumerate(tyvars[1:], start=1):
+            doc = arg_docs[i] if i < len(arg_docs) else None
+            var_s = _ty_repr(tv, 0)
+            doc_s = f" -- ^ {doc}" if doc else ""
+            lines.append(f"    {var_s}{doc_s}")
+
+    return "\n".join(lines) + "\n"

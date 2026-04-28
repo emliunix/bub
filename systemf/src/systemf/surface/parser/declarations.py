@@ -17,7 +17,6 @@ from dataclasses import dataclass, replace
 from parsy import Parser as P, Result, alt, generate
 
 from systemf.surface.parser.types import (
-    TokenBase,
     KeywordToken,
     OperatorToken,
     DelimiterToken,
@@ -35,16 +34,16 @@ from systemf.surface.types import (
     SurfaceImportDeclaration,
     SurfaceConstructorInfo,
     SurfaceType,
-    SurfaceTerm,
 )
 from systemf.surface.parser.type_parser import (
+    tycon_arg_parser,
     type_atom_parser,
     type_parser,
 )
 
 # Import expression parser for term declaration bodies
 from systemf.surface.parser.expressions import expr_parser as _expr_parser_factory
-from systemf.surface.parser.helpers import AnyIndent, AtPos, AfterPos, ValidIndent
+from systemf.surface.parser.helpers import AfterPos
 
 
 def skip_inline_docstrings() -> P[None]:
@@ -276,9 +275,8 @@ def data_parser() -> P[SurfaceDataDeclaration]:
         name_token = yield match_ident()
         name = name_token.value
 
-        # Parse optional type parameters (identifiers)
-        params_tokens = yield match_ident().many()
-        params = [t.value for t in params_tokens]
+        # Parse optional type parameters (with optional inline docstrings)
+        params = yield tycon_arg_parser().many()
 
         # Match "=" symbol
         yield match_symbol("=")
@@ -385,9 +383,8 @@ def prim_type_parser() -> P[SurfacePrimTypeDecl]:
         name_token = yield match_ident()
         name = name_token.value
 
-        # Parse optional type parameters (identifiers)
-        params_tokens = yield match_ident().many()
-        params = [t.value for t in params_tokens]
+        # Parse optional type parameters (with optional inline docstrings)
+        params = yield tycon_arg_parser().many()
 
         return SurfacePrimTypeDecl(name=name, params=params, location=loc, docstring=None, pragma=None)
 

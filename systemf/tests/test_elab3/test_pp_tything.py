@@ -109,9 +109,9 @@ def test_pp_primop_multi_pragma():
 
 def test_pp_data_simple():
     assert pp_tything(ATyCon(_bool_n, [], [
-        ACon(Name("b", "True", 4, None), 0, 0, [], _bool_n),
-        ACon(Name("b", "False", 5, None), 1, 0, [], _bool_n),
-    ])) == (
+        ACon(Name("b", "True", 4, None), 0, 0, [], _bool_n, None),
+        ACon(Name("b", "False", 5, None), 1, 0, [], _bool_n, None),
+    ], None)) == (
         "data Bool\n"
         "    = True\n"
         "    | False\n"
@@ -120,9 +120,9 @@ def test_pp_data_simple():
 
 def test_pp_data_with_params_and_fields():
     assert pp_tything(ATyCon(_list_n, [_a], [
-        ACon(Name("b", "Nil", 8, None), 0, 0, [], _list_n),
-        ACon(Name("b", "Cons", 7, None), 1, 2, [_a, TyConApp(_list_n, [_a])], _list_n),
-    ])) == (
+        ACon(Name("b", "Nil", 8, None), 0, 0, [], _list_n, None),
+        ACon(Name("b", "Cons", 7, None), 1, 2, [_a, TyConApp(_list_n, [_a])], _list_n, None),
+    ], None)) == (
         "data List a\n"
         "    = Nil\n"
         "    | Cons a List a\n"
@@ -131,7 +131,7 @@ def test_pp_data_with_params_and_fields():
 
 def test_pp_data_no_constructors():
     n = Name("M", "Void", 50, None)
-    assert pp_tything(ATyCon(n, [], [])) == (
+    assert pp_tything(ATyCon(n, [], [], None)) == (
         "data Void\n"
     )
 
@@ -142,13 +142,13 @@ def test_pp_data_no_constructors():
 
 
 def test_pp_prim_type_with_params():
-    assert pp_tything(APrimTy(Name("b", "Ref", 29, None), [_a])) == (
+    assert pp_tything(APrimTy(Name("b", "Ref", 29, None), [_a], None)) == (
         "prim_type Ref a\n"
     )
 
 
 def test_pp_prim_type_no_params():
-    assert pp_tything(APrimTy(Name("b", "Int", 99, None), [])) == (
+    assert pp_tything(APrimTy(Name("b", "Int", 99, None), [], None)) == (
         "prim_type Int\n"
     )
 
@@ -163,6 +163,7 @@ def test_pp_acon():
         Name("b", "Cons", 7, None), 1, 2,
         [_a, TyConApp(_list_n, [_a])],
         _list_n,
+        None,
     )) == (
         "Cons a List a\n"
     )

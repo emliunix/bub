@@ -82,9 +82,34 @@ def main() -> None:
 
     # Ref tests
     print("\n  --- Ref ---")
-    check("get_ref (mk_ref MkUnit)", VData(0, []))
-    check("let r = mk_ref MkUnit in let _ = set_ref 42 r in get_ref r", VData(1, [VLit(LitInt(42))]))
-    check("let r = mk_ref MkUnit in let _ = set_ref 1 r in let _ = set_ref 2 r in get_ref r", VData(1, [VLit(LitInt(2))]))
+    check("get_ref (mk_ref 0)", VLit(LitInt(0)))
+    check("let r = mk_ref 0 in let _ = set_ref r 42 in get_ref r", VLit(LitInt(42)))
+    check("let r = mk_ref 0 in let _ = set_ref r 1 in let _ = set_ref r 2 in get_ref r", VLit(LitInt(2)))
+
+    # Ref (Maybe a) — nullable ref
+    print("\n  --- Ref (Maybe a) ---")
+    check("get_ref (mk_ref Nothing)", VData(0, []),
+          "nullable ref starts as Nothing")
+    check(
+        "let r = mk_ref Nothing in let _ = set_ref r (Just 42) in get_ref r",
+        VData(1, [VLit(LitInt(42))]),
+        "set nullable ref to Just 42",
+    )
+    check(
+        "let r = mk_ref (Just 1) in let _ = set_ref r Nothing in get_ref r",
+        VData(0, []),
+        "clear a set ref back to Nothing",
+    )
+    check(
+        "let r = mk_ref Nothing in let _ = set_ref r (Just 10) in fromMaybe 0 (get_ref r)",
+        VLit(LitInt(10)),
+        "fromMaybe on a Just ref",
+    )
+    check(
+        "let r = mk_ref Nothing in fromMaybe 0 (get_ref r)",
+        VLit(LitInt(0)),
+        "fromMaybe on a Nothing ref",
+    )
 
     print("\nAll e2e assertions passed.")
 

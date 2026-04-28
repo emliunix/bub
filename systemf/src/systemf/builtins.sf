@@ -60,10 +60,11 @@ prim_op error :: forall a. String -> a
 
 -- Ref
 
+--| the Ref cell to hold a value
 prim_type Ref a
 
-prim_op mk_ref :: forall a. Unit -> Ref a
+prim_op mk_ref :: forall a. a -> Ref a
 
-prim_op set_ref :: forall a. a -> Ref a -> Unit
+prim_op set_ref :: forall a. Ref a -> a -> Unit
 
-prim_op get_ref :: forall a. Ref a -> Maybe a
+prim_op get_ref :: forall a. Ref a -> a

@@ -662,7 +662,7 @@ class TestPrimTypeParser:
         result = prim_type_parser().parse(tokens)
         assert isinstance(result, SurfacePrimTypeDecl)
         assert result.name == "Ref"
-        assert result.params == ["a"]
+        assert [p.name for p in result.params] == ["a"]
 
     def test_prim_type_multiple_params(self):
         """Parse prim_type declaration with multiple type parameters."""
@@ -672,7 +672,7 @@ class TestPrimTypeParser:
         result = prim_type_parser().parse(tokens)
         assert isinstance(result, SurfacePrimTypeDecl)
         assert result.name == "Map"
-        assert result.params == ["k", "v"]
+        assert [p.name for p in result.params] == ["k", "v"]
 
 
 class TestPrimOpParser:

@@ -63,10 +63,10 @@ class Typecheck:
         env: TypeEnv = {}
 
         def _acon(tag: int, con: RnDataConDecl) -> ACon:
-            return ACon(con.name, tag, len(con.fields), con.fields, con.tycon.name)
+            return ACon(con.name, tag, len(con.fields), con.fields, con.tycon.name, metas=con.metas)
         for data_decl in data_decls:
             cons = [_acon(i, con) for i, con in enumerate(data_decl.constructors)]
-            env[data_decl.name] = ATyCon(data_decl.name, data_decl.tyvars, cons)
+            env[data_decl.name] = ATyCon(data_decl.name, data_decl.tyvars, cons, metas=data_decl.metas)
             for con in cons:
                 env[con.name] = con
         return env
@@ -74,7 +74,7 @@ class Typecheck:
     def tc_prims(self, ptys: list[RnPrimTyDecl], pops: list[RnPrimOpDecl]) -> TypeEnv:
         env: TypeEnv = {}
         for ty in ptys:
-            env[ty.name] = APrimTy(ty.name, ty.tyvars)
+            env[ty.name] = APrimTy(ty.name, ty.tyvars, metas=ty.metas)
         for op in pops:
             name, ty = op.name.name, op.name.type_ann
             env[name] = AnId.create(Id(name, ty), is_prim=True, metas=op.metas)

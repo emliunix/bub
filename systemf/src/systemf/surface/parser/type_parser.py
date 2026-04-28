@@ -156,6 +156,28 @@ _type_parser: P[SurfaceType] = parsy.forward_declaration()
 # =============================================================================
 
 
+def tycon_arg_parser() -> P[SurfaceTypeVar]:
+    """Parse a single type-constructor argument with optional inline docstrings.
+
+    Grammar:  ("--^" doc)* ident ("--^" doc)*
+    """
+
+    @generate
+    def parser():
+        pre_docs = yield match_inline_docstring_strict().many()
+        ident_tok = yield match_token(IdentifierToken)
+        post_docs = yield match_inline_docstring_strict().many()
+        docs = pre_docs + post_docs
+        docstring = "\n".join(docs) if docs else None
+        return SurfaceTypeVar(
+            name=ident_tok.value,
+            location=ident_tok.location,
+            docstring=docstring,
+        )
+
+    return parser
+
+
 @generate
 def type_tuple_parser() -> P[SurfaceType]:
     """Parse a tuple type: ``(t1, t2, ..., tn)``.
@@ -440,6 +462,7 @@ __all__ = [
     "match_inline_docstring_strict",
     "attach_docs",
     # Type parsers (factories — call to get a Parser)
+    "tycon_arg_parser",
     "type_tuple_parser",   # @generate Parser object (zero-arg, used inside parens)
     "type_atom_parser",
     "type_app_parser",

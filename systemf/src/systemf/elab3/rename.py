@@ -13,7 +13,7 @@ from systemf.elab3.name_gen import check_dups
 from systemf.elab3.types.tything import Metas
 
 from .rename_expr import RenameExpr
-from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
+from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, RdrElt, ReaderEnv
 from .types import NameGenerator, REPLContext, Module
 from .types.ty import Name, BoundTv
 from .types.ast import (
@@ -114,12 +114,13 @@ class Rename:
         ]
 
     def rename_rhs_data(self, lhs_res: RnLhsDataResult) -> RnDataDecl:
-        var_names = self.new_lhs_names(lhs_res.decl.params, lhs_res.decl.location)
+        var_names = self.new_lhs_names([p.name for p in lhs_res.decl.params], lhs_res.decl.location)
+        metas = Metas.create(lhs_res.decl.pragma, lhs_res.decl.docstring, tyvars_to_argdocs(lhs_res.decl.params))
         rn_data = RnDataDecl(
             name=lhs_res.name,
             tyvars=[BoundTv(v) for v in var_names],
             constructors=[],
-            metas=None,
+            metas=metas,
         )
 
         def _go(con: SurfaceConstructorInfo, con_name: Name) -> RnDataConDecl:
@@ -165,11 +166,12 @@ class Rename:
         return [self.new_lhs_name(name, loc) for name in names]
 
     def rename_prim_ty(self, pt: SurfacePrimTypeDecl, name: Name) -> RnPrimTyDecl:
-        var_names = self.new_lhs_names(pt.params, pt.location)
+        var_names = self.new_lhs_names([p.name for p in pt.params], pt.location)
+        metas = Metas.create(pt.pragma, pt.docstring, tyvars_to_argdocs(pt.params))
         return RnPrimTyDecl(
             name=name,
             tyvars=[BoundTv(v) for v in var_names],
-            metas=None,
+            metas=metas,
         )
 
     def rename_prim_op(self, op: SurfacePrimOpDecl, name: Name) -> RnPrimOpDecl:
@@ -177,7 +179,7 @@ class Rename:
         # FIX: at parser level, make types requried
         if ty is None:
             raise Exception(f"primitive operator {op.name} must have a type annotation at {op.location}")
-        metas = Metas(pragma=op.pragma or {}, doc=op.docstring, arg_docs=funty_to_argdocs(ty))
+        metas = Metas.create(op.pragma, op.docstring, funty_to_argdocs(ty))
         return RnPrimOpDecl(
             name=AnnotName(name, self.rename_expr.rename_type(ty)),
             metas=metas,

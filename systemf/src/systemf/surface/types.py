@@ -6,7 +6,7 @@ omitting type annotations where they can be inferred.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import override
 
 from systemf.utils.location import Location
@@ -562,14 +562,14 @@ class SurfaceDataDeclaration(SurfaceDeclaration):
     """Data type declaration: data Name params = Con1 args1 | Con2 args2 | ..."""
 
     name: str
-    params: list[str]
+    params: list[SurfaceTypeVar]
     constructors: list[SurfaceConstructorInfo]
     docstring: str | None
     pragma: dict[str, str] | None
 
     @override
     def __str__(self) -> str:
-        params_str = " ".join(self.params) if self.params else ""
+        params_str = " ".join(p.name for p in self.params) if self.params else ""
         constrs_str = " | ".join(
             f"{c.name} {' '.join(str(t) for t in c.args)}" for c in self.constructors
         )
@@ -614,14 +614,14 @@ class SurfacePrimTypeDecl(SurfaceDeclaration):
     """
 
     name: str
-    params: list[str]
+    params: list[SurfaceTypeVar]
     docstring: str | None
     pragma: dict[str, str] | None
 
     @override
     def __str__(self) -> str:
         if self.params:
-            return f"prim_type {self.name} {' '.join(self.params)}"
+            return f"prim_type {self.name} {' '.join(p.name for p in self.params)}"
         return f"prim_type {self.name}"
 
 
@@ -681,8 +681,3 @@ type SurfaceDeclarationRepr = (
     SurfacePrimTypeDecl |
     SurfacePrimOpDecl |
     SurfaceImportDeclaration )
-
-
-
-# Note: equals_ignore_location has been moved to systemf.utils.ast_utils
-# It is re-exported here for backward compatibility.

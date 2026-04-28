@@ -13,6 +13,10 @@ class Metas:
     doc: str | None
     arg_docs: list[str | None]
 
+    @staticmethod
+    def create(pragma: dict[str, str] | None, doc: str | None, arg_docs: list[str | None]) -> Metas:
+        return Metas(pragma or {}, doc, arg_docs)
+
 
 class TyThing(ABC):
     pass
@@ -37,6 +41,8 @@ class ATyCon(TyThing):
     name: Name
     tyvars: list[TyVar]
     constructors: list[ACon]
+    metas: Metas | None
+
 
 
 @dataclass
@@ -47,6 +53,7 @@ class ACon(TyThing):
     arity: int
     field_types: list[Ty]
     parent: Name
+    metas: Metas | None
 
 
 @dataclass
@@ -54,6 +61,7 @@ class APrimTy(TyThing):
     """Primitives"""
     name: Name
     tyvars: list[TyVar]
+    metas: Metas | None
 
 
 type TypeEnv = dict[Name, TyThing]

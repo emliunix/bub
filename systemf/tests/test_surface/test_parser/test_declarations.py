@@ -48,7 +48,7 @@ class TestDataDeclaration:
         result = data_parser().parse(tokens)
         assert isinstance(result, SurfaceDataDeclaration)
         assert result.name == "Maybe"
-        assert "a" in result.params
+        assert any(p.name == "a" for p in result.params)
 
     def test_data_with_multiple_params(self):
         """Parse data Either a b = Left a | Right b."""
