@@ -173,3 +173,4 @@ class ChannelManager:
         logger.info(f"channel.manager cancelled {count} in-flight tasks")
         for channel in self.enabled_channels():
             await channel.stop()
+        await self.framework.shutdown()

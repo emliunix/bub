@@ -107,3 +107,7 @@ class BubHookSpecs:
     def build_tape_context(self) -> TapeContext:
         """Build a tape context for the current session, to be used to build context messages."""
         raise NotImplementedError
+
+    @hookspec
+    def shutdown(self) -> None:
+        """Perform any necessary cleanup when the framework is shutting down."""

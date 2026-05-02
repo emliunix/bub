@@ -284,3 +284,7 @@ class BubFramework:
                 raise TypeError("hook.onboard_config must return dict or None")
             configure.merge(current_config, result)
         return configure.validate(current_config)
+
+    async def shutdown(self) -> None:
+        """Call the close hook for all plugins."""
+        await self._hook_runtime.call_many("shutdown")
