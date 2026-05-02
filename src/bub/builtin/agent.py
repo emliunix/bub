@@ -87,7 +87,7 @@ class Agent:
     async def run(
         self,
         *,
-        session_id: str,
+        tape_name: str,
         prompt: str | list[dict],
         state: State,
         model: str | None = None,
@@ -96,9 +96,9 @@ class Agent:
     ) -> str:
         if not prompt:
             return "error: empty prompt"
-        tape = self.tapes.session_tape(session_id, workspace_from_state(state))
+        tape = self.tapes.tape(tape_name)
         tape.context = replace(tape.context, state=state)
-        merge_back = not session_id.startswith("temp/")
+        merge_back = not state.get("session_id", "").startswith("temp/")
         async with self.tapes.fork_tape(tape.name, merge_back=merge_back):
             await self.tapes.ensure_bootstrap_anchor(tape.name)
             if isinstance(prompt, str) and prompt.strip().startswith(","):
@@ -110,7 +110,7 @@ class Agent:
     async def run_stream(
         self,
         *,
-        session_id: str,
+        tape_name: str,
         prompt: str | list[dict],
         state: State,
         model: str | None = None,
@@ -124,9 +124,9 @@ class Agent:
             ]
             return self._events_from_iterable(events)
 
-        tape = self.tapes.session_tape(session_id, workspace_from_state(state))
+        tape = self.tapes.tape(tape_name)
         tape.context = replace(tape.context, state=state)
-        merge_back = not session_id.startswith("temp/")
+        merge_back = not state.get("session_id", "").startswith("temp/")
         stack = AsyncExitStack()
         # the fork_tape context manager must not be exited until the last chunk of the stream is consumed.
         # So we use an AsyncExitStack and inject a callback to the iterator.

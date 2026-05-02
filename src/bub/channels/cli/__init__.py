@@ -18,7 +18,7 @@ from rich.live import Live
 
 import bub
 from bub.builtin.agent import Agent
-from bub.builtin.tape import TapeInfo
+from bub.builtin.tape import TapeInfo, session_tape_name
 from bub.channels.base import Channel
 from bub.channels.cli.renderer import CliRenderer
 from bub.channels.message import ChannelMessage
@@ -54,7 +54,8 @@ class CliChannel(Channel):
         return logger.add(self._renderer.log, colorize=False, format="{level:<8} | {message}")
 
     async def _refresh_tape_info(self) -> None:
-        tape = self._agent.tapes.session_tape(self._message_template["session_id"], self._workspace)
+        tape_name = session_tape_name(self._message_template["session_id"], str(self._workspace.resolve()))
+        tape = self._agent.tapes.tape(tape_name)
         info = await self._agent.tapes.info(tape.name)
         self._last_tape_info = info
 

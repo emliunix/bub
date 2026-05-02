@@ -13,6 +13,25 @@ from republic import LLM, AsyncTapeStore, Tape, TapeEntry, TapeQuery
 from bub.builtin.store import ForkTapeStore
 
 
+def session_tape_name(session_id: str, workspace: str) -> str:
+    workspace_hash = hashlib.md5(workspace.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    tape_name = (
+        workspace_hash + "__" + hashlib.md5(session_id.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    )
+    return tape_name
+
+
+def get_tape_name(state: dict[str, Any]) -> str:
+    tape_name = state.get("tape_name")
+    if tape_name is None:
+        session_id = state.get("session_id")
+        workspace = state.get("_runtime_workspace")
+        if session_id is None or workspace is None:
+            raise RuntimeError("no tape found in state and cannot be derived")
+        tape_name = session_tape_name(session_id, workspace)
+    return tape_name
+
+
 @dataclass(frozen=True)
 class TapeInfo:
     """Runtime tape info summary."""
@@ -117,11 +136,7 @@ class TapeService:
         tape = self._llm.tape(tape_name)
         await tape.append_async(TapeEntry.event(name=name, data=payload, **meta))
 
-    def session_tape(self, session_id: str, workspace: Path) -> Tape:
-        workspace_hash = hashlib.md5(str(workspace.resolve()).encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
-        tape_name = (
-            workspace_hash + "__" + hashlib.md5(session_id.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
-        )
+    def tape(self, tape_name: str) -> Tape:
         return self._llm.tape(tape_name)
 
     @contextlib.asynccontextmanager

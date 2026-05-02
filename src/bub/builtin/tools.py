@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, Field
+from bub.builtin.tape import get_tape_name
 from republic import AsyncTapeStore, TapeQuery, ToolContext
 
 from bub.builtin.shell_manager import shell_manager
@@ -267,8 +268,9 @@ async def run_subagent(param: SubAgentInput, *, context: ToolContext) -> str:
     state = {**context.state, "session_id": subagent_session}
     allowed_tools = resolve_tool_names(param.allowed_tools or None, exclude={"subagent"})
     output = ""
+    tape_name = get_tape_name(state)
     async for event in await agent.run_stream(
-        session_id=subagent_session,
+        tape_name=tape_name,
         prompt=param.prompt,
         state=state,
         model=param.model,
