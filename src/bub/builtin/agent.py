@@ -101,8 +101,6 @@ class Agent:
         merge_back = not state.get("session_id", "").startswith("temp/")
         async with self.tapes.fork_tape(tape.name, merge_back=merge_back):
             await self.tapes.ensure_bootstrap_anchor(tape.name)
-            if isinstance(prompt, str) and prompt.strip().startswith(","):
-                return await self._run_command(tape=tape, line=prompt.strip())
             return await self._agent_loop(
                 tape=tape, prompt=prompt, model=model, allowed_skills=allowed_skills, allowed_tools=allowed_tools
             )
@@ -132,25 +130,24 @@ class Agent:
         # So we use an AsyncExitStack and inject a callback to the iterator.
         await stack.enter_async_context(self.tapes.fork_tape(tape.name, merge_back=merge_back))
         await self.tapes.ensure_bootstrap_anchor(tape.name)
-        if isinstance(prompt, str) and prompt.strip().startswith(","):
-            result = await self._run_command(tape=tape, line=prompt.strip())
-            events = self._events_from_iterable([
-                StreamEvent("text", {"delta": result}),
-                StreamEvent("final", {"text": result, "ok": True}),
-            ])
-        else:
-            events = await self._agent_loop(
-                tape=tape,
-                prompt=prompt,
-                model=model,
-                allowed_skills=allowed_skills,
-                allowed_tools=allowed_tools,
-                stream_output=True,
-            )
+        events = await self._agent_loop(
+            tape=tape,
+            prompt=prompt,
+            model=model,
+            allowed_skills=allowed_skills,
+            allowed_tools=allowed_tools,
+            stream_output=True,
+        )
         return self._events_with_callback(events, callback=stack.aclose)
 
-    async def _run_command(self, tape: Tape, *, line: str) -> str:
-        line = line[1:].strip()
+    async def run_command(self, tape_name: str, prompt: str | list[dict], state: State) -> str | None:
+        """Execute command if prompt starts with ','. Return None otherwise."""
+        if not isinstance(prompt, str) or not prompt.strip().startswith(","):
+            return None
+
+        tape = self.tapes.tape(tape_name)
+        tape.context = replace(tape.context, state=state)
+        line = prompt.strip()[1:].strip()
         if not line:
             raise ValueError("empty command")
 
@@ -188,6 +185,18 @@ class Agent:
                 "date": datetime.now(UTC).isoformat(),
             }
             await self.tapes.append_event(tape.name, "command", event_payload)
+
+    async def run_command_stream(self, tape_name: str, prompt: str | list[dict], state: State) -> AsyncStreamEvents | None:
+        """Execute command and wrap result in AsyncStreamEvents. Return None if not a command."""
+        result = await self.run_command(tape_name, prompt, state)
+        if result is None:
+            return None
+
+        events = [
+            StreamEvent("text", {"delta": result}),
+            StreamEvent("final", {"text": result, "ok": True}),
+        ]
+        return self._events_from_iterable(events)
 
     @overload
     async def _agent_loop(

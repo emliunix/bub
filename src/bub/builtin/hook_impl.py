@@ -160,12 +160,18 @@ class BuiltinImpl:
     @hookimpl
     async def run_model(self, prompt: str | list[dict], session_id: str, state: State) -> str:
         tape_name = get_tape_name(state)
-        return await self._get_agent().run(tape_name=tape_name, prompt=prompt, state=state)
+        agent = self._get_agent()
+        if (result := await agent.run_command(tape_name, prompt, state)) is not None:
+            return result
+        return await agent.run(tape_name=tape_name, prompt=prompt, state=state)
 
     @hookimpl
     async def run_model_stream(self, prompt: str | list[dict], session_id: str, state: State) -> AsyncStreamEvents:
         tape_name = get_tape_name(state)
-        return await self._get_agent().run_stream(tape_name=tape_name, prompt=prompt, state=state)
+        agent = self._get_agent()
+        if (events := await agent.run_command_stream(tape_name, prompt, state)) is not None:
+            return events
+        return await agent.run_stream(tape_name=tape_name, prompt=prompt, state=state)
 
     @hookimpl
     def register_cli_commands(self, app: typer.Typer) -> None:

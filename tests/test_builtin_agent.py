@@ -85,9 +85,9 @@ class _FakeTapeService:
         self._fork = fork_capture
         self.run_tools_model: str | None = None
 
-    def session_tape(self, session_id: str, workspace: Any) -> MagicMock:
+    def tape(self, tape_name: str) -> MagicMock:
         tape = MagicMock()
-        tape.name = "test-tape"
+        tape.name = tape_name
         tape.context = TapeContext(state={})
 
         async def fake_stream_events_async(**kwargs: Any) -> AsyncStreamEvents:
@@ -120,7 +120,7 @@ async def test_agent_run_regular_session_merges_back() -> None:
     fork_capture = _ForkCapture()
     agent.tapes = _FakeTapeService(fork_capture)  # type: ignore[assignment]
 
-    result = await agent.run_stream(session_id="user/session1", prompt="hello", state={"_runtime_workspace": "/tmp"})  # noqa: S108
+    result = await agent.run_stream(tape_name="user/session1", prompt="hello", state={"session_id": "user/session1", "_runtime_workspace": "/tmp"})  # noqa: S108
     [event async for event in result]
 
     assert fork_capture.merge_back_values == [True]
@@ -133,7 +133,7 @@ async def test_agent_run_temp_session_does_not_merge_back() -> None:
     fork_capture = _ForkCapture()
     agent.tapes = _FakeTapeService(fork_capture)  # type: ignore[assignment]
 
-    result = await agent.run_stream(session_id="temp/abc123", prompt="hello", state={"_runtime_workspace": "/tmp"})  # noqa: S108
+    result = await agent.run_stream(tape_name="temp/abc123", prompt="hello", state={"session_id": "temp/abc123", "_runtime_workspace": "/tmp"})  # noqa: S108
     [event async for event in result]
 
     assert fork_capture.merge_back_values == [False]
@@ -148,9 +148,9 @@ async def test_agent_run_passes_model_to_llm() -> None:
     agent.tapes = fake_tapes  # type: ignore[assignment]
 
     result = await agent.run_stream(
-        session_id="user/s1",
+        tape_name="user/s1",
         prompt="hello",
-        state={"_runtime_workspace": "/tmp"},  # noqa: S108
+        state={"session_id": "user/s1", "_runtime_workspace": "/tmp"},  # noqa: S108
         model="openai:gpt-4o",
     )
     [event async for event in result]
@@ -163,7 +163,7 @@ async def test_agent_run_empty_prompt_returns_error() -> None:
     agent = _make_agent()
     agent.tapes = MagicMock()  # type: ignore[assignment]
 
-    result = await agent.run_stream(session_id="user/s1", prompt="", state={})
+    result = await agent.run_stream(tape_name="user/s1", prompt="", state={})
     events = [event async for event in result]
 
     assert [(event.kind, event.data) for event in events] == [
@@ -180,7 +180,7 @@ async def test_agent_run_model_defaults_to_none() -> None:
     fake_tapes = _FakeTapeService(fork_capture)
     agent.tapes = fake_tapes  # type: ignore[assignment]
 
-    result = await agent.run_stream(session_id="user/s1", prompt="hello", state={"_runtime_workspace": "/tmp"})  # noqa: S108
+    result = await agent.run_stream(tape_name="user/s1", prompt="hello", state={"session_id": "user/s1", "_runtime_workspace": "/tmp"})  # noqa: S108
     [event async for event in result]
 
     assert fake_tapes.run_tools_model is None

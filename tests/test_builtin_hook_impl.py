@@ -30,12 +30,18 @@ class FakeAgent:
         self.run_calls: list[tuple[str, str, dict[str, object]]] = []
         self.run_stream_calls: list[tuple[str, str, dict[str, object]]] = []
 
-    async def run(self, *, session_id: str, prompt: str, state: dict[str, object]) -> str:
-        self.run_calls.append((session_id, prompt, state))
+    async def run_command(self, tape_name: str, prompt: str, state: dict[str, object]) -> str | None:
+        return None
+
+    async def run_command_stream(self, tape_name: str, prompt: str, state: dict[str, object]) -> AsyncStreamEvents | None:
+        return None
+
+    async def run(self, *, tape_name: str, prompt: str, state: dict[str, object]) -> str:
+        self.run_calls.append((tape_name, prompt, state))
         return "agent-output"
 
-    async def run_stream(self, *, session_id: str, prompt: str, state: dict[str, object]) -> AsyncStreamEvents:
-        self.run_stream_calls.append((session_id, prompt, state))
+    async def run_stream(self, *, tape_name: str, prompt: str, state: dict[str, object]) -> AsyncStreamEvents:
+        self.run_stream_calls.append((tape_name, prompt, state))
 
         async def iterator():
             yield StreamEvent("text", {"delta": "agent-output"})
@@ -125,25 +131,27 @@ async def test_build_prompt_marks_commands_and_prefixes_context(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_run_model_delegates_to_agent(tmp_path: Path) -> None:
     _, impl, agent = _build_impl(tmp_path)
-    state = {"context": "ctx"}
+    state = {"context": "ctx", "session_id": "session", "_runtime_workspace": str(tmp_path)}
 
     result = await impl.run_model(prompt="prompt", session_id="session", state=state)
 
     assert result == "agent-output"
-    assert agent.run_calls == [("session", "prompt", state)]
+    assert len(agent.run_calls) == 1
+    assert agent.run_calls[0][1:] == ("prompt", state)
     assert agent.run_stream_calls == []
 
 
 @pytest.mark.asyncio
 async def test_run_model_stream_delegates_to_agent(tmp_path: Path) -> None:
     _, impl, agent = _build_impl(tmp_path)
-    state = {"context": "ctx"}
+    state = {"context": "ctx", "session_id": "session", "_runtime_workspace": str(tmp_path)}
 
     stream = await impl.run_model_stream(prompt="prompt", session_id="session", state=state)
     events = [event async for event in stream]
 
     assert [(event.kind, event.data) for event in events] == [("text", {"delta": "agent-output"})]
-    assert agent.run_stream_calls == [("session", "prompt", state)]
+    assert len(agent.run_stream_calls) == 1
+    assert agent.run_stream_calls[0][1:] == ("prompt", state)
     assert agent.run_calls == []
 
 
