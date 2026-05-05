@@ -39,37 +39,12 @@ def unescape_newlines(text: str) -> str:
     return result
 
 
-def edit_message(bot_token: str, chat_id: str, message_id: int, text: str) -> dict:
-    """
-    Edit an existing message via Telegram Bot API.
-
-    Uses telegramify_markdown to convert text to MarkdownV2 format.
-
-    Args:
-        bot_token: Telegram bot token
-        chat_id: Target chat ID
-        message_id: ID of the message to edit
-        text: New message text (will be converted to MarkdownV2)
-
-    Returns:
-        API response as dict
-    """
-    url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-
-    # Convert markdown to Telegram MarkdownV2 format
-    converted_text = markdownify(text)
-
-    payload = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "text": converted_text,
-        "parse_mode": "MarkdownV2",
-    }
-
-    response = requests.post(url, json=payload, timeout=30)
-    response.raise_for_status()
-
-    return response.json()
+def get_proxies() -> dict | None:
+    """Get proxy configuration from BUB_TELEGRAM_PROXY env var."""
+    proxy_url = os.environ.get("BUB_TELEGRAM_PROXY")
+    if proxy_url:
+        return {"http": proxy_url, "https": proxy_url}
+    return None
 
 
 def send_message(
@@ -109,10 +84,11 @@ def send_message(
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
 
-    response = requests.post(url, json=payload, timeout=30)
+    proxies = get_proxies()
+    response = requests.post(url, json=payload, timeout=30, proxies=proxies)
     if response.status_code == 400 and reply_to_message_id:
         payload.pop("reply_to_message_id", None)
-        response = requests.post(url, json=payload, timeout=30)
+        response = requests.post(url, json=payload, timeout=30, proxies=proxies)
     response.raise_for_status()
 
     return response.json()
@@ -160,8 +136,9 @@ def main():
 
     # Send messages
     try:
-        send_message(bot_token, chat_id, message, reply_to)
-        print(f"✅ Message sent successfully to {chat_id} (MarkdownV2)")
+        result = send_message(bot_token, chat_id, message, reply_to)
+        msg_id = result.get("result", {}).get("message_id", "?")
+        print(f"✅ Message sent successfully to {chat_id} (MarkdownV2) message_id={msg_id}")
     except requests.HTTPError as e:
         print(f"❌ HTTP Error: {e}")
         print(f"   Response: {e.response.text}")

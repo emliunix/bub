@@ -40,6 +40,14 @@ def unescape_newlines(text: str) -> str:
     return result
 
 
+def get_proxies() -> dict | None:
+    """Get proxy configuration from BUB_TELEGRAM_PROXY env var."""
+    proxy_url = os.environ.get("BUB_TELEGRAM_PROXY")
+    if proxy_url:
+        return {"http": proxy_url, "https": proxy_url}
+    return None
+
+
 def edit_message(bot_token: str, chat_id: str, message_id: int, text: str) -> dict:
     """
     Edit an existing message via Telegram Bot API.
@@ -68,7 +76,7 @@ def edit_message(bot_token: str, chat_id: str, message_id: int, text: str) -> di
         "parse_mode": "MarkdownV2",
     }
 
-    response = requests.post(url, json=payload, timeout=30)
+    response = requests.post(url, json=payload, timeout=30, proxies=get_proxies())
     response.raise_for_status()
 
     return response.json()
