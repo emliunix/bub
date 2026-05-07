@@ -55,8 +55,11 @@ def run(
     )
 
     async def _run() -> TurnResult:
-        async with framework.running():
-            return await framework.process_inbound(inbound)
+        try:
+            async with framework.running():
+                return await framework.process_inbound(inbound)
+        finally:
+            await framework.shutdown()
 
     result = asyncio.run(_run())
     for outbound in result.outbounds:
@@ -64,7 +67,6 @@ def run(
         target_channel = str(field_of(outbound, "channel", "stdout"))
         target_chat = str(field_of(outbound, "chat_id", "local"))
         typer.echo(f"[{target_channel}:{target_chat}]\n{rendered}")
-    asyncio.run(framework.shutdown())
 
 
 def list_hooks(ctx: typer.Context) -> None:
