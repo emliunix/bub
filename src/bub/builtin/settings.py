@@ -41,6 +41,7 @@ class AgentSettings(Settings):
     api_key: str | dict[str, str] | None = Field(default_factory=provider_specific("api_key"))
     api_base: str | dict[str, str] | None = Field(default_factory=provider_specific("api_base"))
     api_format: Literal["completion", "responses", "messages"] = "completion"
+    reasoning_effort: str | None = None
     max_steps: int = 50
     max_tokens: int = DEFAULT_MAX_TOKENS
     model_timeout_seconds: int | None = None

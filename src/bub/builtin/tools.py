@@ -192,7 +192,7 @@ async def tape_search(param: SearchInput, *, context: ToolContext) -> str:
     """Search for entries in the current tape that match the query. Returns a list of matching entries."""
     agent = _get_agent(context)
     query = (
-        TapeQuery[AsyncTapeStore](tape=context.tape or "", store=agent.tapes._store)
+        TapeQuery(tape=context.tape or "")
         .query(param.query)
         .kinds(*param.kinds)
         .limit(param.limit)

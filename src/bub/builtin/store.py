@@ -14,12 +14,12 @@ from typing import Any, cast
 
 from loguru import logger
 from republic import AsyncTapeStore, TapeEntry, TapeQuery
-from republic.tape import AsyncTapeStoreAdapter, InMemoryQueryMixin, InMemoryTapeStore, TapeStore
+from republic.tape import AsyncTapeStoreAdapter, InMemoryQueryMixin, InMemoryTapeStore
 from republic.tape.store import is_async_tape_store
 
 from bub.utils import get_entry_text
 
-current_store: contextvars.ContextVar[TapeStore] = contextvars.ContextVar("current_store")
+current_store: contextvars.ContextVar[AsyncTapeStore] = contextvars.ContextVar("current_store")
 current_fork_tape: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_fork_tape", default=None)
 current_tape_was_reset: contextvars.ContextVar[bool] = contextvars.ContextVar("current_tape_was_reset", default=False)
 WORD_PATTERN = re.compile(r"[a-z0-9_/-]+")
@@ -29,14 +29,11 @@ MAX_FUZZY_CANDIDATES = 128
 
 
 class ForkTapeStore:
-    def __init__(self, parent: AsyncTapeStore | TapeStore) -> None:
-        if is_async_tape_store(parent):
-            self._parent = parent
-        else:
-            self._parent = AsyncTapeStoreAdapter(parent)
+    def __init__(self, parent: AsyncTapeStore) -> None:
+        self._parent = parent
 
     @property
-    def _current(self) -> TapeStore:
+    def _current(self) -> AsyncTapeStore:
         return current_store.get(_empty_store)
 
     @property
@@ -51,7 +48,7 @@ class ForkTapeStore:
         return cast(list[str], await self._parent.list_tapes())
 
     async def reset(self, tape: str) -> None:
-        self._current.reset(tape)
+        await self._current.reset(tape)
         if self._current is _empty_store or self._fork_tape != tape:
             await self._parent.reset(tape)
             return
@@ -66,7 +63,8 @@ class ForkTapeStore:
                 parent_entries = []
         this_entries: list[TapeEntry] = []
         if hasattr(self._current, "read"):
-            for entry in cast(list[TapeEntry], self._current.read(query.tape) or []):
+            # InMemoryQueryMixin has sync read()
+            for entry in cast(list[TapeEntry], self._current.read(query.tape) or []): # type: ignore
                 if query._kinds and entry.kind not in query._kinds:
                     continue
                 if entry.kind == "anchor":  # noqa: SIM102
@@ -96,7 +94,7 @@ class ForkTapeStore:
 
     async def append(self, tape: str, entry: TapeEntry) -> None:
         self._redact_payload(entry.payload)
-        self._current.append(tape, entry)
+        await self._current.append(tape, entry)
 
     @contextlib.asynccontextmanager
     async def fork(self, tape: str, merge_back: bool = True) -> AsyncGenerator[None, None]:
@@ -122,26 +120,26 @@ class ForkTapeStore:
                     logger.info(f'Merged {count} entries into tape "{tape}"')
 
 
-class EmptyTapeStore:
+class EmptyTapeStore(AsyncTapeStore):
     """Sync TapeStore sentinel that always returns empty results."""
 
-    def list_tapes(self) -> list[str]:
+    async def list_tapes(self) -> list[str]:
         return []
 
-    def reset(self, tape: str) -> None:
+    async def reset(self, tape: str) -> None:
         pass
 
-    def fetch_all(self, query: TapeQuery) -> Iterable[TapeEntry]:
+    async def fetch_all(self, query: TapeQuery) -> Iterable[TapeEntry]:
         return []
 
-    def append(self, tape: str, entry: TapeEntry) -> None:
+    async def append(self, tape: str, entry: TapeEntry) -> None:
         pass
 
 
 _empty_store = EmptyTapeStore()
 
 
-class FileTapeStore(InMemoryQueryMixin):
+class FileTapeStore(InMemoryQueryMixin, AsyncTapeStore):
     """TapeStore implementation that persists tapes as JSONL files under a directory."""
 
     def __init__(self, directory: Path) -> None:
@@ -149,12 +147,12 @@ class FileTapeStore(InMemoryQueryMixin):
         self._directory.mkdir(parents=True, exist_ok=True)
         self._tape_files: dict[str, TapeFile] = {}
 
-    def fetch_all(self, query: TapeQuery) -> Iterable[TapeEntry]:
+    async def fetch_all(self, query: TapeQuery) -> Iterable[TapeEntry]:
         if not query._query:
-            result: Iterable[TapeEntry] = super().fetch_all(query)
+            result: Iterable[TapeEntry] = await super().fetch_all(query)
             return result
         unlimited_query = replace(query, _limit=None)
-        entries: Iterable[TapeEntry] = super().fetch_all(unlimited_query)
+        entries: Iterable[TapeEntry] = await super().fetch_all(unlimited_query)
         return self._filter_entries(list(entries), query._query, query._limit or 20)
 
     def _filter_entries(self, entries: list[TapeEntry], query: str, limit: int) -> list[TapeEntry]:
@@ -221,7 +219,7 @@ class FileTapeStore(InMemoryQueryMixin):
             self._tape_files[tape] = TapeFile(self._directory / f"{tape}.jsonl")
         return self._tape_files[tape]
 
-    def list_tapes(self) -> list[str]:
+    async def list_tapes(self) -> list[str]:
         result: list[str] = []
         for file in self._directory.glob("*.jsonl"):
             filename = file.stem
@@ -230,10 +228,10 @@ class FileTapeStore(InMemoryQueryMixin):
             result.append(filename)
         return result
 
-    def reset(self, tape: str) -> None:
+    async def reset(self, tape: str) -> None:
         self._tape_file(tape).reset()
 
-    def append(self, tape: str, entry: TapeEntry) -> None:
+    async def append(self, tape: str, entry: TapeEntry) -> None:
         self._tape_file(tape).append(entry)
 
     def read(self, tape: str) -> list[TapeEntry] | None:

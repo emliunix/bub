@@ -55,8 +55,7 @@ class CliChannel(Channel):
 
     async def _refresh_tape_info(self) -> None:
         tape_name = session_tape_name(self._message_template["session_id"], str(self._workspace.resolve()))
-        tape = self._agent.tapes.tape(tape_name)
-        info = await self._agent.tapes.info(tape.name)
+        info = await self._agent.tapes.info(tape_name)
         self._last_tape_info = info
 
     def set_metadata(self, session_id: str | None = None, chat_id: str | None = None) -> None:

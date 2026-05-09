@@ -2,15 +2,19 @@ import contextlib
 import hashlib
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic.dataclasses import dataclass
-from republic import LLM, AsyncTapeStore, Tape, TapeEntry, TapeQuery
+from republic import AsyncTapeManager, AsyncTapeStore, TapeEntry, TapeQuery
+from republic.tape.session import TapeSession
+from republic.tape.store import InMemoryTapeStore
 
 from bub.builtin.store import ForkTapeStore
+from bub.framework import BubFramework
+from bub.types import State
 
 
 def session_tape_name(session_id: str, workspace: str) -> str:
@@ -53,14 +57,42 @@ class AnchorSummary:
 
 
 class TapeService:
-    def __init__(self, llm: LLM, archive_path: Path, store: ForkTapeStore) -> None:
-        self._llm = llm
-        self._archive_path = archive_path
+    def __init__(self, store: ForkTapeStore, archive_path: Path, framework: BubFramework) -> None:
         self._store = store
+        self._archive_path = archive_path
+        self._framework = framework
+
+    @classmethod
+    def from_framework(cls, framework: BubFramework) -> TapeService:
+        import bub
+        store = framework.get_tape_store()
+        if store is None:
+            store = InMemoryTapeStore()
+        return cls(ForkTapeStore(store), bub.home / "tapes", framework)
+
+    def _make_mgr(self, state: State | None = None) -> AsyncTapeManager:
+        ctx = replace(self._framework.build_tape_context(), state=state or {})
+        return AsyncTapeManager(store=self._store, default_context=ctx)
+
+    @contextlib.asynccontextmanager
+    async def session(
+        self, tape_name: str, *, merge_back: bool = True, state: State | None = None
+    ) -> AsyncGenerator[TapeSession, None]:
+        """Fork tape, create session, bootstrap anchor, yield session."""
+        async with self._store.fork(tape_name, merge_back=merge_back):
+            mgr = self._make_mgr(state)
+            async with mgr.session(tape_name) as session:
+                await self._bootstrap(session)
+                yield session
+
+    async def _bootstrap(self, session: TapeSession) -> None:
+        """Create initial anchor if tape has none."""
+        entries = await self._store.fetch_all(TapeQuery(tape=session.name))
+        if not any(e.kind == "anchor" for e in entries):
+            await session.handoff("session/start", state={"owner": "human"})
 
     async def info(self, tape_name: str) -> TapeInfo:
-        tape = self._llm.tape(tape_name)
-        entries = list(await tape.query_async.all())
+        entries = list(await self._store.fetch_all(TapeQuery(tape=tape_name)))
         anchors = [(i, entry) for i, entry in enumerate(entries) if entry.kind == "anchor"]
         if anchors:
             last_anchor = anchors[-1][1].payload.get("name")
@@ -77,7 +109,7 @@ class TapeService:
                         last_token_usage = token_usage
                         break
         return TapeInfo(
-            name=tape.name,
+            name=tape_name,
             entries=len(entries),
             anchors=len(anchors),
             last_anchor=str(last_anchor) if last_anchor else None,
@@ -86,14 +118,13 @@ class TapeService:
         )
 
     async def ensure_bootstrap_anchor(self, tape_name: str) -> None:
-        tape = self._llm.tape(tape_name)
-        anchors = list(await tape.query_async.kinds("anchor").all())
-        if not anchors:
-            await tape.handoff_async("session/start", state={"owner": "human"})
+        entries = await self._store.fetch_all(TapeQuery(tape=tape_name).kinds("anchor"))
+        if not entries:
+            mgr = self._make_mgr()
+            await mgr.handoff(tape_name, "session/start", state={"owner": "human"})
 
     async def anchors(self, tape_name: str, limit: int = 20) -> list[AnchorSummary]:
-        tape = self._llm.tape(tape_name)
-        entries = list(await tape.query_async.kinds("anchor").all())
+        entries = list(await self._store.fetch_all(TapeQuery(tape=tape_name).kinds("anchor")))
         results: list[AnchorSummary] = []
         for entry in entries[-limit:]:
             name = str(entry.payload.get("name", "-"))
@@ -103,41 +134,37 @@ class TapeService:
         return results
 
     async def _archive(self, tape_name: str) -> Path:
-        tape = self._llm.tape(tape_name)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         self._archive_path.mkdir(parents=True, exist_ok=True)
-        archive_path = self._archive_path / f"{tape.name}.jsonl.{stamp}.bak"
+        archive_path = self._archive_path / f"{tape_name}.jsonl.{stamp}.bak"
         with archive_path.open("w", encoding="utf-8") as f:
-            for entry in await tape.query_async.all():
+            for entry in await self._store.fetch_all(TapeQuery(tape=tape_name)):
                 f.write(json.dumps(asdict(entry), ensure_ascii=False) + "\n")
         return archive_path
 
     async def reset(self, tape_name: str, *, archive: bool = False) -> str:
-        tape = self._llm.tape(tape_name)
         archive_path: Path | None = None
         if archive:
             archive_path = await self._archive(tape_name)
-        await tape.reset_async()
+        await self._store.reset(tape_name)
         state = {"owner": "human"}
         if archive_path is not None:
             state["archived"] = str(archive_path)
-        await tape.handoff_async("session/start", state=state)
+        mgr = self._make_mgr()
+        await mgr.handoff(tape_name, "session/start", state=state)
         return f"Archived: {archive_path}" if archive_path else "ok"
 
     async def handoff(self, tape_name: str, *, name: str, state: dict[str, Any] | None = None) -> list[TapeEntry]:
-        tape = self._llm.tape(tape_name)
-        entries = await tape.handoff_async(name, state=state)
+        mgr = self._make_mgr()
+        entries = await mgr.handoff(tape_name, name, state=state)
         return cast(list[TapeEntry], entries)
 
-    async def search(self, query: TapeQuery[AsyncTapeStore]) -> list[TapeEntry]:
+    async def search(self, query: TapeQuery) -> list[TapeEntry]:
         return list(await self._store.fetch_all(query))
 
     async def append_event(self, tape_name: str, name: str, payload: dict[str, Any], **meta: Any) -> None:
-        tape = self._llm.tape(tape_name)
-        await tape.append_async(TapeEntry.event(name=name, data=payload, **meta))
-
-    def tape(self, tape_name: str) -> Tape:
-        return self._llm.tape(tape_name)
+        mgr = self._make_mgr()
+        await mgr.append_entry(tape_name, TapeEntry.event(name=name, data=payload, **meta))
 
     @contextlib.asynccontextmanager
     async def fork_tape(self, tape_name: str, merge_back: bool = True) -> AsyncGenerator[None, None]:

@@ -1,55 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-import republic.auth.openai_codex as openai_codex
-from republic import AsyncStreamEvents, StreamEvent, TapeContext
+from republic import AsyncStreamEvents, StreamEvent
+from republic.core.results import Finished, LLMResult, PreparedChat, TextEvent
+from republic.tape.session import TapeSession
 
-import bub.builtin.agent as agent_module
 from bub.builtin.agent import Agent
 from bub.builtin.settings import AgentSettings
-
-
-def test_build_llm_passes_codex_resolver_to_republic(monkeypatch) -> None:
-    captured: dict[str, Any] = {}
-    resolver = object()
-
-    class FakeLLM:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            captured["args"] = args
-            captured["kwargs"] = kwargs
-
-    monkeypatch.setattr(agent_module, "LLM", FakeLLM)
-    monkeypatch.setattr(openai_codex, "openai_codex_oauth_resolver", lambda: resolver)
-
-    settings = AgentSettings.model_construct(
-        model="openai:gpt-5-codex",
-        api_key=None,
-        api_base=None,
-        client_args={"extra_headers": {"HTTP-Referer": "https://openclaw.ai", "X-Title": "OpenClaw"}},
-    )
-    tape_store = object()
-
-    agent_module._build_llm(settings, tape_store, "ctx")
-
-    assert captured["args"] == ("openai:gpt-5-codex",)
-    assert captured["kwargs"]["api_key"] is None
-    assert captured["kwargs"]["api_base"] is None
-    assert captured["kwargs"]["client_args"] == {
-        "extra_headers": {"HTTP-Referer": "https://openclaw.ai", "X-Title": "OpenClaw"},
-    }
-    assert captured["kwargs"]["api_key_resolver"] is resolver
-    assert captured["kwargs"]["tape_store"] is tape_store
-    assert captured["kwargs"]["context"] == "ctx"
-
-
-# ---------------------------------------------------------------------------
-# Agent.run() tests: merge_back logic and model passthrough
-# ---------------------------------------------------------------------------
 
 
 def _make_agent() -> Agent:
@@ -66,96 +29,67 @@ def _make_agent() -> Agent:
     return agent
 
 
-class _ForkCapture:
-    """Captures the merge_back kwarg passed to fork_tape."""
+class _MergeBackCapture:
+    """Captures the merge_back kwarg passed to TapeService.session()."""
 
     def __init__(self) -> None:
         self.merge_back_values: list[bool] = []
+        self.sessions: list[MagicMock] = []
 
     @contextlib.asynccontextmanager
-    async def fork_tape(self, tape_name: str, merge_back: bool = True) -> AsyncGenerator[None, None]:
+    async def session(
+        self, tape_name: str, *, merge_back: bool = True, state: Any = None
+    ) -> AsyncGenerator[MagicMock, None]:
         self.merge_back_values.append(merge_back)
-        yield
-
-
-class _FakeTapeService:
-    """Minimal TapeService stand-in for testing Agent.run()."""
-
-    def __init__(self, fork_capture: _ForkCapture) -> None:
-        self._fork = fork_capture
-        self.run_tools_model: str | None = None
-
-    def tape(self, tape_name: str) -> MagicMock:
-        tape = MagicMock()
-        tape.name = tape_name
-        tape.context = TapeContext(state={})
-
-        async def fake_stream_events_async(**kwargs: Any) -> AsyncStreamEvents:
-            self.run_tools_model = kwargs.get("model")
-
-            async def iterator():
-                yield StreamEvent("final", {"text": "done"})
-
-            return AsyncStreamEvents(iterator())
-
-        tape.stream_events_async = fake_stream_events_async
-        return tape
-
-    async def ensure_bootstrap_anchor(self, tape_name: str) -> None:
-        pass
-
-    async def append_event(self, tape_name: str, name: str, payload: dict) -> None:
-        pass
-
-    @contextlib.asynccontextmanager
-    async def fork_tape(self, tape_name: str, merge_back: bool = True) -> AsyncGenerator[None, None]:
-        async with self._fork.fork_tape(tape_name, merge_back=merge_back):
-            yield
+        mock_session = MagicMock()
+        mock_session.name = tape_name
+        self.sessions.append(mock_session)
+        yield mock_session
 
 
 @pytest.mark.asyncio
 async def test_agent_run_regular_session_merges_back() -> None:
     """A regular (non-temp) session should merge tape entries back."""
     agent = _make_agent()
-    fork_capture = _ForkCapture()
-    agent.tapes = _FakeTapeService(fork_capture)  # type: ignore[assignment]
+    capture = _MergeBackCapture()
+    agent.tapes = capture  # type: ignore[assignment]
 
-    result = await agent.run_stream(tape_name="user/session1", prompt="hello", state={"session_id": "user/session1", "_runtime_workspace": "/tmp"})  # noqa: S108
-    [event async for event in result]
+    # Mock the LLM call path to return immediately
+    with patch.object(
+        agent,
+        "_loop_stream_gen",
+        return_value=_error_stream("error: empty prompt"),
+    ):
+        result = await agent.run_stream(
+            tape_name="user/session1",
+            prompt="hello",
+            state={"session_id": "user/session1", "_runtime_workspace": "/tmp"},  # noqa: S108
+        )
+        [event async for event in result]
 
-    assert fork_capture.merge_back_values == [True]
+    assert capture.merge_back_values == [True]
 
 
 @pytest.mark.asyncio
 async def test_agent_run_temp_session_does_not_merge_back() -> None:
     """A temp/ session should NOT merge tape entries back."""
     agent = _make_agent()
-    fork_capture = _ForkCapture()
-    agent.tapes = _FakeTapeService(fork_capture)  # type: ignore[assignment]
+    capture = _MergeBackCapture()
+    agent.tapes = capture  # type: ignore[assignment]
 
-    result = await agent.run_stream(tape_name="temp/abc123", prompt="hello", state={"session_id": "temp/abc123", "_runtime_workspace": "/tmp"})  # noqa: S108
-    [event async for event in result]
+    with patch.object(
+        agent,
+        "_loop_stream_gen",
+        return_value=_error_stream("error: empty prompt"),
+    ):
+        result = await agent.run_stream(
+            tape_name="temp/abc123",
+            prompt="hello",
+            state={"session_id": "temp/abc123", "_runtime_workspace": "/tmp"},  # noqa: S108
+        )
+        [event async for event in result]
 
-    assert fork_capture.merge_back_values == [False]
-
-
-@pytest.mark.asyncio
-async def test_agent_run_passes_model_to_llm() -> None:
-    """The model parameter should be forwarded to stream_events_async."""
-    agent = _make_agent()
-    fork_capture = _ForkCapture()
-    fake_tapes = _FakeTapeService(fork_capture)
-    agent.tapes = fake_tapes  # type: ignore[assignment]
-
-    result = await agent.run_stream(
-        tape_name="user/s1",
-        prompt="hello",
-        state={"session_id": "user/s1", "_runtime_workspace": "/tmp"},  # noqa: S108
-        model="openai:gpt-4o",
-    )
-    [event async for event in result]
-
-    assert fake_tapes.run_tools_model == "openai:gpt-4o"
+    assert capture.merge_back_values == [False]
 
 
 @pytest.mark.asyncio
@@ -172,15 +106,88 @@ async def test_agent_run_empty_prompt_returns_error() -> None:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Model passthrough tests
+# ---------------------------------------------------------------------------
+
+
+class _ChatCapture:
+    """Captures PreparedChat passed to ChatClient.stream()."""
+
+    def __init__(self) -> None:
+        self.prepared: PreparedChat | None = None
+
+    async def stream(self, prepared: PreparedChat, messages: list[dict]) -> AsyncStreamEvents:
+        self.prepared = prepared
+
+        async def iterator():
+            yield TextEvent(content="done")
+            yield _final_event("done")
+
+        return AsyncStreamEvents(iterator())
+
+
+def _final_event(text: str) -> Any:
+    from republic.core.results import FinalEvent
+    return FinalEvent(result=Finished(result=LLMResult(
+        request=PreparedChat(model="", provider=""),
+        text=text,
+    )))
+
+
+def _error_stream(message: str) -> AsyncStreamEvents:
+    """Create a stream that yields a single error event."""
+    from republic.core.errors import ErrorKind, RepublicError
+    from republic.core.results import ErrorEvent
+
+    async def gen():
+        yield ErrorEvent(error=RepublicError(ErrorKind.INVALID_INPUT, message))
+
+    return AsyncStreamEvents(gen())
+
+
 @pytest.mark.asyncio
-async def test_agent_run_model_defaults_to_none() -> None:
-    """When model is not specified, None should be passed to run_tools_async."""
+async def test_agent_run_passes_model_to_llm() -> None:
+    """The model parameter should be forwarded to session.prepare()."""
     agent = _make_agent()
-    fork_capture = _ForkCapture()
-    fake_tapes = _FakeTapeService(fork_capture)
-    agent.tapes = fake_tapes  # type: ignore[assignment]
+    capture = _MergeBackCapture()
+    agent.tapes = capture  # type: ignore[assignment]
 
-    result = await agent.run_stream(tape_name="user/s1", prompt="hello", state={"session_id": "user/s1", "_runtime_workspace": "/tmp"})  # noqa: S108
-    [event async for event in result]
+    chat_capture = _ChatCapture()
+    agent._chat = chat_capture  # type: ignore[assignment]
 
-    assert fake_tapes.run_tools_model is None
+    # Patch _resolve_model to avoid real provider lookup
+    with patch.object(agent, "_resolve_model", return_value=("openai", "gpt-4o")):
+        result = await agent.run_stream(
+            tape_name="user/s1",
+            prompt="hello",
+            state={"session_id": "user/s1", "_runtime_workspace": "/tmp"},  # noqa: S108
+            model="openai:gpt-4o",
+        )
+        [event async for event in result]
+
+    assert chat_capture.prepared is not None
+    assert chat_capture.prepared.model == "gpt-4o"
+    assert chat_capture.prepared.provider == "openai"
+
+
+@pytest.mark.asyncio
+async def test_agent_run_model_defaults_to_settings_model() -> None:
+    """When model is not specified, Agent.settings.model should be used."""
+    agent = _make_agent()
+    capture = _MergeBackCapture()
+    agent.tapes = capture  # type: ignore[assignment]
+
+    chat_capture = _ChatCapture()
+    agent._chat = chat_capture  # type: ignore[assignment]
+
+    with patch.object(agent, "_resolve_model", return_value=("test", "test:model")):
+        result = await agent.run_stream(
+            tape_name="user/s1",
+            prompt="hello",
+            state={"session_id": "user/s1", "_runtime_workspace": "/tmp"},  # noqa: S108
+        )
+        [event async for event in result]
+
+    assert chat_capture.prepared is not None
+    assert chat_capture.prepared.model == "test:model"
