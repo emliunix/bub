@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 import typer
-from republic import AsyncStreamEvents, StreamEvent, StreamState
+from republic import AsyncStreamEvents, TextEvent, FinalEvent
 from typer.testing import CliRunner
 
 from bub import configure
@@ -307,12 +307,13 @@ async def test_process_inbound_streams_when_requested() -> None:  # noqa: C901
         async def run_model_stream(self, prompt, session_id, state):
             stream_calls.append(prompt)
 
+            from republic.core.results import LLMResult, Finished
             async def iterator():
-                yield StreamEvent("text", {"delta": "stream"})
-                yield StreamEvent("text", {"delta": "ed"})
-                yield StreamEvent("final", {"text": "streamed", "ok": True})
+                yield TextEvent(content="stream")
+                yield TextEvent(content="ed")
+                yield FinalEvent(result=Finished(result=LLMResult(request=None, text="streamed")))
 
-            return AsyncStreamEvents(iterator(), state=StreamState())
+            return AsyncStreamEvents(iterator())
 
         @hookimpl
         async def save_state(self, session_id, state, message, model_output) -> None:
@@ -330,7 +331,7 @@ async def test_process_inbound_streams_when_requested() -> None:  # noqa: C901
         def wrap_stream(self, message, stream):
             async def iterator():
                 async for event in stream:
-                    wrapped_events.append(event.kind)
+                    wrapped_events.append(type(event).__name__)
                     yield event
 
             return iterator()
@@ -350,5 +351,5 @@ async def test_process_inbound_streams_when_requested() -> None:  # noqa: C901
     )
 
     assert stream_calls == ["prompt"]
-    assert wrapped_events == ["text", "text", "final"]
+    assert wrapped_events == ["TextEvent", "TextEvent", "FinalEvent"]
     assert result.model_output == "streamed"

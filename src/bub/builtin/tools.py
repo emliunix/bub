@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, Field
 from bub.builtin.tape import get_tape_name
-from republic import AsyncTapeStore, TapeQuery, ToolContext
+from republic import AsyncTapeStore, ErrorEvent, TapeQuery, TextEvent, ToolContext
 
 from bub.builtin.shell_manager import shell_manager
 from bub.skills import discover_skills
@@ -277,10 +277,11 @@ async def run_subagent(param: SubAgentInput, *, context: ToolContext) -> str:
         allowed_tools=allowed_tools,
         allowed_skills=param.allowed_skills,
     ):
-        if event.kind == "error":
-            output += f"[Error: {event.data.get('message', 'unknown error')}]"
-        elif event.kind == "text":
-            output += str(event.data.get("delta", ""))
+        match event:
+            case TextEvent(content=content):
+                output += content or ""
+            case ErrorEvent(error=err):
+                output += f"[Error: {err.message}]"
     return output
 
 

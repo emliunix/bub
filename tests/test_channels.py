@@ -7,7 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from republic import StreamEvent
+from republic import TextEvent
+from republic.core.results import FinalEvent, Finished, LLMResult, PreparedChat
 
 from bub.channels.cli import CliChannel
 from bub.channels.cli import renderer as cli_renderer
@@ -80,6 +81,9 @@ class FakeFramework:
             yield
         finally:
             self.running_exits += 1
+
+    async def shutdown(self) -> None:
+        pass
 
     def bind_outbound_router(self, router) -> None:
         self.router = router
@@ -325,10 +329,10 @@ async def test_cli_channel_stream_events_renders_stream_and_yields_events() -> N
 
     message = _message("ignored", channel="cli", kind="command", session_id="cli:1")
 
-    async def source() -> asyncio.AsyncIterator[StreamEvent]:
-        yield StreamEvent("text", {"delta": "hel"})
-        yield StreamEvent("text", {"delta": "lo"})
-        yield StreamEvent("final", {})
+    async def source() -> asyncio.AsyncIterator[Any]:
+        yield TextEvent(content="hel")
+        yield TextEvent(content="lo")
+        yield FinalEvent(result=Finished(result=LLMResult(request=PreparedChat(model="", provider=""), text="")))
 
     yielded = [event async for event in channel.stream_events(message, source())]
 
@@ -337,7 +341,7 @@ async def test_cli_channel_stream_events_renders_stream_and_yields_events() -> N
         ("update", "command", "hello"),
         ("finish", "command", "hello"),
     ]
-    assert [event.kind for event in yielded] == ["text", "text", "final"]
+    assert [type(e).__name__ for e in yielded] == ["TextEvent", "TextEvent", "FinalEvent"]
 
 
 def test_cli_channel_history_file_uses_workspace_hash(tmp_path: Path) -> None:

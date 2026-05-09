@@ -12,9 +12,7 @@ import pluggy
 import typer
 from dotenv import load_dotenv
 from loguru import logger
-from republic import AsyncTapeStore, RepublicError, TapeContext
-from republic.core.errors import ErrorKind
-from republic.tape import TapeStore
+from republic import AsyncTapeStore, ErrorEvent, RepublicError, TapeContext, TextEvent
 
 from bub import configure
 from bub.envelope import content_of, field_of, unpack_batch
@@ -48,7 +46,7 @@ class BubFramework:
         self._hook_runtime = HookRuntime(self._plugin_manager)
         self._plugin_status: dict[str, PluginStatus] = {}
         self._outbound_router: OutboundChannelRouter | None = None
-        self._tape_store: TapeStore | AsyncTapeStore | None = None
+        self._tape_store: AsyncTapeStore | None = None
         configure.load(self.config_file)
 
     def _load_builtin_hooks(self) -> None:
@@ -177,17 +175,13 @@ class BubFramework:
             if self._outbound_router is not None:
                 stream = self._outbound_router.wrap_stream(inbound, stream)
             async for event in stream:
-                if event.kind == "text":
-                    parts.append(str(event.data.get("delta", "")))
-                elif event.kind == "error":
-                    # Turn "kind" to enum type otherwise the RepublicError's __str__ won't work well
-                    data = {
-                        **event.data,
-                        "kind": ErrorKind(event.data.get("kind", "unknown")),
-                    }
-                    await self._hook_runtime.notify_error(
-                        stage="run_model", error=RepublicError(**data), message=inbound
-                    )
+                match event:
+                    case TextEvent(content=content):
+                        parts.append(content or "")
+                    case ErrorEvent(error=err):
+                        await self._hook_runtime.notify_error(
+                            stage="run_model", error=err, message=inbound
+                        )
             return "".join(parts)
 
     def hook_report(self) -> dict[str, list[str]]:
@@ -272,7 +266,7 @@ class BubFramework:
             finally:
                 self._tape_store = None
 
-    def get_tape_store(self) -> TapeStore | AsyncTapeStore | None:
+    def get_tape_store(self) -> AsyncTapeStore | None:
         return self._tape_store
 
     def get_system_prompt(self, prompt: str | list[dict], state: dict[str, Any]) -> str:

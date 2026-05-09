@@ -23,7 +23,6 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any, TypeVar
 
-from httpx import stream
 from loguru import logger
 from republic import (
     RepublicError,
@@ -354,7 +353,8 @@ class Agent:
                 except Exception as exc:
                     await self._log_step(session, step, start, "error", prepared, error=str(exc))
                     raise
-            raise RuntimeError(f"max_steps_reached={self.settings.max_steps}")
+            else:
+                raise RuntimeError(f"max_steps_reached={self.settings.max_steps}")
         return AsyncStreamEvents(generator())
 
     # tape logging

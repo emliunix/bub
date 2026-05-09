@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 import pluggy
 from republic import AsyncStreamEvents, AsyncTapeStore, TapeContext
-from republic.tape import TapeStore
 
 from bub.types import Envelope, MessageHandler, State
 
@@ -94,7 +93,7 @@ class BubHookSpecs:
         raise NotImplementedError
 
     @hookspec(firstresult=True)
-    def provide_tape_store(self) -> TapeStore | AsyncTapeStore:
+    def provide_tape_store(self) -> AsyncTapeStore:
         """Provide a tape store instance for Bub's conversation recording feature."""
         ...
 

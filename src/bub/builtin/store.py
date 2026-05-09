@@ -14,7 +14,7 @@ from typing import Any, cast
 
 from loguru import logger
 from republic import AsyncTapeStore, TapeEntry, TapeQuery
-from republic.tape import AsyncTapeStoreAdapter, InMemoryQueryMixin, InMemoryTapeStore
+from republic.tape import InMemoryQueryMixin, InMemoryTapeStore
 from republic.tape.store import is_async_tape_store
 
 from bub.utils import get_entry_text

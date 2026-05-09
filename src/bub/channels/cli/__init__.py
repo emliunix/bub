@@ -1,5 +1,7 @@
 import asyncio
 import contextlib
+from typing import Any
+
 from collections.abc import AsyncGenerator, AsyncIterable
 from datetime import datetime
 from hashlib import md5
@@ -12,7 +14,7 @@ from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
-from republic import StreamEvent
+from republic import TextEvent
 from rich import get_console
 from rich.live import Live
 
@@ -139,21 +141,22 @@ class CliChannel(Channel):
         return FormattedText([("bold", f"{cwd} {symbol} ")])
 
     async def stream_events(
-        self, message: ChannelMessage, stream: AsyncIterable[StreamEvent]
-    ) -> AsyncIterable[StreamEvent]:
+        self, message: ChannelMessage, stream: AsyncIterable[Any]
+    ) -> AsyncIterable[Any]:
         live: Live | None = None
         text = ""
         try:
             async for event in stream:
-                if event.kind == "text":
-                    content = str(event.data.get("delta", ""))
-                    if not content.strip() and not text:
-                        continue  # skip leading whitespace-only events
-                    text += content
-                    if live is None:
-                        live = self._renderer.start_stream(message.kind, text)
-                    else:
-                        self._renderer.update_stream(live, kind=message.kind, text=text)
+                match event:
+                    case TextEvent(content=content):
+                        content = content or ""
+                        if not content.strip() and not text:
+                            continue  # skip leading whitespace-only events
+                        text += content
+                        if live is None:
+                            live = self._renderer.start_stream(message.kind, text)
+                        else:
+                            self._renderer.update_stream(live, kind=message.kind, text=text)
                 yield event
         finally:
             if live is not None:

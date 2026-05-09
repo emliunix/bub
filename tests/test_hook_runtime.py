@@ -1,6 +1,7 @@
 import pluggy
 import pytest
-from republic import AsyncStreamEvents, StreamEvent
+from republic import AsyncStreamEvents, TextEvent
+from republic.core.results import FinalEvent, Finished, LLMResult, PreparedChat
 
 from bub.hook_runtime import HookRuntime
 from bub.hookspecs import BUB_HOOK_NAMESPACE, BubHookSpecs, hookimpl
@@ -113,8 +114,9 @@ async def test_run_model_uses_streaming_hook_when_plain_hook_absent() -> None:
         @hookimpl
         async def run_model_stream(self, prompt, session_id, state):
             async def iterator():
-                yield StreamEvent("text", {"delta": "stream"})
-                yield StreamEvent("text", {"delta": "ed"})
+                yield TextEvent(content="stream")
+                yield TextEvent(content="ed")
+                yield FinalEvent(result=Finished(result=LLMResult(request=PreparedChat(model="", provider=""), text="")))
 
             return AsyncStreamEvents(iterator())
 
@@ -138,4 +140,4 @@ async def test_run_model_stream_falls_back_to_plain_hook() -> None:
 
     assert stream is not None
     events = [event async for event in stream]
-    assert [(event.kind, event.data) for event in events] == [("text", {"delta": "plain"})]
+    assert [(type(e).__name__, getattr(e, 'content', None)) for e in events] == [("TextEvent", "plain")]

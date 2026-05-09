@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from republic import AsyncStreamEvents, StreamEvent
-from republic.core.results import Finished, LLMResult, PreparedChat, TextEvent
+from republic.core.results import ErrorEvent, Finished, LLMResult, PreparedChat, TextEvent
 from republic.tape.session import TapeSession
 
 from bub.builtin.agent import Agent
@@ -100,15 +100,42 @@ async def test_agent_run_empty_prompt_returns_error() -> None:
     result = await agent.run_stream(tape_name="user/s1", prompt="", state={})
     events = [event async for event in result]
 
-    assert [(event.kind, event.data) for event in events] == [
-        ("text", {"delta": "error: empty prompt"}),
-        ("final", {"ok": False, "text": "error: empty prompt"}),
-    ]
+    assert len(events) == 1
+    assert isinstance(events[0], ErrorEvent)
+    assert events[0].error.message == "error: empty prompt"
 
 
 # ---------------------------------------------------------------------------
 # Model passthrough tests
 # ---------------------------------------------------------------------------
+
+
+class _FakeSession:
+    """Minimal fake TapeSession that delegates stream() to the ChatClient."""
+
+    def __init__(self, name: str = "test") -> None:
+        self.name = name
+        self.last_prepared: PreparedChat | None = None
+
+    async def prepare(self, *, prompt: str, provider: str, model: str, **kwargs: Any) -> PreparedChat:
+        self.last_prepared = PreparedChat(model=model, provider=provider)
+        return self.last_prepared
+
+    async def stream(self, chat: Any, prepared: PreparedChat) -> AsyncStreamEvents:
+        return await chat.stream(prepared, [])
+
+    async def run(self, chat: Any, prepared: PreparedChat) -> Any:
+        from republic.core.results import Finished, LLMResult
+        return Finished(result=LLMResult(request=prepared, text="done"))
+
+    async def add_tool_results(self, needed: Any, results: list[dict]) -> PreparedChat:
+        return self.last_prepared or PreparedChat(model="", provider="")
+
+    async def handoff(self, name: str, **kwargs: Any) -> None:
+        pass
+
+    async def append_event(self, prepared: PreparedChat, kind: str, payload: dict) -> None:
+        pass
 
 
 class _ChatCapture:
@@ -146,12 +173,29 @@ def _error_stream(message: str) -> AsyncStreamEvents:
     return AsyncStreamEvents(gen())
 
 
+class _FakeTapeService:
+    """Yields _FakeSession instances."""
+
+    def __init__(self) -> None:
+        self.merge_back_values: list[bool] = []
+        self.sessions: list[_FakeSession] = []
+
+    @contextlib.asynccontextmanager
+    async def session(
+        self, tape_name: str, *, merge_back: bool = True, state: Any = None
+    ) -> AsyncGenerator[_FakeSession, None]:
+        self.merge_back_values.append(merge_back)
+        fake = _FakeSession(name=tape_name)
+        self.sessions.append(fake)
+        yield fake
+
+
 @pytest.mark.asyncio
 async def test_agent_run_passes_model_to_llm() -> None:
     """The model parameter should be forwarded to session.prepare()."""
     agent = _make_agent()
-    capture = _MergeBackCapture()
-    agent.tapes = capture  # type: ignore[assignment]
+    tapes = _FakeTapeService()
+    agent.tapes = tapes  # type: ignore[assignment]
 
     chat_capture = _ChatCapture()
     agent._chat = chat_capture  # type: ignore[assignment]
@@ -175,8 +219,8 @@ async def test_agent_run_passes_model_to_llm() -> None:
 async def test_agent_run_model_defaults_to_settings_model() -> None:
     """When model is not specified, Agent.settings.model should be used."""
     agent = _make_agent()
-    capture = _MergeBackCapture()
-    agent.tapes = capture  # type: ignore[assignment]
+    tapes = _FakeTapeService()
+    agent.tapes = tapes  # type: ignore[assignment]
 
     chat_capture = _ChatCapture()
     agent._chat = chat_capture  # type: ignore[assignment]

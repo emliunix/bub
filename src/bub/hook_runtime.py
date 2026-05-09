@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import pluggy
 from loguru import logger
-from republic import AsyncStreamEvents, StreamEvent, StreamState
+from republic import AsyncStreamEvents, TextEvent
 
 from bub.types import Envelope
 
@@ -170,8 +170,9 @@ class HookRuntime:
                 stream = await self.call_first("run_model_stream", prompt=prompt, session_id=session_id, state=state)
                 text = ""
                 async for event in stream:
-                    if event.kind == "text":
-                        text += str(event.data.get("delta", ""))
+                    match event:
+                        case TextEvent(content=content):
+                            text += content or ""
                 return text
         return None
 
@@ -184,11 +185,11 @@ class HookRuntime:
                 return await self.call_first("run_model_stream", prompt=prompt, session_id=session_id, state=state)
             elif hasattr(plugin, "run_model"):
 
-                async def iterator() -> AsyncGenerator[StreamEvent, None]:
+                async def iterator() -> AsyncGenerator[Any, None]:
                     result = await self.call_first("run_model", prompt=prompt, session_id=session_id, state=state)
-                    yield StreamEvent("text", {"delta": result})
+                    yield TextEvent(content=result)
 
-                return AsyncStreamEvents(iterator(), state=StreamState())
+                return AsyncStreamEvents(iterator())
         return None
 
 

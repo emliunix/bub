@@ -4,7 +4,8 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from republic import AsyncStreamEvents, StreamEvent
+from republic import AsyncStreamEvents, TextEvent
+from republic.core.results import FinalEvent, Finished, LLMResult, PreparedChat
 
 from bub.builtin.tools import run_subagent
 from bub.tools import REGISTRY, tool
@@ -24,7 +25,8 @@ class FakeAgent:
 
     async def _run_stream(self, **kwargs: Any) -> AsyncStreamEvents:
         async def iterator():
-            yield StreamEvent("text", {"delta": "agent result"})
+            yield TextEvent(content="agent result")
+            yield FinalEvent(result=Finished(result=LLMResult(request=PreparedChat(model="", provider=""), text="agent result")))
 
         return AsyncStreamEvents(iterator())
 
@@ -32,14 +34,14 @@ class FakeAgent:
 @pytest.mark.asyncio
 async def test_subagent_inherit_session() -> None:
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "_runtime_workspace": "/tmp"})
 
     result = await run_subagent.run(prompt="do something", session="inherit", context=ctx)
 
     assert result == "agent result"
     agent.run_stream.assert_called_once()
     call_kwargs = agent.run_stream.call_args.kwargs
-    assert call_kwargs["session_id"] == "user/abc"
+    assert call_kwargs["state"]["session_id"] == "user/abc"
     assert call_kwargs["prompt"] == "do something"
     assert call_kwargs["model"] is None
 
@@ -47,30 +49,30 @@ async def test_subagent_inherit_session() -> None:
 @pytest.mark.asyncio
 async def test_subagent_temp_session() -> None:
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "_runtime_workspace": "/tmp"})
 
     await run_subagent.run(prompt="task", session="temp", context=ctx)
 
     call_kwargs = agent.run_stream.call_args.kwargs
-    assert call_kwargs["session_id"].startswith("temp/")
-    assert call_kwargs["session_id"] != "user/abc"
+    assert call_kwargs["state"]["session_id"].startswith("temp/")
+    assert call_kwargs["state"]["session_id"] != "user/abc"
 
 
 @pytest.mark.asyncio
 async def test_subagent_custom_session() -> None:
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "_runtime_workspace": "/tmp"})
 
     await run_subagent.run(prompt="task", session="custom/session-1", context=ctx)
 
     call_kwargs = agent.run_stream.call_args.kwargs
-    assert call_kwargs["session_id"] == "custom/session-1"
+    assert call_kwargs["state"]["session_id"] == "custom/session-1"
 
 
 @pytest.mark.asyncio
 async def test_subagent_passes_model() -> None:
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "_runtime_workspace": "/tmp"})
 
     await run_subagent.run(prompt="task", model="openai:gpt-4o", context=ctx)
 
@@ -81,14 +83,15 @@ async def test_subagent_passes_model() -> None:
 @pytest.mark.asyncio
 async def test_subagent_state_includes_session_id() -> None:
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "extra": "val"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "extra": "val", "_runtime_workspace": "/tmp"})
 
     await run_subagent.run(prompt="task", session="temp", context=ctx)
 
     call_kwargs = agent.run_stream.call_args.kwargs
     state = call_kwargs["state"]
     # State should contain the subagent session_id, not the original
-    assert state["session_id"] == call_kwargs["session_id"]
+    assert state["session_id"].startswith("temp/")
+    assert state["session_id"] != "user/abc"
     assert state["extra"] == "val"
 
 
@@ -96,12 +99,12 @@ async def test_subagent_state_includes_session_id() -> None:
 async def test_subagent_default_session_when_missing() -> None:
     """When session_id is not in context state, default to 'temp/unknown'."""
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent})
+    ctx = FakeContext({"_runtime_agent": agent, "_runtime_workspace": "/tmp"})
 
     await run_subagent.run(prompt="task", session="inherit", context=ctx)
 
     call_kwargs = agent.run_stream.call_args.kwargs
-    assert call_kwargs["session_id"] == "temp/unknown"
+    assert call_kwargs["state"]["session_id"] == "temp/unknown"
 
 
 @pytest.mark.asyncio
@@ -114,7 +117,7 @@ async def test_subagent_empty_allowed_tools_defaults_to_all_non_subagent_tools()
         return "ok"
 
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "_runtime_workspace": "/tmp"})
 
     await run_subagent.run(prompt="task", allowed_tools=[], context=ctx)
 
@@ -133,7 +136,7 @@ async def test_subagent_resolves_model_tool_aliases_to_runtime_names() -> None:
         return "ok"
 
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "_runtime_workspace": "/tmp"})
 
     await run_subagent.run(prompt="task", allowed_tools=[" tests_resolve_subagent "], context=ctx)
 
@@ -143,7 +146,7 @@ async def test_subagent_resolves_model_tool_aliases_to_runtime_names() -> None:
 @pytest.mark.asyncio
 async def test_subagent_rejects_unknown_allowed_tools() -> None:
     agent = FakeAgent()
-    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc"})
+    ctx = FakeContext({"_runtime_agent": agent, "session_id": "user/abc", "_runtime_workspace": "/tmp"})
 
     with pytest.raises(ValueError, match="tests_missing_tool"):
         await run_subagent.run(prompt="task", allowed_tools=[" tests_missing_tool "], context=ctx)

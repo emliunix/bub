@@ -7,7 +7,7 @@ import typer
 from loguru import logger
 from bub.builtin.tape import get_tape_name
 from republic import AsyncStreamEvents, TapeContext
-from republic.tape import TapeStore
+from republic import AsyncTapeStore
 
 from bub import inquirer as bub_inquirer
 from bub.builtin.agent import Agent
@@ -306,7 +306,7 @@ class BuiltinImpl:
         return [outbound]
 
     @hookimpl
-    def provide_tape_store(self) -> TapeStore:
+    def provide_tape_store(self) -> AsyncTapeStore:
         import bub
         from bub.builtin.store import FileTapeStore
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from republic import AsyncStreamEvents, StreamEvent
+from republic import AsyncStreamEvents, TextEvent
 
 from bub.builtin.hook_impl import AGENTS_FILE_NAME, DEFAULT_SYSTEM_PROMPT, BuiltinImpl
 from bub.builtin.store import FileTapeStore
@@ -44,7 +44,7 @@ class FakeAgent:
         self.run_stream_calls.append((tape_name, prompt, state))
 
         async def iterator():
-            yield StreamEvent("text", {"delta": "agent-output"})
+            yield TextEvent(content="agent-output")
 
         return AsyncStreamEvents(iterator())
 
@@ -149,7 +149,7 @@ async def test_run_model_stream_delegates_to_agent(tmp_path: Path) -> None:
     stream = await impl.run_model_stream(prompt="prompt", session_id="session", state=state)
     events = [event async for event in stream]
 
-    assert [(event.kind, event.data) for event in events] == [("text", {"delta": "agent-output"})]
+    assert [(event.content, event.reasoning) for event in events] == [("agent-output", None)]
     assert len(agent.run_stream_calls) == 1
     assert agent.run_stream_calls[0][1:] == ("prompt", state)
     assert agent.run_calls == []
