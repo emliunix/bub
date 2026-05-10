@@ -1,11 +1,14 @@
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterable, AsyncGenerator, AsyncIterable
+import contextlib
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from republic import TapeEntry
 
 from bub.types import State
+
+T = TypeVar("T")
 
 
 def exclude_none(d: dict[str, Any]) -> dict[str, Any]:

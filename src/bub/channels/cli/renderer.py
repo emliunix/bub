@@ -33,8 +33,18 @@ class CliRenderer:
             return
         self.console.print(Text(text, style="bright_black"))
 
-    def panel(self, kind: MessageKind, text: str) -> Panel:
+    def panel(self, kind: MessageKind, text: str, reasoning: str = "") -> Panel:
         title, border_style = self._panel_style(kind)
+        if reasoning and reasoning.strip():
+            from rich.text import Text as RichText
+            combined = RichText()
+            combined.append("💭 ", style="bright_black")
+            combined.append("Thinking", style="bold bright_black")
+            combined.append("\n", style="bright_black")
+            combined.append(reasoning, style="bright_black")
+            combined.append("\n\n")
+            combined.append(text)
+            return Panel(combined, title=title, border_style=border_style)
         return Panel(text, title=title, border_style=border_style)
 
     def command_output(self, text: str) -> None:
@@ -57,9 +67,9 @@ class CliRenderer:
         if text:
             self.console.print(text)
 
-    def start_stream(self, kind: MessageKind, text: str) -> Live:
+    def start_stream(self, kind: MessageKind, text: str, *, reasoning: str = "") -> Live:
         live = Live(
-            self.panel(kind, text),
+            self.panel(kind, text, reasoning=reasoning),
             console=self.console,
             auto_refresh=False,
             transient=False,
@@ -68,12 +78,17 @@ class CliRenderer:
         live.start(refresh=True)
         return live
 
-    def update_stream(self, live: Live, *, kind: MessageKind, text: str) -> None:
-        live.update(self.panel(kind, text), refresh=True)
+    def update_stream(self, live: Live, *, kind: MessageKind, text: str, reasoning: str = "") -> None:
+        live.update(self.panel(kind, text, reasoning=reasoning), refresh=True)
 
-    def finish_stream(self, live: Live, *, kind: MessageKind, text: str) -> None:
-        live.update(self.panel(kind, text), refresh=True)
+    def finish_stream(self, live: Live, *, kind: MessageKind, text: str, reasoning: str = "") -> None:
+        live.update(self.panel(kind, text, reasoning=reasoning), refresh=True)
         live.stop()
+
+    def reasoning_output(self, text: str) -> None:
+        if not text.strip():
+            return
+        self.console.print(Text(text, style="bright_black"))
 
     @staticmethod
     def _panel_style(kind: MessageKind) -> tuple[str, str]:

@@ -148,3 +148,122 @@ api_format: responses
 
     assert settings.model == "openrouter:openrouter/free"
     assert settings.api_format == "responses"
+
+
+def test_settings_per_provider_reasoning_strategy() -> None:
+    settings = _settings_with_env({
+        "BUB_OPENAI_REASONING_STRATEGY": "full",
+        "BUB_ANTHROPIC_REASONING_STRATEGY": "last_turn_only",
+    })
+
+    assert isinstance(settings.reasoning_strategy, dict)
+    assert settings.reasoning_strategy["openai"] == "full"
+    assert settings.reasoning_strategy["anthropic"] == "last_turn_only"
+
+
+def test_settings_zai_complete_provider_specific() -> None:
+    """Full-circle Zhipu config via provider-specific env keys."""
+    settings = _settings_with_env({
+        "BUB_MODEL": "zai:GLM-5.1",
+        "BUB_ZAI_API_KEY": "sk-zai-test",
+        "BUB_ZAI_API_BASE": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "BUB_ZAI_REASONING_STRATEGY": "last_turn_only",
+        "BUB_ZAI_MAX_TOKENS": "8192",
+    })
+
+    assert settings.model == "zai:GLM-5.1"
+    assert isinstance(settings.api_key, dict)
+    assert settings.api_key["zai"] == "sk-zai-test"
+    assert isinstance(settings.api_base, dict)
+    assert settings.api_base["zai"] == "https://open.bigmodel.cn/api/coding/paas/v4"
+    assert isinstance(settings.reasoning_strategy, dict)
+    assert settings.reasoning_strategy["zai"] == "last_turn_only"
+
+
+def test_settings_client_args_provider_specific_from_yaml(load_config) -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        load_config(
+            """
+model: zai:GLM-5.1
+client_args:
+  default:
+    timeout: 30
+  zai:
+    thinking:
+      type: enabled
+""".strip(),
+        )
+
+        settings = load_settings()
+
+    assert settings.client_args is not None
+    assert settings.client_args["default"] == {"timeout": 30}
+    assert settings.client_args["zai"] == {"thinking": {"type": "enabled"}}
+
+
+def test_settings_client_args_from_env_json_parsed() -> None:
+    settings = _settings_with_env({
+        "BUB_ZAI_CLIENT_ARGS": '{"thinking":{"type":"enabled"}}',
+    })
+
+    assert isinstance(settings.client_args, dict)
+    assert settings.client_args["zai"] == {"thinking": {"type": "enabled"}}
+    assert settings.client_args["default"] == {}
+
+
+def test_settings_client_args_global_env_overrides_provider_specific() -> None:
+    """BUB_CLIENT_ARGS (global) takes precedence over BUB_ZAI_CLIENT_ARGS (factory)."""
+    settings = _settings_with_env({
+        "BUB_CLIENT_ARGS": '{"timeout":30}',
+        "BUB_ZAI_CLIENT_ARGS": '{"thinking":{"type":"enabled"}}',
+    })
+
+    # pydantic parses BUB_CLIENT_ARGS directly; factory is bypassed
+    assert settings.client_args == {"timeout": 30}
+
+
+def test_settings_transport_args_provider_specific_from_env() -> None:
+    settings = _settings_with_env({
+        "BUB_ZAI_TRANSPORT_ARGS": '{"thinking":{"type":"enabled"}}',
+    })
+
+    assert isinstance(settings.transport_args, dict)
+    assert settings.transport_args["zai"] == {"thinking": {"type": "enabled"}}
+    assert settings.transport_args["default"] == {}
+
+
+def test_settings_transport_args_from_yaml(load_config) -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        load_config(
+            """
+model: zai:GLM-5.1
+transport_args:
+  default:
+    temperature: 0.7
+  zai:
+    thinking:
+      type: enabled
+""".strip(),
+        )
+
+        settings = load_settings()
+
+    assert settings.transport_args is not None
+    assert settings.transport_args["default"] == {"temperature": 0.7}
+    assert settings.transport_args["zai"] == {"thinking": {"type": "enabled"}}
+
+
+def test_settings_reasoning_strategy_from_yaml(load_config) -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        load_config(
+            """
+model: openai:gpt-4o
+reasoning_strategy:
+  openai: full
+  default: prune
+""".strip(),
+        )
+
+        settings = load_settings()
+
+    assert settings.reasoning_strategy == {"openai": "full", "default": "prune"}

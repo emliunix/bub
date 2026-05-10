@@ -319,9 +319,9 @@ async def test_cli_channel_stream_events_renders_stream_and_yields_events() -> N
     events: list[tuple[str, str, str]] = []
     live_handle = object()
     channel._renderer = SimpleNamespace(
-        start_stream=lambda kind, text: events.append(("start", kind, text)) or live_handle,
-        update_stream=lambda live, *, kind, text: events.append(("update", kind, text)),
-        finish_stream=lambda live, *, kind, text: events.append(("finish", kind, text)),
+        start_stream=lambda kind, text, reasoning="": events.append(("start", kind, text)) or live_handle,
+        update_stream=lambda live, *, kind, text, reasoning="": events.append(("update", kind, text)),
+        finish_stream=lambda live, *, kind, text, reasoning="": events.append(("finish", kind, text)),
         error=lambda content: events.append(("error", "error", content)),
         command_output=lambda content: events.append(("send", "command", content)),
         assistant_output=lambda content: events.append(("send", "normal", content)),

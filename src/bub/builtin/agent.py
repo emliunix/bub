@@ -45,6 +45,7 @@ from republic.core.results import (
     TurnResult,
     get_tool_schemas,
 )
+from republic.tape.context import ReasoningStrategy
 from republic.tape.session import TapeSession
 from republic.tools.context import ToolContext
 from republic.tools.executor import ToolExecutor
@@ -56,6 +57,7 @@ from bub.tools import REGISTRY, model_tools, render_tools_prompt
 from bub.types import State
 from bub.utils import workspace_from_state
 from republic.tools.schema import ToolInput
+from republic.utils import ensure_drained
 
 # constants
 
@@ -286,26 +288,27 @@ class Agent:
                 stream = await session.stream(self._chat, prepared)
 
             result_event = None
-            async for event in stream:
-                match event:
-                    case TextEvent():
-                        yield event
-                    case FinalEvent():
-                        result_event = event
-                        break
-                    case ErrorEvent(error=err):
-                        if _is_context_length_error(str(err)):
-                            raise NeedHandOffError("auto_handoff/context_overflow",
-                                state={
-                                    "reason": "context_length_exceeded",
-                                    "error": str(err),
-                                },
-                                error=err)
-                        raise err
+            async with ensure_drained(stream) as stream:
+                async for event in stream:
+                    match event:
+                        case TextEvent():
+                            yield event
+                        case FinalEvent():
+                            result_event = event
+                            break
+                        case ErrorEvent(error=err):
+                            if _is_context_length_error(str(err)):
+                                raise NeedHandOffError("auto_handoff/context_overflow",
+                                    state={
+                                        "reason": "context_length_exceeded",
+                                        "error": str(err),
+                                    },
+                                    error=err)
+                            raise err
 
             if result_event is None:
                 raise RuntimeError("stream ended without final event")
-            
+
             res[0] = result_event.result
 
         async def generator() -> AsyncGenerator[StreamEvent, None]:
@@ -331,7 +334,7 @@ class Agent:
                         case ToolCallNeeded() as needed:
                             prepared = await self._execute_tools(session, needed, renamed, state, run_id=prepared.run_id)
                             await self._log_step(session, step, start, "continue", prepared)
-                        case Finished():
+                        case Finished() as finished:
                             await self._log_step(session, step, start, "ok", prepared)
                             break
 
@@ -455,6 +458,26 @@ class Agent:
             )
         return await session.add_tool_results(needed, execution.tool_results)
 
+    def _resolve_reasoning_strategy(self, provider: str) -> ReasoningStrategy:
+        setting = self.settings.reasoning_strategy
+        provider = provider.lower()
+        if isinstance(setting, dict):
+            strategy = setting.get(provider) or setting.get("default")
+        else:
+            strategy = setting
+        try:
+            return ReasoningStrategy(strategy) if strategy else ReasoningStrategy.PRUNE
+        except ValueError:
+            return ReasoningStrategy.PRUNE
+
+    def _resolve_transport_args(self, provider: str) -> dict[str, Any]:
+        setting = self.settings.transport_args
+        if not setting:
+            return {}
+        if "default" in setting or provider in setting:
+            return setting.get(provider, setting.get("default", {}))
+        return setting
+
     async def _prepare_turn(
         self,
         session: TapeSession,
@@ -464,6 +487,11 @@ class Agent:
         system_prompt: str,
         renamed: list,
     ) -> PreparedChat:
+        session._context = replace(
+            session._context,
+            reasoning_strategy=self._resolve_reasoning_strategy(provider),
+        )
+        transport_args = self._resolve_transport_args(provider)
         return await session.prepare(
             prompt=prompt,
             provider=provider,
@@ -472,6 +500,7 @@ class Agent:
             tools=get_tool_schemas(renamed),
             max_tokens=self.settings.max_tokens,
             reasoning_effort=self.settings.reasoning_effort,
+            **transport_args,
         )
 
 

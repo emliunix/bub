@@ -145,22 +145,25 @@ class CliChannel(Channel):
     ) -> AsyncIterable[Any]:
         live: Live | None = None
         text = ""
+        reasoning = ""
         try:
             async for event in stream:
                 match event:
-                    case TextEvent(content=content):
+                    case TextEvent(content=content, reasoning=r):
                         content = content or ""
-                        if not content.strip() and not text:
+                        if r:
+                            reasoning += r
+                        if not content.strip() and not text and not reasoning.strip():
                             continue  # skip leading whitespace-only events
                         text += content
                         if live is None:
-                            live = self._renderer.start_stream(message.kind, text)
+                            live = self._renderer.start_stream(message.kind, text, reasoning=reasoning)
                         else:
-                            self._renderer.update_stream(live, kind=message.kind, text=text)
+                            self._renderer.update_stream(live, kind=message.kind, text=text, reasoning=reasoning)
                 yield event
         finally:
             if live is not None:
-                self._renderer.finish_stream(live, kind=message.kind, text=text)
+                self._renderer.finish_stream(live, kind=message.kind, text=text, reasoning=reasoning)
 
     def _build_prompt(self, workspace: Path) -> PromptSession[str]:
         kb = KeyBindings()

@@ -4,11 +4,12 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from republic import AsyncStreamEvents, StreamEvent
+from republic import AsyncStreamEvents
 from republic.core.results import ErrorEvent, Finished, LLMResult, PreparedChat, TextEvent
+from republic.tape.context import ReasoningStrategy
 from republic.tape.session import TapeSession
 
 from bub.builtin.agent import Agent
@@ -114,11 +115,23 @@ class _FakeSession:
     """Minimal fake TapeSession that delegates stream() to the ChatClient."""
 
     def __init__(self, name: str = "test") -> None:
+        from republic.tape.context import TapeContext
         self.name = name
+        self._context = TapeContext()
         self.last_prepared: PreparedChat | None = None
 
     async def prepare(self, *, prompt: str, provider: str, model: str, **kwargs: Any) -> PreparedChat:
-        self.last_prepared = PreparedChat(model=model, provider=provider)
+        tools = kwargs.pop("tools", None) or []
+        max_tokens = kwargs.pop("max_tokens", None)
+        reasoning_effort = kwargs.pop("reasoning_effort", None)
+        self.last_prepared = PreparedChat(
+            model=model,
+            provider=provider,
+            tools=tools,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            kwargs=kwargs,
+        )
         return self.last_prepared
 
     async def stream(self, chat: Any, prepared: PreparedChat) -> AsyncStreamEvents:
@@ -235,3 +248,170 @@ async def test_agent_run_model_defaults_to_settings_model() -> None:
 
     assert chat_capture.prepared is not None
     assert chat_capture.prepared.model == "test:model"
+
+
+# ---------------------------------------------------------------------------
+# Reasoning strategy resolution tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveReasoningStrategy:
+    """Unit tests for Agent._resolve_reasoning_strategy."""
+
+    def test_global_string_setting(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(reasoning_strategy="full")
+        assert agent._resolve_reasoning_strategy("openai") == ReasoningStrategy.FULL
+
+    def test_dict_with_matching_provider(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"openai": "full", "anthropic": "last_turn_only"}
+        )
+        assert agent._resolve_reasoning_strategy("openai") == ReasoningStrategy.FULL
+        assert agent._resolve_reasoning_strategy("anthropic") == ReasoningStrategy.LAST_TURN_ONLY
+
+    def test_dict_no_match_returns_prune(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"openai": "full"}
+        )
+        assert agent._resolve_reasoning_strategy("deepseek") == ReasoningStrategy.PRUNE
+
+    def test_dict_with_default_fallback(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"default": "tool_calls_only", "openai": "full"}
+        )
+        assert agent._resolve_reasoning_strategy("openai") == ReasoningStrategy.FULL
+        assert agent._resolve_reasoning_strategy("deepseek") == ReasoningStrategy.TOOLCALLS_ONLY
+
+    def test_invalid_global_string_returns_prune(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(reasoning_strategy="invalid")
+        assert agent._resolve_reasoning_strategy("openai") == ReasoningStrategy.PRUNE
+
+    def test_invalid_dict_value_returns_prune(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"openai": "bad_value", "default": "full"}
+        )
+        assert agent._resolve_reasoning_strategy("openai") == ReasoningStrategy.PRUNE
+        assert agent._resolve_reasoning_strategy("deepseek") == ReasoningStrategy.FULL
+
+    def test_none_setting_returns_prune(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(reasoning_strategy=None)
+        assert agent._resolve_reasoning_strategy("openai") == ReasoningStrategy.PRUNE
+
+    def test_provider_case_insensitive(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"openai": "full"}
+        )
+        assert agent._resolve_reasoning_strategy("OpenAI") == ReasoningStrategy.FULL
+        assert agent._resolve_reasoning_strategy("OPENAI") == ReasoningStrategy.FULL
+
+    @pytest.mark.asyncio
+    async def test_prepare_turn_updates_context(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"openai": "full", "default": "prune"}
+        )
+        session = _FakeSession()
+
+        with patch.object(session, "prepare", new_callable=AsyncMock) as mock_prepare:
+            await agent._prepare_turn(
+                session, "hello", "openai", "gpt-4o", "sys", []
+            )
+
+        assert session._context.reasoning_strategy == ReasoningStrategy.FULL
+        mock_prepare.assert_awaited_once()
+
+    def test_zai_provider_last_turn_only(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"zai": "last_turn_only", "default": "prune"}
+        )
+        assert agent._resolve_reasoning_strategy("zai") == ReasoningStrategy.LAST_TURN_ONLY
+
+    def test_zai_client_args_isolated_from_openai(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            client_args={
+                "default": {"timeout": 30},
+                "zai": {"thinking": {"type": "enabled"}},
+            },
+        )
+        core = agent._core
+        assert core._resolve_client_args("zai") == {"thinking": {"type": "enabled"}}
+        assert core._resolve_client_args("openai") == {"timeout": 30}
+
+    def test_resolve_transport_args_provider_specific(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            transport_args={
+                "default": {"temperature": 0.7},
+                "zai": {"thinking": {"type": "enabled"}},
+            },
+        )
+        assert agent._resolve_transport_args("zai") == {"thinking": {"type": "enabled"}}
+        assert agent._resolve_transport_args("openai") == {"temperature": 0.7}
+
+    def test_resolve_transport_args_global(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            transport_args={"temperature": 0.5},
+        )
+        assert agent._resolve_transport_args("zai") == {"temperature": 0.5}
+        assert agent._resolve_transport_args("openai") == {"temperature": 0.5}
+
+    @pytest.mark.asyncio
+    async def test_prepare_turn_passes_transport_args(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            transport_args={
+                "zai": {"thinking": {"type": "enabled"}},
+            },
+        )
+        session = _FakeSession()
+
+        await agent._prepare_turn(
+            session, "hello", "zai", "GLM-5.1", "sys", []
+        )
+
+        assert session.last_prepared is not None
+        assert session.last_prepared.kwargs.get("thinking") == {"type": "enabled"}
+
+    @pytest.mark.asyncio
+    async def test_prepare_turn_updates_context_for_zai(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"zai": "last_turn_only", "default": "prune"}
+        )
+        session = _FakeSession()
+
+        with patch.object(session, "prepare", new_callable=AsyncMock) as mock_prepare:
+            await agent._prepare_turn(
+                session, "hello", "zai", "GLM-5.1", "sys", []
+            )
+
+        assert session._context.reasoning_strategy == ReasoningStrategy.LAST_TURN_ONLY
+        mock_prepare.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_prepare_turn_passes_reasoning_effort_for_zai(self) -> None:
+        agent = _make_agent()
+        agent.settings = AgentSettings.model_construct(
+            reasoning_strategy={"zai": "last_turn_only"},
+            reasoning_effort="low",
+        )
+        session = _FakeSession()
+
+        await agent._prepare_turn(
+            session, "hello", "zai", "GLM-5.1", "sys", []
+        )
+
+        assert session._context.reasoning_strategy == ReasoningStrategy.LAST_TURN_ONLY
+        assert session.last_prepared is not None
+        assert session.last_prepared.reasoning_effort == "low"

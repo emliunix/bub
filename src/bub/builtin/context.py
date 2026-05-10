@@ -7,11 +7,25 @@ from collections.abc import Iterable
 from typing import Any
 
 from republic import TapeContext, TapeEntry
+from republic.tape.context import ReasoningStrategy
 
 
 def default_tape_context() -> TapeContext:
     """Return the default context selection for Bub."""
+    from bub.builtin.settings import load_settings
 
+    settings = load_settings()
+    strategy = settings.reasoning_strategy
+    if isinstance(strategy, dict):
+        strategy = strategy.get("default")
+    if strategy:
+        try:
+            return TapeContext(
+                select=_select_messages,
+                reasoning_strategy=ReasoningStrategy(strategy),
+            )
+        except ValueError:
+            pass
     return TapeContext(select=_select_messages)
 
 
@@ -26,7 +40,7 @@ def _select_messages(entries: Iterable[TapeEntry], _context: TapeContext) -> lis
             case "message":
                 _append_message_entry(messages, entry)
             case "tool_call":
-                pending_calls = _append_tool_call_entry(messages, entry)
+                pending_calls = _extract_tool_calls(entry)
             case "tool_result":
                 _append_tool_result_entry(messages, pending_calls, entry)
                 pending_calls = []
@@ -45,11 +59,12 @@ def _append_message_entry(messages: list[dict[str, Any]], entry: TapeEntry) -> N
         messages.append(dict(payload))
 
 
-def _append_tool_call_entry(messages: list[dict[str, Any]], entry: TapeEntry) -> list[dict[str, Any]]:
-    calls = _normalize_tool_calls(entry.payload.get("calls"))
-    if calls:
-        messages.append({"role": "assistant", "content": "", "tool_calls": calls})
-    return calls
+def _extract_tool_calls(entry: TapeEntry) -> list[dict[str, Any]]:
+    """Extract tool calls from a tool_call entry for pairing with tool_result entries.
+
+    Does NOT append to messages — the assistant message with tool_calls is already
+    present in the preceding message entry."""
+    return _normalize_tool_calls(entry.payload.get("calls"))
 
 
 def _append_tool_result_entry(
