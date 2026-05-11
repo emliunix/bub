@@ -16,6 +16,7 @@ from telegram.request import HTTPXRequest
 
 from bub import config
 from bub.channels.base import Channel
+from bub.channels.idle_tracker import IdleTracker
 from bub.channels.message import ChannelMessage, MediaItem, MediaType
 from bub.configure import Settings, ensure_config
 from bub.types import MessageHandler
@@ -156,6 +157,7 @@ class TelegramChannel(Channel):
         self._allow_chats = {cid.strip() for cid in (self._settings.allow_chats or "").split(",") if cid.strip()}
         self._parser = TelegramMessageParser(bot_getter=lambda: self._app.bot)
         self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._idle_tracker = IdleTracker.create()
 
     @property
     def enabled(self) -> bool:
@@ -166,6 +168,7 @@ class TelegramChannel(Channel):
         return True
 
     async def start(self, stop_event: asyncio.Event) -> None:
+        await self._idle_tracker.start()
         proxy = self._settings.proxy
         logger.info(
             "telegram.start allow_users_count={} allow_chats_count={} proxy_enabled={}",
@@ -239,7 +242,32 @@ class TelegramChannel(Channel):
         if self._allow_users and sender_tokens.isdisjoint(self._allow_users):
             await update.message.reply_text("Access denied.")
             return
+        session_id = f"{self.name}:{chat_id}"
+        async def _on_idle() -> None:
+            await self._on_session_idle(session_id, chat_id)
+        if not self._idle_tracker.is_registered(session_id):
+            await self._idle_tracker.register(
+                session_id,
+                _on_idle,
+                1800.0,
+            )
         await self._on_receive(await self._build_message(update.message))
+
+    async def _on_session_idle(self, session_id: str, chat_id: str) -> None:
+        """Send idle message through normal pipeline."""
+        idle_message = ChannelMessage(
+            session_id=session_id,
+            channel=self.name,
+            chat_id=chat_id,
+            content=f"""
+            <context type="idle_event">
+                <session>{session_id}</session>
+                Session has been idle for 30 minutes,
+                consider compaction or tape handoff
+            </context>""",
+            output_channel="null",  # disable outbound for telegram messages
+        )
+        await self._on_receive(idle_message)
 
     async def _build_message(self, message: Message) -> ChannelMessage:
         chat_id = str(message.chat_id)
@@ -260,6 +288,9 @@ class TelegramChannel(Channel):
             media_items.extend(reply_media)
         content = json.dumps({"message": content, **metadata}, ensure_ascii=False)
         is_active = MESSAGE_FILTER.filter(message) is not False
+        stack = contextlib.AsyncExitStack()
+        await stack.enter_async_context(self.start_typing(chat_id))
+        await stack.enter_async_context(self.heartbeat(chat_id))
         return ChannelMessage(
             session_id=session_id,
             channel=self.name,
@@ -267,7 +298,7 @@ class TelegramChannel(Channel):
             content=content,
             media=media_items,
             is_active=is_active,
-            lifespan=self.start_typing(chat_id),
+            lifespan=stack,
             output_channel="null",  # disable outbound for telegram messages
         )
 
@@ -285,6 +316,13 @@ class TelegramChannel(Channel):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             del self._typing_tasks[chat_id]
+
+    @contextlib.asynccontextmanager
+    async def heartbeat(self, chat_id: str) -> AsyncGenerator[None, None]:
+        try:
+            yield
+        finally:
+            await self._idle_tracker.heartbeat(chat_id)
 
     async def _typing_loop(self, chat_id: str) -> None:
         while True:
