@@ -39,7 +39,7 @@ class _MergeBackCapture:
 
     @contextlib.asynccontextmanager
     async def session(
-        self, tape_name: str, *, merge_back: bool = True, state: Any = None
+        self, tape_name: str, *, merge_back: bool = True
     ) -> AsyncGenerator[MagicMock, None]:
         self.merge_back_values.append(merge_back)
         mock_session = MagicMock()
@@ -195,7 +195,7 @@ class _FakeTapeService:
 
     @contextlib.asynccontextmanager
     async def session(
-        self, tape_name: str, *, merge_back: bool = True, state: Any = None
+        self, tape_name: str, *, merge_back: bool = True
     ) -> AsyncGenerator[_FakeSession, None]:
         self.merge_back_values.append(merge_back)
         fake = _FakeSession(name=tape_name)

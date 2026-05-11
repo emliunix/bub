@@ -19,7 +19,7 @@ from republic.tape.store import is_async_tape_store
 
 from bub.utils import get_entry_text
 
-current_store: contextvars.ContextVar[AsyncTapeStore] = contextvars.ContextVar("current_store")
+current_store: contextvars.ContextVar[InMemoryTapeStore | EmptyTapeStore] = contextvars.ContextVar("current_store")
 current_fork_tape: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_fork_tape", default=None)
 current_tape_was_reset: contextvars.ContextVar[bool] = contextvars.ContextVar("current_tape_was_reset", default=False)
 WORD_PATTERN = re.compile(r"[a-z0-9_/-]+")
@@ -33,7 +33,7 @@ class ForkTapeStore:
         self._parent = parent
 
     @property
-    def _current(self) -> AsyncTapeStore:
+    def _current(self) -> InMemoryTapeStore | EmptyTapeStore:
         return current_store.get(_empty_store)
 
     @property
@@ -45,16 +45,16 @@ class ForkTapeStore:
         return current_tape_was_reset.get()
 
     async def list_tapes(self) -> list[str]:
-        return cast(list[str], await self._parent.list_tapes())
+        return await self._parent.list_tapes()
 
     async def reset(self, tape: str) -> None:
         await self._current.reset(tape)
         if self._current is _empty_store or self._fork_tape != tape:
             await self._parent.reset(tape)
             return
-        current_tape_was_reset.set(True)
+        _ = current_tape_was_reset.set(True)
 
-    async def fetch_all(self, query: TapeQuery[AsyncTapeStore]) -> Iterable[TapeEntry]:
+    async def fetch_all(self, query: TapeQuery) -> Iterable[TapeEntry]:
         parent_entries: Iterable[TapeEntry] = []
         if not (query.tape == self._fork_tape and self._current_was_reset):
             try:

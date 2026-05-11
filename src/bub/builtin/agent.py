@@ -26,7 +26,6 @@ from typing import Any, TypeVar
 from loguru import logger
 from republic import (
     RepublicError,
-    TapeEntry,
 )
 from republic.auth.openai_codex import openai_codex_oauth_resolver
 from republic.clients.chat import ChatClient
@@ -68,6 +67,9 @@ _CONTEXT_LENGTH_RE = re.compile(
     re.IGNORECASE,
 )
 MAX_AUTO_HANDOFF = 1
+
+
+T = TypeVar("T")
 
 
 class Agent:
@@ -127,7 +129,7 @@ class Agent:
         merge = not state.get("session_id", "").startswith("temp/")
         text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
 
-        async with self.tapes.session(tape_name, merge_back=merge, state=state) as session:
+        async with self.tapes.session(tape_name, merge_back=merge) as session:
             return await self._loop(
                 session, text, state, model,
                 allowed_skills, allowed_tools,
@@ -142,7 +144,7 @@ class Agent:
         model: str | None = None,
         allowed_skills: Collection[str] | None = None,
         allowed_tools: Collection[str] | None = None,
-    ) -> AsyncStreamEvents:
+    ) -> AsyncStreamEvents[Finished]:
         """Run the agent loop (streaming). Returns a stream of events."""
         if not prompt:
             return _error_stream("error: empty prompt")
@@ -151,7 +153,7 @@ class Agent:
         text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
 
         stack = AsyncExitStack()
-        session = await stack.enter_async_context(self.tapes.session(tape_name, merge_back=merge, state=state))
+        session = await stack.enter_async_context(self.tapes.session(tape_name, merge_back=merge))
 
         inner = self._loop_stream_gen(
             session, text, state, model,
@@ -208,7 +210,7 @@ class Agent:
 
     async def run_command_stream(
         self, tape_name: str, prompt: str | list[dict], state: State,
-    ) -> AsyncStreamEvents | None:
+    ) -> AsyncStreamEvents[Finished] | None:
         """Execute a command and wrap the result in a stream. None if not a command."""
         result = await self.run_command(tape_name, prompt, state)
         return None if result is None else _text_stream(result)
@@ -258,7 +260,7 @@ class Agent:
                             raise e.error
                         handoffs_left -= 1
                         logger.warning("auto_handoff tape={} step={}", session.name, step)
-                        await session.handoff(e.reason, state=e.state)
+                        await session.handoff(e.reason, anchor_state=e.anchor_state)
                         await self._log_step(
                             session, step, start, "auto_handoff", prepared,
                             error=str(e),
@@ -279,10 +281,10 @@ class Agent:
         model: str | None,
         allowed_skills: Collection[str] | None,
         allowed_tools: Collection[str] | None,
-    ) -> AsyncStreamEvents:
+    ) -> AsyncStreamEvents[Finished]:
         """Returns an AsyncStreamEvents wrapping the multi-step streaming loop."""
 
-        async def _run_once(prepared: PreparedChat, res: list[TurnResult | None]) -> AsyncIterator[StreamEvent]:
+        async def _run_once(prepared: PreparedChat, res: list[TurnResult | None]) -> AsyncIterator[StreamEvent[Finished]]:
 
             async with asyncio.timeout(self.settings.model_timeout_seconds):
                 stream = await session.stream(self._chat, prepared)
@@ -299,7 +301,7 @@ class Agent:
                         case ErrorEvent(error=err):
                             if _is_context_length_error(str(err)):
                                 raise NeedHandOffError("auto_handoff/context_overflow",
-                                    state={
+                                    anchor_state={
                                         "reason": "context_length_exceeded",
                                         "error": str(err),
                                     },
@@ -311,7 +313,7 @@ class Agent:
 
             res[0] = result_event.result
 
-        async def generator() -> AsyncGenerator[StreamEvent, None]:
+        async def generator() -> AsyncGenerator[StreamEvent[Finished], None]:
             provider, model_id = self._resolve_model(model)
             tools = self._resolve_tools(allowed_tools)
             skills = self._skills_set(allowed_skills)
@@ -334,17 +336,17 @@ class Agent:
                         case ToolCallNeeded() as needed:
                             prepared = await self._execute_tools(session, needed, renamed, state, run_id=prepared.run_id)
                             await self._log_step(session, step, start, "continue", prepared)
-                        case Finished() as finished:
-                            await self._log_step(session, step, start, "ok", prepared)
+                        case Finished() as fin:
+                            await self._log_step(session, step, start, "ok", fin.result.request)
                             break
 
                 except NeedHandOffError as e:
                     if handoffs_left > 0:
                         handoffs_left -= 1
                         logger.warning("auto_handoff tape={} step={}", session.name, step)
-                        await session.handoff(
+                        _ = await session.handoff(
                             e.reason,
-                            state=e.state,
+                            anchor_state=e.anchor_state,
                         )
                         await self._log_step(
                             session, step, start, "auto_handoff", prepared,
@@ -450,7 +452,7 @@ class Agent:
         if execution.error and _is_context_length_error(str(execution.error)):
             raise NeedHandOffError(
                 "auto_handoff/context_overflow",
-                state={
+                anchor_state={
                     "reason": "context_length_exceeded",
                     "error": str(execution.error),
                 },
@@ -554,37 +556,39 @@ def _parse_args(tokens: list[str]) -> _Args:
 # stream factory helpers
 
 
-def _text_stream(text: str) -> AsyncStreamEvents:
+def _text_stream(text: str) -> AsyncStreamEvents[Finished]:
     """Create a single-shot stream that yields text then final."""
 
-    async def gen() -> AsyncGenerator[StreamEvent, None]:
+    async def gen() -> AsyncGenerator[StreamEvent[Finished], None]:
         yield TextEvent(content=text)
-        yield FinalEvent(result=LLMResult(
+        yield FinalEvent(result=Finished(LLMResult(
             request=PreparedChat(model="", provider=""),
             text=text,
-        ))
+        )))
 
     return AsyncStreamEvents(gen())
 
 
-def _error_stream(message: str) -> AsyncStreamEvents:
+def _error_stream(message: str) -> AsyncStreamEvents[T]:
     """Create a stream that yields a single error event."""
 
-    async def gen() -> AsyncGenerator[StreamEvent, None]:
+    async def gen() -> AsyncGenerator[StreamEvent[T], None]:
         yield ErrorEvent(error=RepublicError(ErrorKind.INVALID_INPUT, message))
 
     return AsyncStreamEvents(gen())
 
 
 def _with_aclose(
-    events: AsyncStreamEvents, stack: AsyncExitStack,
-) -> AsyncStreamEvents:
+    events: AsyncStreamEvents[T], stack: AsyncExitStack,
+) -> AsyncStreamEvents[T]:
     """Wrap a stream so that ``stack.aclose()`` runs after the last event."""
 
-    async def gen() -> AsyncGenerator[StreamEvent, None]:
-        async for e in events:
-            yield e
-        await stack.aclose()
+    async def gen() -> AsyncGenerator[StreamEvent[T], None]:
+        try:
+            async for e in events:
+                yield e
+        finally:
+            await stack.aclose()
 
     return AsyncStreamEvents(gen())
 
@@ -592,14 +596,11 @@ def _with_aclose(
 class NeedHandOffError(Exception):
     """Raised when the agent needs to hand off to a human (e.g. due to context overflow)."""
 
-    def __init__(self, reason: str, *, error: Exception, state: dict[str, Any] | None = None) -> None:
+    def __init__(self, reason: str, *, error: Exception, anchor_state: dict[str, Any] | None = None) -> None:
         super().__init__(f"need_handoff: {reason}")
         self.reason = reason
         self.error = error
-        self.state = state or {}
-
-
-T = TypeVar("T")
+        self.anchor_state = anchor_state or {}
 
 
 def _assert_not_none(value: T | None) -> T:
