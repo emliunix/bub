@@ -246,6 +246,7 @@ class TelegramChannel(Channel):
         async def _on_idle() -> None:
             await self._on_session_idle(session_id, chat_id)
         if not self._idle_tracker.is_registered(session_id):
+            logger.info("telegram.idle.register session_id={}", session_id)
             await self._idle_tracker.register(
                 session_id,
                 _on_idle,
@@ -255,6 +256,7 @@ class TelegramChannel(Channel):
 
     async def _on_session_idle(self, session_id: str, chat_id: str) -> None:
         """Send idle message through normal pipeline."""
+        logger.info("telegram.idle.send session_id={}", session_id)
         idle_message = ChannelMessage(
             session_id=session_id,
             channel=self.name,
