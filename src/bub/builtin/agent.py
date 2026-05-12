@@ -128,7 +128,7 @@ class Agent:
 
         text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
 
-        async with self.tapes.session(tape_name) as session:
+        async with self.tapes.session(tape_name, wait=False) as session:
             return await self._loop(
                 session, text, state, model,
                 allowed_skills, allowed_tools,
@@ -151,7 +151,7 @@ class Agent:
         text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
 
         stack = AsyncExitStack()
-        session = await stack.enter_async_context(self.tapes.session(tape_name))
+        session = await stack.enter_async_context(self.tapes.session(tape_name, wait=False))
 
         inner = self._loop_stream_gen(
             session, text, state, model,

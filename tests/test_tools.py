@@ -139,8 +139,7 @@ def test_resolve_tool_names_accepts_runtime_names_and_model_aliases() -> None:
     def resolve_runtime_name() -> str:
         return "runtime"
 
-    assert resolve_tool_names([" tests_resolve_alias ", " tests_with_underscore "], exclude={" subagent "}) == {
-        dotted_name,
+    assert resolve_tool_names([" tests_resolve_alias ", " tests_with_underscore "], exclude={" tests_resolve_alias "}) == {
         underscored_name,
     }
     assert dotted_name not in resolve_tool_names(None, exclude={" tests_resolve_alias "})

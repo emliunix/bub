@@ -54,6 +54,9 @@ class AnchorSummary:
     state: dict[str, object]
 
 
+# NOTE: this guarantees self access for the tape is not blocked by locks
+# so tape_xxx on (current_tape()) always works, that's tool call for the tape owned by the that agent call
+# But nested agent call with the same tape will error
 contextvar_session = contextvars.ContextVar[TapeSession | None]("session")
 
 
@@ -132,7 +135,7 @@ class TapeService:
         )
 
     async def ensure_bootstrap_anchor(self, tape_name: str) -> None:
-        async with self.session(tape_name, wait=False) as session:
+        async with self._obtain_session(tape_name) as session:
             entries = await self._store.fetch_all(TapeQuery(tape=tape_name).kinds("anchor"))
             if not entries:
                 _ = session.handoff("session/start", anchor_state={"owner": "human"})

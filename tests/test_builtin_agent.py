@@ -49,10 +49,10 @@ class _MergeBackCapture:
 
 
 @pytest.mark.asyncio
-async def test_agent_run_regular_session_merges_back() -> None:
-    """A regular (non-temp) session should merge tape entries back."""
+async def test_agent_run_creates_session() -> None:
+    """A run should create a tape session."""
     agent = _make_agent()
-    capture = _MergeBackCapture()
+    capture = _FakeTapeService()
     agent.tapes = capture  # type: ignore[assignment]
 
     # Mock the LLM call path to return immediately
@@ -68,14 +68,15 @@ async def test_agent_run_regular_session_merges_back() -> None:
         )
         [event async for event in result]
 
-    assert capture.merge_back_values == [True]
+    assert len(capture.sessions) == 1
+    assert capture.sessions[0].name == "user/session1"
 
 
 @pytest.mark.asyncio
-async def test_agent_run_temp_session_does_not_merge_back() -> None:
-    """A temp/ session should NOT merge tape entries back."""
+async def test_agent_run_temp_session_creates_session() -> None:
+    """A temp/ session should also create a tape session."""
     agent = _make_agent()
-    capture = _MergeBackCapture()
+    capture = _FakeTapeService()
     agent.tapes = capture  # type: ignore[assignment]
 
     with patch.object(
@@ -90,7 +91,8 @@ async def test_agent_run_temp_session_does_not_merge_back() -> None:
         )
         [event async for event in result]
 
-    assert capture.merge_back_values == [False]
+    assert len(capture.sessions) == 1
+    assert capture.sessions[0].name == "temp/abc123"
 
 
 @pytest.mark.asyncio
@@ -147,7 +149,7 @@ class _FakeSession:
     async def handoff(self, name: str, **kwargs: Any) -> None:
         pass
 
-    async def append_event(self, prepared: PreparedChat, kind: str, payload: dict) -> None:
+    async def append_event(self, name: str, data: dict[str, Any] | None = None, **meta: Any) -> None:
         pass
 
 
@@ -190,14 +192,12 @@ class _FakeTapeService:
     """Yields _FakeSession instances."""
 
     def __init__(self) -> None:
-        self.merge_back_values: list[bool] = []
         self.sessions: list[_FakeSession] = []
 
     @contextlib.asynccontextmanager
     async def session(
-        self, tape_name: str, *, merge_back: bool = True
+        self, tape_name: str, *, wait: bool = True
     ) -> AsyncGenerator[_FakeSession, None]:
-        self.merge_back_values.append(merge_back)
         fake = _FakeSession(name=tape_name)
         self.sessions.append(fake)
         yield fake
