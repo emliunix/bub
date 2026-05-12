@@ -1,3 +1,6 @@
+"""
+DEPRECATED: fork tape is for auto buffer merge, we use TapeSession for that now.
+"""
 from __future__ import annotations
 
 import contextlib
@@ -142,6 +145,9 @@ class EmptyTapeStore(AsyncTapeStore):
         return []
 
     async def append(self, tape: str, entry: TapeEntry) -> None:
+        pass
+
+    async def fork_tape(self, source_name: str, target_name: str) -> None:
         pass
 
 

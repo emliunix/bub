@@ -213,11 +213,11 @@ async def tape_search(param: SearchInput, *, context: ToolContext) -> str:
 
 
 @tool(context=True, name="tape.reset")
-async def tape_reset(archive: bool = False, *, context: ToolContext) -> str:
+async def tape_reset(*, context: ToolContext) -> str:
     """Reset the current tape, optionally archiving it."""
     agent = _get_agent(context)
-    result = await agent.tapes.reset(context.tape or "", archive=archive)
-    return result
+    await agent.tapes.reset(context.tape or "")
+    return "ok"
 
 
 @tool(context=True, name="tape.handoff")

@@ -126,10 +126,9 @@ class Agent:
         if not prompt:
             return "error: empty prompt"
 
-        merge = not state.get("session_id", "").startswith("temp/")
         text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
 
-        async with self.tapes.session(tape_name, merge_back=merge) as session:
+        async with self.tapes.session(tape_name) as session:
             return await self._loop(
                 session, text, state, model,
                 allowed_skills, allowed_tools,
@@ -149,11 +148,10 @@ class Agent:
         if not prompt:
             return _error_stream("error: empty prompt")
 
-        merge = not state.get("session_id", "").startswith("temp/")
         text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
 
         stack = AsyncExitStack()
-        session = await stack.enter_async_context(self.tapes.session(tape_name, merge_back=merge))
+        session = await stack.enter_async_context(self.tapes.session(tape_name))
 
         inner = self._loop_stream_gen(
             session, text, state, model,
@@ -244,31 +242,19 @@ class Agent:
                 async with asyncio.timeout(self.settings.model_timeout_seconds):
                     turn_result = await session.run(self._chat, prepared)
             except Exception as exc:
-                await self._log_step(session, step, start, "error", prepared, error=str(exc))
+                await self._log_step(session, step, start, "error", error=str(exc), **prepared.metas)
                 raise
 
             match turn_result:
                 case Finished(result):
-                    await self._log_step(session, step, start, "ok", prepared)
+                    await self._log_step(session, step, start, "ok", **prepared.metas)
                     return result.text or ""
 
                 case ToolCallNeeded() as needed:
-                    try:
-                        prepared = await self._execute_tools(session, needed, renamed, state)
-                    except NeedHandOffError as e:
-                        if handoffs_left <= 0:
-                            raise e.error
-                        handoffs_left -= 1
-                        logger.warning("auto_handoff tape={} step={}", session.name, step)
-                        await session.handoff(e.reason, anchor_state=e.anchor_state)
-                        await self._log_step(
-                            session, step, start, "auto_handoff", prepared,
-                            error=str(e),
-                        )
-                        prepared = await self._prepare_turn(session, prompt, provider, model_id, system_prompt, renamed)
-                        continue
-                    await self._log_step(session, step, start, "continue", prepared)
-
+                    prepared, handoffs_left = await self._tool_call(
+                        state, renamed, start, session, step, handoffs_left, needed,
+                        provider, model_id, prompt, system_prompt
+                    )
         raise RuntimeError(f"max_steps_reached={self.settings.max_steps}")
 
     # agent loop (streaming)
@@ -332,35 +318,57 @@ class Agent:
                     res: list[TurnResult | None] = [None]
                     async for event in _run_once(prepared, res):
                         yield event
-                    match _assert_not_none(res[0]):
-                        case ToolCallNeeded() as needed:
-                            prepared = await self._execute_tools(session, needed, renamed, state, run_id=prepared.run_id)
-                            await self._log_step(session, step, start, "continue", prepared)
-                        case Finished() as fin:
-                            await self._log_step(session, step, start, "ok", fin.result.request)
-                            break
-
-                except NeedHandOffError as e:
-                    if handoffs_left > 0:
-                        handoffs_left -= 1
-                        logger.warning("auto_handoff tape={} step={}", session.name, step)
-                        _ = await session.handoff(
-                            e.reason,
-                            anchor_state=e.anchor_state,
-                        )
-                        await self._log_step(
-                            session, step, start, "auto_handoff", prepared,
-                            error=str(e),
-                        )
-                        prepared = await self._prepare_turn(session, prompt, provider, model_id, system_prompt, renamed)
-                    else:
-                        raise e.error
                 except Exception as exc:
-                    await self._log_step(session, step, start, "error", prepared, error=str(exc))
+                    await self._log_step(session, step, start, "error", error=str(exc), **prepared.metas)
                     raise
+
+                turn_result = _assert_not_none(res[0])
+        
+                match turn_result:
+                    case Finished() as fin:
+                        await self._log_step(session, step, start, "ok", **fin.metas)
+                        break
+                    case ToolCallNeeded() as needed:
+                        prepared, handoffs_left = await self._tool_call(
+                            state, renamed, start, session, step, handoffs_left, needed,
+                            provider, model_id, prompt, system_prompt
+                        )
             else:
                 raise RuntimeError(f"max_steps_reached={self.settings.max_steps}")
         return AsyncStreamEvents(generator())
+    
+
+    async def _tool_call(
+        self, 
+        state: dict[str, Any], tools: list, start: float, 
+        session: TapeSession, step: int, handoffs_left: int, tool_call: ToolCallNeeded,
+        provider: str, model_id: str, prompt: str, system_prompt: str,
+    ) -> tuple[PreparedChat, int]:
+        try:
+            try:
+                prepared = await self._execute_tools(session, tool_call, tools, state, run_id=tool_call.result.request.run_id)
+            except NeedHandOffError as exc:
+                if handoffs_left <= 0:
+                    raise exc
+                handoffs_left -= 1
+                logger.warning("auto_handoff tape={} step={}", session.name, step)
+                _ = session.handoff(
+                    exc.reason,
+                    anchor_state=exc.anchor_state,
+                    **tool_call.metas
+                )
+                await self._log_step(
+                    session, step, start, "auto_handoff",
+                    error=str(exc),
+                    **tool_call.metas,
+                )
+                prepared = await self._prepare_turn(session, prompt, provider, model_id, system_prompt, tools)
+                await self._log_step(session, step, start, "continue", **prepared.metas)
+        except Exception as exc:
+            await self._log_step(session, step, start, "error", error=str(exc), **tool_call.metas)
+            raise
+        await self._log_step(session, step, start, "continue", **prepared.metas)
+        return prepared, handoffs_left
 
     # tape logging
 
@@ -368,8 +376,9 @@ class Agent:
         self, session: TapeSession, step: int, prepared: PreparedChat, prompt: Any,
     ) -> None:
         await session.append_event(
-            prepared, "loop.step.start",
+            "loop.step.start",
             {"step": step, "prompt": prompt},
+            **prepared.metas,
         )
 
     async def _log_step(
@@ -378,9 +387,9 @@ class Agent:
         step: int,
         start: float,
         status: str,
-        prepared: PreparedChat,
         *,
         error: str | None = None,
+        **metas: Any,
     ) -> None:
         data: dict[str, Any] = {
             "step": step,
@@ -390,7 +399,7 @@ class Agent:
         }
         if error:
             data["error"] = error
-        await session.append_event(prepared, "loop.step", data)
+        await session.append_event("loop.step", data, **metas)
 
     # prompt building
 
