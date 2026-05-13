@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import Any, ClassVar
 
 from loguru import logger
@@ -243,13 +243,13 @@ class TelegramChannel(Channel):
             await update.message.reply_text("Access denied.")
             return
         session_id = f"{self.name}:{chat_id}"
-        async def _on_idle() -> None:
-            await self._on_session_idle(session_id, chat_id)
+        def _on_idle(session_id, chat_id) -> Callable[[], Coroutine[None, None, None]]:
+            return lambda: self._on_session_idle(session_id, chat_id)
         if not self._idle_tracker.is_registered(session_id):
             logger.info("telegram.idle.register session_id={}", session_id)
             await self._idle_tracker.register(
                 session_id,
-                _on_idle,
+                _on_idle(session_id, chat_id),
                 1800.0,
             )
         await self._on_receive(await self._build_message(update.message))
@@ -292,7 +292,7 @@ class TelegramChannel(Channel):
         is_active = MESSAGE_FILTER.filter(message) is not False
         stack = contextlib.AsyncExitStack()
         await stack.enter_async_context(self.start_typing(chat_id))
-        await stack.enter_async_context(self.heartbeat(chat_id))
+        await stack.enter_async_context(self.heartbeat(session_id))
         return ChannelMessage(
             session_id=session_id,
             channel=self.name,
@@ -320,11 +320,12 @@ class TelegramChannel(Channel):
             del self._typing_tasks[chat_id]
 
     @contextlib.asynccontextmanager
-    async def heartbeat(self, chat_id: str) -> AsyncGenerator[None, None]:
+    async def heartbeat(self, session_id: str) -> AsyncGenerator[None, None]:
         try:
             yield
         finally:
-            await self._idle_tracker.heartbeat(chat_id)
+            logger.debug("idle_tracker.heartbeat()")
+            await self._idle_tracker.heartbeat(session_id)
 
     async def _typing_loop(self, chat_id: str) -> None:
         while True:
