@@ -6,6 +6,8 @@ import asyncio
 from collections.abc import Coroutine
 from typing import Any, Callable, Protocol
 
+from loguru import logger
+
 
 class TimerHandle(Protocol):
     """Handle for a scheduled timer."""
@@ -68,6 +70,7 @@ class IdleTracker:
         No-op if session not registered.
         """
         if session_id not in self._sessions:
+            logger.warning("session_id {} not found", session_id)
             return
         callback, duration = self._sessions[session_id]
         if (handle := self._timers.pop(session_id, None)) is not None:

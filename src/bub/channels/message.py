@@ -39,6 +39,7 @@ class ChannelMessage:
     content: str
     chat_id: str = "default"
     is_active: bool = False
+    no_buffer: bool = False
     kind: MessageKind = "normal"
     context: dict[str, Any] = field(default_factory=dict)
     media: list[MediaItem] = field(default_factory=list)

@@ -45,6 +45,12 @@ class BufferedMessageHandler:
             )
             await self._handler(message)
             return
+        if message.no_buffer:
+            logger.info(
+                "session.message received no_buffer session_id={}, content={}", message.session_id, message.content
+            )
+            await self._handler(message)
+            return
         if not message.is_active and (
             self._last_active_time is None or now - self._last_active_time > self.active_time_window
         ):

@@ -169,6 +169,7 @@ class TelegramChannel(Channel):
 
     async def start(self, stop_event: asyncio.Event) -> None:
         await self._idle_tracker.start()
+
         proxy = self._settings.proxy
         logger.info(
             "telegram.start allow_users_count={} allow_chats_count={} proxy_enabled={}",
@@ -176,10 +177,11 @@ class TelegramChannel(Channel):
             len(self._allow_chats),
             bool(proxy),
         )
+        get_updates_kwargs = dict(read_timeout=30, connect_timeout=10, pool_timeout=10)
         if proxy:
-            get_updates_request = HTTPXRequest(read_timeout=30, proxy=proxy)
+            get_updates_request = HTTPXRequest(proxy=proxy, **get_updates_kwargs)
         else:
-            get_updates_request = HTTPXRequest(read_timeout=30)
+            get_updates_request = HTTPXRequest(**get_updates_kwargs)
         builder = Application.builder().token(self._settings.token).get_updates_request(get_updates_request)
         if proxy:
             builder = builder.proxy(proxy)
@@ -261,6 +263,7 @@ class TelegramChannel(Channel):
             session_id=session_id,
             channel=self.name,
             chat_id=chat_id,
+            no_buffer=True,
             content=f"""
             <context type="idle_event">
                 <session>{session_id}</session>
@@ -322,6 +325,7 @@ class TelegramChannel(Channel):
     @contextlib.asynccontextmanager
     async def heartbeat(self, session_id: str) -> AsyncGenerator[None, None]:
         try:
+            logger.debug("lifespan entered")
             yield
         finally:
             logger.debug("idle_tracker.heartbeat()")
