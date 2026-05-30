@@ -56,12 +56,12 @@ def test_call_many_sync_skips_async_impl() -> None:
 
     class AsyncPrompt:
         @hookimpl
-        def system_prompt(self, prompt, state):
+        def system_prompt(self, state):
             return _AwaitableValue()
 
     class SyncPrompt:
         @hookimpl
-        def system_prompt(self, prompt, state):
+        def system_prompt(self, state):
             return "sync"
 
     runtime = _runtime_with_plugins(
@@ -69,7 +69,7 @@ def test_call_many_sync_skips_async_impl() -> None:
         ("async", AsyncPrompt()),
     )
 
-    assert runtime.call_many_sync("system_prompt", prompt="hello", state={}) == ["sync"]
+    assert runtime.call_many_sync("system_prompt", state={}) == ["sync"]
 
 
 @pytest.mark.asyncio

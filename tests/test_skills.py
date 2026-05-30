@@ -95,8 +95,7 @@ def test_render_skills_prompt_includes_expanded_body(tmp_path: Path) -> None:
         SkillMetadata(name="skill-b", description="desc-b", location=skill_file, source="project"),
     ]
 
-    rendered = render_skills_prompt(skills, expanded_skills={"skill-a"})
+    rendered = render_skills_prompt(skills)
     assert "<available_skills>" in rendered
     assert "- skill-a: desc" in rendered
-    assert "expanded body" in rendered
     assert "- skill-b: desc-b" in rendered

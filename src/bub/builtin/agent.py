@@ -11,17 +11,18 @@ Key changes from the legacy agent:
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import re
 import shlex
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Collection
+from collections.abc import AsyncGenerator, AsyncIterator, Collection, Coroutine
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 from loguru import logger
 from republic import (
@@ -45,7 +46,8 @@ from republic.core.results import (
     get_tool_schemas,
 )
 from republic.tape.context import ReasoningStrategy
-from republic.tape.session import TapeSession
+from republic.tape.entries import TapeEntry
+from republic.tape.session import TapeSession, prompt_entry
 from republic.tools.context import ToolContext
 from republic.tools.executor import ToolExecutor
 
@@ -55,7 +57,7 @@ from bub.skills import discover_skills, render_skills_prompt
 from bub.tools import REGISTRY, model_tools, render_tools_prompt
 from bub.types import State
 from bub.utils import workspace_from_state
-from republic.tools.schema import ToolInput
+from republic.tools.schema import Tool, ToolInput
 from republic.utils import ensure_drained
 
 # constants
@@ -70,6 +72,15 @@ MAX_AUTO_HANDOFF = 1
 
 
 T = TypeVar("T")
+
+# Prompt can be multi modal, where it's [{type: text, content: "xxx"}]
+
+type Prompt = str | list[dict[str, Any]]
+
+
+CONTEXT_EXCEEDED_HAND_OFF_PROMPT = """
+The context length limit has been exceeded. An auto handoff anchor was inserted and context truncated.
+"""
 
 
 class Agent:
@@ -116,53 +127,49 @@ class Agent:
         self,
         *,
         tape_name: str,
-        prompt: str | list[dict],
+        prompt: Prompt,
+        steering: asyncio.Queue[Prompt] | None,
         state: State,
         model: str | None = None,
         allowed_skills: Collection[str] | None = None,
         allowed_tools: Collection[str] | None = None,
     ) -> str:
         """Run the agent loop (non-streaming). Returns the final text."""
-        if not prompt:
-            return "error: empty prompt"
 
-        text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
+        get_prompts = mk_get_prompts(prompt, steering)
 
-        async with self.tapes.session(tape_name, wait=False) as session:
-            return await self._loop(
-                session, text, state, model,
-                allowed_skills, allowed_tools,
-            )
+        return await self._loop(
+            tape_name, get_prompts, state, model,
+            allowed_skills, allowed_tools,
+        )
 
     async def run_stream(
         self,
         *,
         tape_name: str,
-        prompt: str | list[dict],
+        prompt: Prompt,
+        steering: asyncio.Queue[Prompt] | None,
         state: State,
         model: str | None = None,
         allowed_skills: Collection[str] | None = None,
         allowed_tools: Collection[str] | None = None,
     ) -> AsyncStreamEvents[Finished]:
         """Run the agent loop (streaming). Returns a stream of events."""
-        if not prompt:
-            return _error_stream("error: empty prompt")
-
-        text = prompt if isinstance(prompt, str) else _extract_text_from_parts(prompt)
 
         stack = AsyncExitStack()
-        session = await stack.enter_async_context(self.tapes.session(tape_name, wait=False))
+
+        get_prompts = mk_get_prompts(prompt, steering)
 
         inner = self._loop_stream_gen(
-            session, text, state, model,
+            tape_name, get_prompts, state, model,
             allowed_skills, allowed_tools,
         )
-        return _with_aclose(inner, stack)
+        return inner
 
     # command handling
 
     async def run_command(
-        self, tape_name: str, prompt: str | list[dict], state: State,
+        self, tape_name: str, prompt: Prompt, state: State,
     ) -> str | None:
         """Execute a comma-prefixed internal command. Returns None if not a command."""
         if not isinstance(prompt, str) or not prompt.strip().startswith(","):
@@ -207,73 +214,103 @@ class Agent:
             )
 
     async def run_command_stream(
-        self, tape_name: str, prompt: str | list[dict], state: State,
+        self, tape_name: str, prompt: Prompt, state: State,
     ) -> AsyncStreamEvents[Finished] | None:
         """Execute a command and wrap the result in a stream. None if not a command."""
-        result = await self.run_command(tape_name, prompt, state)
-        return None if result is None else _text_stream(result)
+        try:
+            if (result := await self.run_command(tape_name, prompt, state)) is not None:
+                return AsyncStreamEvents.from_iter([TextEvent(content=result)])
+        except Exception as exc:
+            return AsyncStreamEvents.from_iter([ErrorEvent(error=RepublicError(ErrorKind.TEMPORARY, str(exc)))])
 
     # agent loop (non-streaming)
 
     async def _loop(
         self,
-        session: TapeSession,
-        prompt: str,
+        tape_name: str,
+        get_prompts: Callable[[], Coroutine[Any, Any, list[str]]],
         state: State,
         model: str | None,
         allowed_skills: Collection[str] | None,
         allowed_tools: Collection[str] | None,
     ) -> str:
-        provider, model_id = self._resolve_model(model)
-        tools = self._resolve_tools(allowed_tools)
-        skills = self._skills_set(allowed_skills)
-        renamed = model_tools(tools)
+
+        tools = model_tools(self._resolve_tools(allowed_tools))
+        mk_chat = self._prepare_turn(state, model, allowed_skills, tools)
         handoffs_left = MAX_AUTO_HANDOFF
-
-        system_prompt = self._system_prompt(prompt, state, skills)
-        prepared = await self._prepare_turn(session, prompt, provider, model_id, system_prompt, renamed)
-
-        for step in range(1, self.settings.max_steps + 1):
-            start = time.monotonic()
-            logger.info("agent.step step={} tape={}", step, session.name)
-            await self._log_step_start(session, step, prepared, prompt)
-
+        
+        async def _step(session: TapeSession, start: float, step: int, chat: PreparedChat) -> str | PreparedChat:
+            nonlocal handoffs_left
             try:
                 async with asyncio.timeout(self.settings.model_timeout_seconds):
-                    turn_result = await session.run(self._chat, prepared)
+                    turn_result = await session.run(self._chat, chat)
             except Exception as exc:
-                await self._log_step(session, step, start, "error", error=str(exc), **prepared.metas)
-                raise
+                if _is_context_length_error(str(exc)):
+                    if handoffs_left <= 0:
+                        raise RepublicError(ErrorKind.TEMPORARY, "max auto handoffs reached", details={"exc": exc})
+                    handoffs_left -= 1
+                    logger.warning("auto_handoff tape={} step={}", tape_name, step)
+                    return await self._auto_handoff(functools.partial(mk_chat, session), exc, **chat.metas)
+                else:
+                    await self._log_step(session, step, start, "error", error=str(exc), **chat.metas)
+                    return str(exc)
+            else:
+                match turn_result:
+                    case Finished(result):
+                        await self._log_step(session, step, start, "ok", **chat.metas)
+                        return result.text or ""
 
-            match turn_result:
-                case Finished(result):
-                    await self._log_step(session, step, start, "ok", **prepared.metas)
-                    return result.text or ""
+                    case ToolCallNeeded() as tool_call:
+                        chat = await self._tool_call(
+                            state, tools, start, session, step, tool_call,
+                        )
+                        return chat
 
-                case ToolCallNeeded() as needed:
-                    prepared, handoffs_left = await self._tool_call(
-                        state, renamed, start, session, step, handoffs_left, needed,
-                        provider, model_id, prompt, system_prompt
-                    )
-        raise RuntimeError(f"max_steps_reached={self.settings.max_steps}")
+        async with self.tapes.session(tape_name, wait=False) as session:
+            prompts = await get_prompts()
+            if not prompts:
+                raise ValueError("no prompt provided")
+            chat = await mk_chat(session, [prompt_entry(p) for p in prompts])
+
+            step = 1
+            while step <= self.settings.max_steps:
+                start = time.monotonic()
+                logger.info("agent.step step={} tape={}", step, session.name)
+                await self._log_step_start(session, step, chat, prompts[0])
+                match await _step(session, start, step, chat):
+                    case PreparedChat() as chat_:
+                        chat = chat_
+                        await self._log_step(session, step, start, "continue", **chat.metas)
+                        steering_msgs = [prompt_entry(p) for p in await get_prompts()]
+                        if steering_msgs:
+                            step = 1  # reset step count on new steering input
+                            chat.entries.extend(steering_msgs)
+                    case res:
+                        return res
+                step += 1
+
+            raise RuntimeError(f"max_steps_reached={self.settings.max_steps}")
 
     # agent loop (streaming)
 
     def _loop_stream_gen(
         self,
-        session: TapeSession,
-        prompt: str,
+        tape_name: str,
+        get_prompts: Callable[[], Coroutine[Any, Any, list[str]]],
         state: State,
         model: str | None,
         allowed_skills: Collection[str] | None,
         allowed_tools: Collection[str] | None,
     ) -> AsyncStreamEvents[Finished]:
         """Returns an AsyncStreamEvents wrapping the multi-step streaming loop."""
+        tools = model_tools(self._resolve_tools(allowed_tools))
+        mk_chat = self._prepare_turn(state, model, allowed_skills, tools)
+        handoffs_left = MAX_AUTO_HANDOFF
 
-        async def _run_once(prepared: PreparedChat, res: list[TurnResult | None]) -> AsyncIterator[StreamEvent[Finished]]:
-
+        async def _step(session: TapeSession, start: float, step: int, chat: PreparedChat, res: list[PreparedChat | None]) -> AsyncIterator[StreamEvent[Finished]]:
+            nonlocal handoffs_left
             async with asyncio.timeout(self.settings.model_timeout_seconds):
-                stream = await session.stream(self._chat, prepared)
+                stream = await session.stream(self._chat, chat)
 
             result_event = None
             async with ensure_drained(stream) as stream:
@@ -286,89 +323,94 @@ class Agent:
                             break
                         case ErrorEvent(error=err):
                             if _is_context_length_error(str(err)):
-                                raise NeedHandOffError("auto_handoff/context_overflow",
-                                    anchor_state={
-                                        "reason": "context_length_exceeded",
-                                        "error": str(err),
-                                    },
-                                    error=err)
-                            raise err
+                                if handoffs_left <= 0:
+                                    raise RepublicError(ErrorKind.TEMPORARY, "max auto handoffs reached", details={"error": err})
+                                handoffs_left -= 1
+                                logger.warning("auto_handoff tape={} step={}", tape_name, step)
+                                chat = await self._auto_handoff(functools.partial(mk_chat, session), Exception(err), **chat.metas)
+                                res[0] = chat
+                                return
 
             if result_event is None:
                 raise RuntimeError("stream ended without final event")
 
-            res[0] = result_event.result
+            match result_event.result:
+                case ToolCallNeeded() as needed:
+                    chat_ = await self._tool_call(
+                        state, tools, start, session, step, needed
+                    )
+                    res[0] = chat_
 
         async def generator() -> AsyncGenerator[StreamEvent[Finished], None]:
-            provider, model_id = self._resolve_model(model)
-            tools = self._resolve_tools(allowed_tools)
-            skills = self._skills_set(allowed_skills)
-            renamed = model_tools(tools)
-            handoffs_left = MAX_AUTO_HANDOFF
-
-            system_prompt = self._system_prompt(prompt, state, skills)
-            prepared = await self._prepare_turn(session, prompt, provider, model_id, system_prompt, renamed)
-
-            for step in range(1, self.settings.max_steps + 1):
-                start = time.monotonic()
-                logger.info("agent.step step={} tape={}", step, session.name)
-                await self._log_step_start(session, step, prepared, prompt)
-
-                try: 
-                    res: list[TurnResult | None] = [None]
-                    async for event in _run_once(prepared, res):
-                        yield event
-                except Exception as exc:
-                    await self._log_step(session, step, start, "error", error=str(exc), **prepared.metas)
-                    raise
-
-                turn_result = _assert_not_none(res[0])
-        
-                match turn_result:
-                    case Finished() as fin:
-                        await self._log_step(session, step, start, "ok", **fin.metas)
-                        break
-                    case ToolCallNeeded() as needed:
-                        prepared, handoffs_left = await self._tool_call(
-                            state, renamed, start, session, step, handoffs_left, needed,
-                            provider, model_id, prompt, system_prompt
-                        )
-            else:
+            prompts = await get_prompts()
+            if not prompts:
+                raise ValueError("no prompt provided")
+            async with self.tapes.session(tape_name, wait=False) as session:
+                chat = await mk_chat(session, [prompt_entry(p) for p in prompts])
+                step = 1
+                while step <= self.settings.max_steps:
+                    start = time.monotonic()
+                    logger.info("agent.step step={} tape={}", step, session.name)
+                    await self._log_step_start(session, step, chat, prompts[0])
+                    try: 
+                        res: list[PreparedChat | None] = [None]
+                        async with ensure_drained(_step(session, start, step, chat, res)) as event_stream:
+                            async for event in event_stream:
+                                yield event
+                    except Exception as exc:
+                        await self._log_step(session, step, start, "error", error=str(exc), **chat.metas)
+                        raise
+                    else:
+                        match res[0]:
+                            case PreparedChat() as chat_:
+                                chat = chat_
+                                await self._log_step(session, step, start, "continue", **chat.metas)
+                                steering_msgs = [prompt_entry(p) for p in await get_prompts()]
+                                if steering_msgs:
+                                    step = 1  # reset step count on new steering input
+                                    chat.entries.extend(steering_msgs)
+                                    continue
+                            case _:
+                                return
+                    step += 1
                 raise RuntimeError(f"max_steps_reached={self.settings.max_steps}")
         return AsyncStreamEvents(generator())
-    
 
     async def _tool_call(
         self, 
         state: dict[str, Any], tools: list, start: float, 
-        session: TapeSession, step: int, handoffs_left: int, tool_call: ToolCallNeeded,
-        provider: str, model_id: str, prompt: str, system_prompt: str,
-    ) -> tuple[PreparedChat, int]:
+        session: TapeSession, step: int, tool_call: ToolCallNeeded,
+    ) -> PreparedChat:
         try:
-            try:
-                prepared = await self._execute_tools(session, tool_call, tools, state, run_id=tool_call.result.request.run_id)
-            except NeedHandOffError as exc:
-                if handoffs_left <= 0:
-                    raise exc
-                handoffs_left -= 1
-                logger.warning("auto_handoff tape={} step={}", session.name, step)
-                _ = session.handoff(
-                    exc.reason,
-                    anchor_state=exc.anchor_state,
-                    **tool_call.metas
-                )
-                await self._log_step(
-                    session, step, start, "auto_handoff",
-                    error=str(exc),
-                    **tool_call.metas,
-                )
-                prepared = await self._prepare_turn(session, prompt, provider, model_id, system_prompt, tools)
-                await self._log_step(session, step, start, "continue", **prepared.metas)
+            execution = await self._executor.execute_async(
+                tool_call.tool_calls, tools,
+                context=ToolContext(tape=session.name, run_id=tool_call.result.request.run_id, state=state),
+            )
+            next_chat = await session.add_tool_results(tool_call, execution.tool_results)
+            await self._log_step(session, step, start, "continue", **tool_call.metas)
+            return next_chat
         except Exception as exc:
             await self._log_step(session, step, start, "error", error=str(exc), **tool_call.metas)
             raise
-        await self._log_step(session, step, start, "continue", **prepared.metas)
-        return prepared, handoffs_left
+
+    async def _auto_handoff(
+        self,
+        create_chat: Callable[[list[TapeEntry]], Coroutine[Any, Any, PreparedChat]],
+        exc: Exception,
+        **metas,
+        ) -> PreparedChat:
+        entries = [
+            TapeEntry.handoff(
+                "auto_handoff/context_overflow",
+                anchor_state={
+                    "reason": "context_length_exceeded",
+                    "error": str(exc),
+                },
+                **metas,
+            ),
+            TapeEntry.system(CONTEXT_EXCEEDED_HAND_OFF_PROMPT, **metas),
+        ]
+        return await create_chat(entries)
 
     # tape logging
 
@@ -404,28 +446,27 @@ class Agent:
     # prompt building
 
     def _system_prompt(
-        self, prompt_text: str, state: State, allowed: set[str] | None,
+        self, state: State, allowed: set[str] | None,
     ) -> str:
         blocks: list[str] = []
-        if sys_prompt := self.framework.get_system_prompt(prompt=prompt_text, state=state):
+        if sys_prompt := self.framework.get_system_prompt(state=state):
             blocks.append(sys_prompt)
         if tools_prompt := render_tools_prompt(REGISTRY.values()):
             blocks.append(tools_prompt)
         workspace = workspace_from_state(state)
-        if skills_prompt := self._load_skills(prompt_text, workspace, allowed):
+        if skills_prompt := self._load_skills(workspace, allowed):
             blocks.append(skills_prompt)
         return "\n\n".join(blocks)
 
     def _load_skills(
-        self, prompt: str, workspace: Path, allowed: set[str] | None = None,
+        self, workspace: Path, allowed: set[str] | None = None,
     ) -> str:
         index = {
             s.name.casefold(): s
             for s in discover_skills(workspace)
             if allowed is None or s.name.casefold() in allowed
         }
-        expanded = set(HINT_RE.findall(prompt)) & set(index)
-        return render_skills_prompt(list(index.values()), expanded_skills=expanded)
+        return render_skills_prompt(list(index.values()))
 
     # tool / model resolution
 
@@ -445,41 +486,17 @@ class Agent:
     def _skills_set(coll: Collection[str] | None) -> set[str] | None:
         return {s.casefold() for s in coll} if coll else None
 
-    async def _execute_tools(
-        self,
-        session: TapeSession,
-        needed: ToolCallNeeded,
-        renamed: list,
-        state: State,
-        *,
-        run_id: str = "",
-    ) -> PreparedChat:
-        execution = await self._executor.execute_async(
-            needed.tool_calls, renamed,
-            context=ToolContext(tape=session.name, run_id=run_id, state=state),
-        )
-        if execution.error and _is_context_length_error(str(execution.error)):
-            raise NeedHandOffError(
-                "auto_handoff/context_overflow",
-                anchor_state={
-                    "reason": "context_length_exceeded",
-                    "error": str(execution.error),
-                },
-                error=execution.error,
-            )
-        return await session.add_tool_results(needed, execution.tool_results)
-
-    def _resolve_reasoning_strategy(self, provider: str) -> ReasoningStrategy:
-        setting = self.settings.reasoning_strategy
-        provider = provider.lower()
-        if isinstance(setting, dict):
-            strategy = setting.get(provider) or setting.get("default")
-        else:
-            strategy = setting
-        try:
-            return ReasoningStrategy(strategy) if strategy else ReasoningStrategy.PRUNE
-        except ValueError:
-            return ReasoningStrategy.PRUNE
+    # def _resolve_reasoning_strategy(self, provider: str) -> ReasoningStrategy:
+    #     setting = self.settings.reasoning_strategy
+    #     provider = provider.lower()
+    #     if isinstance(setting, dict):
+    #         strategy = setting.get(provider) or setting.get("default")
+    #     else:
+    #         strategy = setting
+    #     try:
+    #         return ReasoningStrategy(strategy) if strategy else ReasoningStrategy.PRUNE
+    #     except ValueError:
+    #         return ReasoningStrategy.PRUNE
 
     def _resolve_transport_args(self, provider: str) -> dict[str, Any]:
         setting = self.settings.transport_args
@@ -489,30 +506,41 @@ class Agent:
             return setting.get(provider, setting.get("default", {}))
         return setting
 
-    async def _prepare_turn(
+    def _prepare_turn(
         self,
-        session: TapeSession,
-        prompt: str,
-        provider: str,
-        model_id: str,
-        system_prompt: str,
-        renamed: list,
-    ) -> PreparedChat:
-        session._context = replace(
-            session._context,
-            reasoning_strategy=self._resolve_reasoning_strategy(provider),
-        )
+        state: State,
+        model: str | None,
+        allowed_skills: Collection[str] | None,
+        tools: list[Tool],
+    ) -> Callable[[TapeSession, list[TapeEntry]], Coroutine[Any, Any, PreparedChat]]:
+
+        provider, model_id = self._resolve_model(model)
+        skills = self._skills_set(allowed_skills)
+        system_prompt = self._system_prompt(state, skills)
+        # TODO: check build_tape_context correctly source reasoning strategy
+        # which in turn needs to extend hook build_tape_context to take provider as arg
+        # or we should defer the potential prunning strategy to chat client
+        # or the read_messages should take the building params supplied by chat client (This is reasonable)
+        # session._context = replace(
+        #     session._context,
+        #     reasoning_strategy=self._resolve_reasoning_strategy(provider),
+        # )
         transport_args = self._resolve_transport_args(provider)
-        return await session.prepare(
-            prompt=prompt,
-            provider=provider,
-            model=model_id,
-            system_prompt=system_prompt,
-            tools=get_tool_schemas(renamed),
-            max_tokens=self.settings.max_tokens,
-            reasoning_effort=self.settings.reasoning_effort,
-            **transport_args,
-        )
+
+        async def _mk(session: TapeSession, entries: list[TapeEntry]) -> PreparedChat:
+            chat = await session.prepare(
+                provider=provider,
+                model=model_id,
+                system_prompt=system_prompt,
+                tools=get_tool_schemas(tools),
+                max_tokens=self.settings.max_tokens,
+                reasoning_effort=self.settings.reasoning_effort,
+                **transport_args,
+            )
+            chat.entries.extend(entries)
+            return chat
+        
+        return _mk
 
 
 # helpers
@@ -520,6 +548,12 @@ class Agent:
 
 def _is_context_length_error(msg: str) -> bool:
     return bool(_CONTEXT_LENGTH_RE.search(msg))
+
+
+def _ensure_text_prompt(prompt: Prompt):
+    if isinstance(prompt, list):
+        return _extract_text_from_parts(prompt)
+    return prompt
 
 
 def _extract_text_from_parts(parts: list[dict]) -> str:
@@ -565,43 +599,6 @@ def _parse_args(tokens: list[str]) -> _Args:
 # stream factory helpers
 
 
-def _text_stream(text: str) -> AsyncStreamEvents[Finished]:
-    """Create a single-shot stream that yields text then final."""
-
-    async def gen() -> AsyncGenerator[StreamEvent[Finished], None]:
-        yield TextEvent(content=text)
-        yield FinalEvent(result=Finished(LLMResult(
-            request=PreparedChat(model="", provider=""),
-            text=text,
-        )))
-
-    return AsyncStreamEvents(gen())
-
-
-def _error_stream(message: str) -> AsyncStreamEvents[T]:
-    """Create a stream that yields a single error event."""
-
-    async def gen() -> AsyncGenerator[StreamEvent[T], None]:
-        yield ErrorEvent(error=RepublicError(ErrorKind.INVALID_INPUT, message))
-
-    return AsyncStreamEvents(gen())
-
-
-def _with_aclose(
-    events: AsyncStreamEvents[T], stack: AsyncExitStack,
-) -> AsyncStreamEvents[T]:
-    """Wrap a stream so that ``stack.aclose()`` runs after the last event."""
-
-    async def gen() -> AsyncGenerator[StreamEvent[T], None]:
-        try:
-            async for e in events:
-                yield e
-        finally:
-            await stack.aclose()
-
-    return AsyncStreamEvents(gen())
-
-
 class NeedHandOffError(Exception):
     """Raised when the agent needs to hand off to a human (e.g. due to context overflow)."""
 
@@ -616,3 +613,27 @@ def _assert_not_none(value: T | None) -> T:
     if value is None:
         raise RuntimeError("unexpected None value")
     return value
+
+
+async def _drain_prompts(queue: asyncio.Queue[Prompt]) -> list[str]:
+    prompts: list[str] = []
+    try:
+        while True:
+            p = queue.get_nowait()
+            prompts.append(_ensure_text_prompt(p))
+    except asyncio.QueueEmpty:
+        pass
+    return prompts
+
+
+def mk_get_prompts(prompt: Prompt, steering: asyncio.Queue[Prompt] | None) -> Callable[[], Coroutine[Any, Any, list[str]]]:
+    first_message = [_ensure_text_prompt(prompt)]
+    async def _get_prompts() -> list[str]:
+        msgs = []
+        if first_message:
+            msgs.append(first_message[0])
+            first_message.clear()
+        if steering:
+            msgs.extend(await _drain_prompts(steering))
+        return msgs
+    return _get_prompts

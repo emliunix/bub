@@ -165,17 +165,11 @@ def _iter_skill_roots(workspace_path: Path) -> list[tuple[Path, str]]:
     return roots
 
 
-def render_skills_prompt(skills: list[SkillMetadata], expanded_skills: Collection[str] = ()) -> str:
+def render_skills_prompt(skills: list[SkillMetadata]) -> str:
     if not skills:
         return ""
     lines = ["<available_skills>"]
     for skill in skills:
-        line = f"- {skill.name}: {skill.description}"
-        if skill.name in expanded_skills:
-            line += f"\n  Location: {skill.location}"
-            body = skill.body()
-            if body:
-                line += f"\n{body}"
-        lines.append(line)
+        lines.append(f"- {skill.name}: {skill.description}")
     lines.append("</available_skills>")
     return "\n".join(lines)

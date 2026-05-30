@@ -159,7 +159,7 @@ def test_system_prompt_appends_workspace_agents_file(tmp_path: Path) -> None:
     _, impl, _ = _build_impl(tmp_path)
     (tmp_path / AGENTS_FILE_NAME).write_text("local rules", encoding="utf-8")
 
-    result = impl.system_prompt(prompt="hello", state={"_runtime_workspace": str(tmp_path)})
+    result = impl.system_prompt(state={"_runtime_workspace": str(tmp_path)})
 
     assert result == DEFAULT_SYSTEM_PROMPT + "\n\nlocal rules"
 
@@ -167,7 +167,7 @@ def test_system_prompt_appends_workspace_agents_file(tmp_path: Path) -> None:
 def test_system_prompt_ignores_missing_agents_file(tmp_path: Path) -> None:
     _, impl, _ = _build_impl(tmp_path)
 
-    result = impl.system_prompt(prompt="hello", state={"_runtime_workspace": str(tmp_path)})
+    result = impl.system_prompt(state={"_runtime_workspace": str(tmp_path)})
 
     assert result == DEFAULT_SYSTEM_PROMPT + "\n\n"
 

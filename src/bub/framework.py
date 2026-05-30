@@ -269,10 +269,10 @@ class BubFramework:
     def get_tape_store(self) -> AsyncTapeStore | None:
         return self._tape_store
 
-    def get_system_prompt(self, prompt: str | list[dict], state: dict[str, Any]) -> str:
+    def get_system_prompt(self, state: dict[str, Any]) -> str:
         return "\n\n".join(
             result
-            for result in reversed(self._hook_runtime.call_many_sync("system_prompt", prompt=prompt, state=state))
+            for result in reversed(self._hook_runtime.call_many_sync("system_prompt", state=state))
             if result
         )
 

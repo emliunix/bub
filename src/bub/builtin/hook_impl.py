@@ -253,7 +253,7 @@ class BuiltinImpl:
             return ""
 
     @hookimpl
-    def system_prompt(self, prompt: str | list[dict], state: State) -> str:
+    def system_prompt(self, state: State) -> str:
         # Read the content of AGENTS.md under workspace
         return DEFAULT_SYSTEM_PROMPT + "\n\n" + self._read_agents_file(state)
 

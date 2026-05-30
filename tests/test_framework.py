@@ -94,24 +94,24 @@ def test_get_system_prompt_uses_priority_order_and_skips_empty_results() -> None
 
     class LowPriorityPlugin:
         @hookimpl
-        def system_prompt(self, prompt: str, state: dict[str, str]) -> str:
+        def system_prompt(self, state: dict[str, str]) -> str:
             return "low"
 
     class HighPriorityPlugin:
         @hookimpl
-        def system_prompt(self, prompt: str, state: dict[str, str]) -> str | None:
+        def system_prompt(self, state: dict[str, str]) -> str | None:
             return "high"
 
     class EmptyPlugin:
         @hookimpl
-        def system_prompt(self, prompt: str, state: dict[str, str]) -> str | None:
+        def system_prompt(self, state: dict[str, str]) -> str | None:
             return None
 
     framework._plugin_manager.register(LowPriorityPlugin(), name="low")
     framework._plugin_manager.register(HighPriorityPlugin(), name="high")
     framework._plugin_manager.register(EmptyPlugin(), name="empty")
 
-    prompt = framework.get_system_prompt(prompt="hello", state={})
+    prompt = framework.get_system_prompt(state={})
 
     assert prompt == "low\n\nhigh"
 

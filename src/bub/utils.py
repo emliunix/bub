@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import Coroutine, Iterable, AsyncGenerator, AsyncIterable
-import contextlib
 from pathlib import Path
 from typing import Any, TypeVar
 

@@ -88,7 +88,7 @@ class BubHookSpecs:
         """Observe framework errors from any stage."""
 
     @hookspec
-    def system_prompt(self, prompt: str | list[dict], state: State) -> str:
+    def system_prompt(self, state: State) -> str:
         """Provide a system prompt to be prepended to all model prompts."""
         raise NotImplementedError
 

@@ -106,7 +106,7 @@ class TapeService:
         """Create initial anchor if tape has none."""
         entries = await self._store.fetch_all(TapeQuery(tape=session.name).kinds("anchor").limit(1))
         if not entries:
-            _ = session.handoff("session/start", anchor_state={"owner": "human"})
+            session.append_entry(TapeEntry.handoff("session/start", anchor_state={"owner": "human"}))
 
     async def info(self, tape_name: str) -> TapeInfo:
         entries = list(await self._store.fetch_all(TapeQuery(tape=tape_name)))
@@ -138,7 +138,7 @@ class TapeService:
         async with self._obtain_session(tape_name) as session:
             entries = await self._store.fetch_all(TapeQuery(tape=tape_name).kinds("anchor"))
             if not entries:
-                _ = session.handoff("session/start", anchor_state={"owner": "human"})
+                session.append_entry(TapeEntry.handoff("session/start", anchor_state={"owner": "human"}))
 
     async def anchors(self, tape_name: str, limit: int = 20) -> list[AnchorSummary]:
         entries = list(await self._store.fetch_all(TapeQuery(tape=tape_name).kinds("anchor")))
@@ -155,22 +155,21 @@ class TapeService:
             await self._store.reset(tape_name)
             # handoff deferred to session close, so the order is correct
             anchor_state = {"owner": "human"}
-            _ = session.handoff("session/start", anchor_state=anchor_state)
+            session.append_entry(TapeEntry.handoff("session/start", anchor_state=anchor_state))
 
     async def create(self, tape_name: str):
         async with self._obtain_session(tape_name) as session:
             if any(a.name == "session/start" for a in await self.anchors(tape_name)):
                 raise Exception("Tape already exists")
             anchor_state = {"owner": "human"}
-            _ = session.handoff("session/start", anchor_state=anchor_state)
+            session.append_entry(TapeEntry.handoff("session/start", anchor_state=anchor_state))
 
-    async def handoff(self, tape_name: str, *, name: str, anchor_state: dict[str, Any] | None = None) -> list[TapeEntry]:
+    async def handoff(self, tape_name: str, *, name: str, anchor_state: dict[str, Any] | None = None):
         """
         Handoff append is deferred to session close
         """
         async with self._obtain_session(tape_name) as session:
-            entries = session.handoff(name, anchor_state=anchor_state)
-        return entries
+            session.append_entry(TapeEntry.handoff(name, anchor_state=anchor_state))
 
     async def search(self, query: TapeQuery) -> list[TapeEntry]:
         return list(await self._store.fetch_all(query))
