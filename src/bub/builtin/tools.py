@@ -224,8 +224,9 @@ async def tape_reset(*, context: ToolContext) -> str:
 async def tape_handoff(name: str = "handoff", summary: str = "", *, context: ToolContext) -> str:
     """Add a handoff anchor to the current tape."""
     agent = _get_agent(context)
-    await agent.tapes.handoff(context.tape or "", name=name, anchor_state={"summary": summary})
-    return f"anchor added: {name}"
+    unique_name = f"{name}/{uuid.uuid4().hex[:8]}"
+    await agent.tapes.handoff(context.tape or "", name=unique_name, anchor_state={"summary": summary})
+    return f"anchor added: {unique_name}"
 
 
 @tool(context=True, name="tape.anchors")

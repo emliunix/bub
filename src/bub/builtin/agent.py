@@ -16,6 +16,7 @@ import inspect
 import re
 import shlex
 import time
+import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Collection, Coroutine
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
@@ -401,7 +402,7 @@ class Agent:
         ) -> PreparedChat:
         entries = [
             TapeEntry.handoff(
-                "auto_handoff/context_overflow",
+                f"auto_handoff/context_overflow/{uuid.uuid4().hex[:8]}",
                 anchor_state={
                     "reason": "context_length_exceeded",
                     "error": str(exc),
