@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import Any, ClassVar
@@ -10,7 +11,8 @@ from loguru import logger
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 from telegram import Bot, Message, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, filters
+from telegram.error import TimedOut
+from telegram.ext import Application, CommandHandler, ContextTypes, ExtBot, filters
 from telegram.ext import MessageHandler as TelegramMessageHandler
 from telegram.request import HTTPXRequest
 
@@ -41,6 +43,52 @@ class TelegramSettings(Settings):
 
 
 NO_ACCESS_MESSAGE = "You are not allowed to chat with me. Please deploy your own instance of Bub."
+
+
+# Hard wall-clock deadline for Telegram long-polling get_updates().
+# httpx's read_timeout is per-byte and may not fire on a half-dead TLS
+# connection (CLOSE-WAIT), so we guard the whole call with asyncio.wait_for.
+_GET_UPDATES_DEADLINE = 60.0
+
+
+async def _cancel_stale_task(task: asyncio.Task) -> None:
+    """Best-effort cancellation of a get_updates task that exceeded its deadline."""
+    if not task.done():
+        task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await task
+
+
+def _wrap_get_updates(get_updates: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Coroutine[Any, Any, Any]]:
+    """Wrap Bot.get_updates with a wall-clock deadline and fire-and-forget cleanup.
+
+    When the underlying httpx/httpcore read stalls on a half-dead proxy
+    connection, ``asyncio.wait_for`` still raises ``TimeoutError`` because it
+    does not depend on the socket returning data. The original get_updates task
+    is shielded so ``wait_for`` does not block waiting for its cancellation;
+    we then spawn a fire-and-forget task to cancel the stale work and let PTB's
+    network retry loop immediately try again.
+    """
+    async def wrapper(_self: Bot, *args: Any, **kwargs: Any) -> Any:
+        # get_updates is captured at patch time. When patching the class it is
+        # an unbound function and needs `self`; when patching an instance it is
+        # already bound.
+        if inspect.ismethod(get_updates):
+            coro = get_updates(*args, **kwargs)
+        else:
+            coro = get_updates(_self, *args, **kwargs)
+        task = asyncio.create_task(coro)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=_GET_UPDATES_DEADLINE)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "telegram.get_updates watchdog timeout after {:.1f}s, spawning cancellation",
+                _GET_UPDATES_DEADLINE,
+            )
+            asyncio.create_task(_cancel_stale_task(task))
+            raise TimedOut("get_updates watchdog timeout") from None
+
+    return wrapper
 
 
 def _message_type(message: Message) -> str:
@@ -185,6 +233,13 @@ class TelegramChannel(Channel):
         builder = Application.builder().token(self._settings.token).get_updates_request(get_updates_request)
         if proxy:
             builder = builder.proxy(proxy)
+        self._app = builder.build()
+        # Guard get_updates with a wall-clock deadline. httpx's read_timeout can
+        # fail to fire on half-dead TLS/proxy connections; this wrapper retries
+        # promptly and spawns a fire-and-forget cancellation of the stale task.
+        # ExtBot uses __slots__ and forbids setting get_updates on the instance,
+        # so patch the class method instead.
+        ExtBot.get_updates = _wrap_get_updates(ExtBot.get_updates)
         self._app = builder.build()
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("bub", self._on_message, has_args=True, block=False))
